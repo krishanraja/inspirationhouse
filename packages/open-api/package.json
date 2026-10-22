@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@karakeep/open-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
+    "@karakeep/shared": "workspace:^0.1.0",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@karakeep/tsconfig": "workspace:^0.1.0",
+    "tsx": "^4.23.13"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "tsx index.ts check",
+    "generate": "tsx index.ts",
+    "format": "oxfmt --ignore-path=../../.gitignore --check .",
+    "format:fix": "oxfmt --ignore-path=../../.gitignore .",
+    "lint": "oxlint --ignore-path=../../.gitignore .",
+    "lint:fix": "oxlint --ignore-path=../../.gitignore . --fix"
+  },
+  "main": "index.ts"
+}

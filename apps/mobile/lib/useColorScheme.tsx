@@ -1,0 +1,46 @@
+import * as React from "react";
+import { Platform } from "react-native";
+import { NavigationBar } from "expo-navigation-bar";
+import useAppSettings from "@/lib/settings";
+import { COLORS } from "@/theme/colors";
+import { useColorScheme as useNativewindColorScheme } from "nativewind";
+
+function useColorScheme() {
+  const { settings, isLoading } = useAppSettings();
+  const { colorScheme, setColorScheme: setNativewindColorScheme } =
+    useNativewindColorScheme();
+
+  // Sync user settings with native color scheme
+  React.useEffect(() => {
+    setNativewindColorScheme(settings.theme);
+  }, [settings.theme, isLoading]);
+
+  React.useEffect(() => {
+    if (Platform.OS === "android") {
+      setNavigationBar(colorScheme ?? "light");
+    }
+  }, [colorScheme]);
+
+  return {
+    colorScheme: colorScheme ?? "light",
+    isDarkColorScheme: colorScheme === "dark",
+    colors: COLORS[colorScheme ?? "light"],
+  };
+}
+
+/**
+ * Set the Android navigation bar color based on the color scheme.
+ */
+function useInitialAndroidBarSync() {
+  const { colorScheme } = useColorScheme();
+  React.useEffect(() => {
+    if (Platform.OS !== "android") return;
+    setNavigationBar(colorScheme);
+  }, []);
+}
+
+export { useColorScheme, useInitialAndroidBarSync };
+
+function setNavigationBar(colorScheme: "light" | "dark") {
+  NavigationBar.setStyle(colorScheme === "dark" ? "light" : "dark");
+}

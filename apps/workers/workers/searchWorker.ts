@@ -1,0 +1,190 @@
+import { eq } from "drizzle-orm";
+import { workerStatsCounter } from "metrics";
+import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
+
+import type { ZSearchIndexingRequest } from "@karakeep/shared-server";
+import { db } from "@karakeep/db";
+import { bookmarks } from "@karakeep/db/schema";
+import {
+  addLogFields,
+  SearchIndexingQueue,
+  zSearchIndexingRequestSchema,
+} from "@karakeep/shared-server";
+import serverConfig from "@karakeep/shared/config";
+import logger from "@karakeep/shared/logger";
+import { DequeuedJob, getQueueClient } from "@karakeep/shared/queueing";
+import {
+  BookmarkSearchDocument,
+  getSearchClient,
+  SearchIndexClient,
+} from "@karakeep/shared/search";
+import { Bookmark } from "@karakeep/trpc/models/bookmarks";
+
+export class SearchIndexingWorker {
+  static async build() {
+    logger.info("Starting search indexing worker ...");
+    const worker =
+      (await getQueueClient())!.createRunner<ZSearchIndexingRequest>(
+        SearchIndexingQueue,
+        {
+          run: withWorkerTracing(
+            "searchWorker.run",
+            withWorkerEventLog("searchWorker.run", runSearchIndexing),
+          ),
+          onComplete: (job) => {
+            workerStatsCounter.labels("search", "completed").inc();
+            const jobId = job.id;
+            logger.info(`[search][${jobId}] Completed successfully`);
+            return Promise.resolve();
+          },
+          onError: (job) => {
+            workerStatsCounter.labels("search", "failed").inc();
+            if (job.numRetriesLeft == 0) {
+              workerStatsCounter.labels("search", "failed_permanent").inc();
+            }
+            const jobId = job.id;
+            logger.error(
+              `[search][${jobId}] search job failed: ${job.error}\n${job.error.stack}`,
+            );
+            return Promise.resolve();
+          },
+        },
+        {
+          concurrency: serverConfig.search.numWorkers,
+          pollIntervalMs: 1000,
+          timeoutSecs: serverConfig.search.jobTimeoutSec,
+        },
+      );
+
+    return worker;
+  }
+}
+
+async function runIndex(
+  searchClient: SearchIndexClient,
+  bookmarkId: string,
+  batch: boolean,
+) {
+  const bookmark = await db.query.bookmarks.findFirst({
+    where: eq(bookmarks.id, bookmarkId),
+    with: {
+      link: true,
+      text: true,
+      asset: true,
+      tagsOnBookmarks: {
+        with: {
+          tag: true,
+        },
+      },
+    },
+  });
+
+  if (!bookmark) {
+    logger.warn(
+      `[search] Bookmark ${bookmarkId} not found, it might have been deleted already by the user. Skipping ...`,
+    );
+    return;
+  }
+
+  const document: BookmarkSearchDocument = {
+    id: bookmark.id,
+    userId: bookmark.userId,
+    ...(bookmark.link
+      ? {
+          url: bookmark.link.url,
+          linkTitle: bookmark.link.title,
+          description: bookmark.link.description,
+          content: await Bookmark.getBookmarkPlainTextContent(
+            bookmark.link,
+            bookmark.userId,
+          ),
+          publisher: bookmark.link.publisher,
+          author: bookmark.link.author,
+          datePublished: bookmark.link.datePublished,
+          dateModified: bookmark.link.dateModified,
+        }
+      : {}),
+    ...(bookmark.asset
+      ? {
+          content: bookmark.asset.content,
+          metadata: bookmark.asset.metadata,
+        }
+      : {}),
+    ...(bookmark.text ? { content: bookmark.text.text } : {}),
+    note: bookmark.note,
+    summary: bookmark.summary,
+    title: bookmark.title,
+    createdAt: bookmark.createdAt.toISOString(),
+    tags: bookmark.tagsOnBookmarks.map((t) => t.tag.name),
+  };
+
+  addLogFields<"searchWorker.run">({
+    "search.document_size": Buffer.byteLength(JSON.stringify(document), "utf8"),
+  });
+
+  await searchClient.addDocuments([document], { batch });
+
+  // The bookmark might have been deleted while we were building the document,
+  // and its delete could have reached the index before our add. If it's gone
+  // now, remove it. Otherwise, the delete gets enqueued after our add landed.
+  const stillExists = await db.query.bookmarks.findFirst({
+    where: eq(bookmarks.id, bookmarkId),
+    columns: { id: true },
+  });
+  if (!stillExists) {
+    logger.info(
+      `[search] Bookmark ${bookmarkId} was deleted while indexing, removing it from the index ...`,
+    );
+    await searchClient.deleteDocuments([bookmarkId], { batch });
+  }
+}
+
+async function runDelete(
+  searchClient: SearchIndexClient,
+  bookmarkId: string,
+  batch: boolean,
+) {
+  await searchClient.deleteDocuments([bookmarkId], { batch });
+}
+
+async function runSearchIndexing(job: DequeuedJob<ZSearchIndexingRequest>) {
+  const jobId = job.id;
+
+  const request = zSearchIndexingRequestSchema.safeParse(job.data);
+  if (!request.success) {
+    throw new Error(
+      `[search][${jobId}] Got malformed job request: ${request.error.toString()}`,
+    );
+  }
+
+  const searchClient = await getSearchClient();
+  if (!searchClient) {
+    logger.debug(
+      `[search][${jobId}] Search is not configured, nothing to do now`,
+    );
+    return;
+  }
+
+  const bookmarkId = request.data.bookmarkId;
+  addLogFields<"searchWorker.run">({
+    "bookmark.id": bookmarkId,
+    "search.op": request.data.type,
+  });
+  // Disable batching on retries (runNumber > 0) for improved reliability
+  const batch = job.runNumber === 0;
+
+  logger.info(
+    `[search][${jobId}] Attempting to index bookmark with id ${bookmarkId} (run ${job.runNumber}, batch=${batch}) ...`,
+  );
+
+  switch (request.data.type) {
+    case "index": {
+      await runIndex(searchClient, bookmarkId, batch);
+      break;
+    }
+    case "delete": {
+      await runDelete(searchClient, bookmarkId, batch);
+      break;
+    }
+  }
+}

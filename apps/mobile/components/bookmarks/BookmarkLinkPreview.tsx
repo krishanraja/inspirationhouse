@@ -1,0 +1,362 @@
+import { useCallback, useMemo, useState } from "react";
+import { Linking, Pressable, TouchableOpacity, View } from "react-native";
+import ImageView from "react-native-image-viewing";
+import WebView from "react-native-webview";
+import {
+  ShouldStartLoadRequest,
+  WebViewSourceUri,
+} from "react-native-webview/lib/WebViewTypes";
+import * as WebBrowser from "expo-web-browser";
+import QueryPageState from "@/components/QueryPageState";
+import { Text } from "@/components/ui/Text";
+import { useAssetUrl } from "@/lib/hooks";
+import {
+  getOfflineLibraryScope,
+  useOfflineArticleContent,
+} from "@/lib/offlineLibrary";
+import { useReaderSettings, WEBVIEW_FONT_FAMILIES } from "@/lib/readerSettings";
+import { READABLE_CONTENT_MAX_WIDTH } from "@/lib/responsive";
+import useAppSettings from "@/lib/settings";
+import { useColorScheme } from "@/lib/useColorScheme";
+import { useQuery } from "@tanstack/react-query";
+import { BookOpen, X } from "lucide-react-native";
+
+import {
+  useCreateHighlight,
+  useDeleteHighlight,
+  useUpdateHighlight,
+} from "@karakeep/shared-react/hooks/highlights";
+import { useReadingProgress } from "@karakeep/shared-react/hooks/reading-progress";
+import { useTRPC } from "@karakeep/shared-react/trpc";
+import { BookmarkTypes, ZBookmark } from "@karakeep/shared/types/bookmarks";
+
+import BookmarkAssetImage from "./BookmarkAssetImage";
+import BookmarkHtmlHighlighterDom from "./BookmarkHtmlHighlighterDom";
+import { PDFViewer } from "./PDFViewer";
+
+function openUrlExternally(url: string) {
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    void WebBrowser.openBrowserAsync(url);
+  } else if (
+    url.startsWith("mailto:") ||
+    url.startsWith("tel:") ||
+    url.startsWith("sms:")
+  ) {
+    void Linking.openURL(url);
+  }
+  // Ignore javascript: and other schemes
+}
+
+export function BookmarkLinkBrowserPreview({
+  bookmark,
+}: {
+  bookmark: ZBookmark;
+}) {
+  if (bookmark.content.type !== BookmarkTypes.LINK) {
+    throw new Error("Wrong content type rendered");
+  }
+
+  const bookmarkUrl = bookmark.content.url;
+
+  const onShouldStartLoadWithRequest = useCallback(
+    (request: ShouldStartLoadRequest) => {
+      const bookmarkOrigin = new URL(bookmarkUrl).origin;
+      if (request.url.startsWith(bookmarkOrigin)) {
+        return true;
+      }
+      openUrlExternally(request.url);
+      return false;
+    },
+    [bookmarkUrl],
+  );
+
+  return (
+    <WebView
+      startInLoadingState={true}
+      mediaPlaybackRequiresUserAction={true}
+      source={{ uri: bookmarkUrl }}
+      setSupportMultipleWindows={false}
+      onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+    />
+  );
+}
+
+export function BookmarkLinkPdfPreview({ bookmark }: { bookmark: ZBookmark }) {
+  if (bookmark.content.type !== BookmarkTypes.LINK) {
+    throw new Error("Wrong content type rendered");
+  }
+
+  const asset = bookmark.assets.find((r) => r.assetType == "pdf");
+
+  const assetSource = useAssetUrl(asset?.id ?? "");
+
+  if (!asset) {
+    return (
+      <View className="flex-1 bg-background">
+        <Text>Asset has no PDF</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex flex-1">
+      <PDFViewer source={assetSource.uri ?? ""} headers={assetSource.headers} />
+    </View>
+  );
+}
+
+export function BookmarkLinkReaderPreview({
+  bookmark,
+}: {
+  bookmark: ZBookmark;
+}) {
+  const { isDarkColorScheme: isDark } = useColorScheme();
+  const { settings: readerSettings } = useReaderSettings();
+  const { settings } = useAppSettings();
+  const api = useTRPC();
+  const offlineHtmlContent = useOfflineArticleContent(
+    getOfflineLibraryScope(settings),
+    bookmark.id,
+  );
+
+  const {
+    data: bookmarkWithContent,
+    error,
+    refetch,
+  } = useQuery(
+    api.bookmarks.getBookmark.queryOptions({
+      bookmarkId: bookmark.id,
+      includeContent: true,
+    }),
+  );
+  // The offline body is stored on its own, so fold it back into the bookmark
+  // this component was already handed rather than reading the saved metadata.
+  const displayedBookmarkWithContent = useMemo(() => {
+    if (bookmarkWithContent) {
+      return bookmarkWithContent;
+    }
+    if (
+      offlineHtmlContent === undefined ||
+      bookmark.content.type !== BookmarkTypes.LINK
+    ) {
+      return undefined;
+    }
+    return {
+      ...bookmark,
+      content: { ...bookmark.content, htmlContent: offlineHtmlContent },
+    };
+  }, [bookmark, bookmarkWithContent, offlineHtmlContent]);
+
+  const { data: highlights } = useQuery(
+    api.highlights.getForBookmark.queryOptions({
+      bookmarkId: bookmark.id,
+    }),
+  );
+
+  const { mutate: createHighlight } = useCreateHighlight();
+  const { mutate: updateHighlight } = useUpdateHighlight();
+  const { mutate: deleteHighlight } = useDeleteHighlight();
+
+  const {
+    showBanner,
+    bannerPercent,
+    onContinue,
+    onDismiss,
+    restorePosition,
+    readingProgressOffset,
+    readingProgressAnchor,
+    onSavePosition,
+    onScrollPositionChange,
+  } = useReadingProgress({
+    bookmarkId: bookmark.id,
+  });
+
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
+
+  const handleLinkPress = useCallback((url: string) => {
+    openUrlExternally(url);
+  }, []);
+
+  const handleImagePress = useCallback((src: string) => {
+    setViewingImage(src);
+  }, []);
+
+  if (!displayedBookmarkWithContent) {
+    return <QueryPageState error={error} onRetry={refetch} />;
+  }
+
+  if (displayedBookmarkWithContent.content.type !== BookmarkTypes.LINK) {
+    throw new Error("Wrong content type rendered");
+  }
+
+  const contentStyle: React.CSSProperties = {
+    fontFamily: WEBVIEW_FONT_FAMILIES[readerSettings.fontFamily],
+    fontSize: `${readerSettings.fontSize}px`,
+    lineHeight: String(readerSettings.lineHeight),
+    color: isDark ? "#e5e7eb" : "#374151",
+    padding: "16px",
+    background: isDark ? "#000000" : "#ffffff",
+    // Keep lines at a readable length on tablets.
+    maxWidth: `${READABLE_CONTENT_MAX_WIDTH}px`,
+    margin: "0 auto",
+  };
+
+  return (
+    <View className="flex-1 bg-background">
+      <ImageView
+        visible={!!viewingImage}
+        imageIndex={0}
+        onRequestClose={() => setViewingImage(null)}
+        doubleTapToZoomEnabled={true}
+        images={viewingImage ? [{ uri: viewingImage }] : []}
+      />
+      {showBanner && (
+        <View className="flex-row items-center gap-2 border-b border-border bg-background px-4 py-2">
+          <BookOpen size={16} className="text-muted-foreground" />
+          <Text className="flex-1 text-sm text-muted-foreground">
+            {bannerPercent && bannerPercent > 0
+              ? `Continue where you left off (${bannerPercent}%)`
+              : "Continue where you left off"}
+          </Text>
+          <TouchableOpacity
+            onPress={onContinue}
+            className="rounded-md bg-primary px-3 py-1"
+          >
+            <Text className="text-xs font-medium text-primary-foreground">
+              Continue
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onDismiss} className="p-1">
+            <X size={14} className="text-muted-foreground" />
+          </TouchableOpacity>
+        </View>
+      )}
+      <BookmarkHtmlHighlighterDom
+        htmlContent={displayedBookmarkWithContent.content.htmlContent ?? ""}
+        contentStyle={contentStyle}
+        isDark={isDark}
+        highlights={highlights?.highlights ?? []}
+        readingProgressOffset={readingProgressOffset}
+        readingProgressAnchor={readingProgressAnchor}
+        restoreReadingPosition={restorePosition}
+        onSavePosition={onSavePosition}
+        onScrollPositionChange={onScrollPositionChange}
+        onLinkPress={handleLinkPress}
+        onImagePress={handleImagePress}
+        onHighlight={(h) =>
+          createHighlight({
+            startOffset: h.startOffset,
+            endOffset: h.endOffset,
+            color: h.color,
+            bookmarkId: bookmark.id,
+            text: h.text,
+            note: h.note ?? null,
+          })
+        }
+        onUpdateHighlight={(h) =>
+          updateHighlight({
+            highlightId: h.id,
+            color: h.color,
+            note: h.note,
+          })
+        }
+        onDeleteHighlight={(h) =>
+          deleteHighlight({
+            highlightId: h.id,
+          })
+        }
+        dom={{ scrollEnabled: true }}
+      />
+    </View>
+  );
+}
+
+export function BookmarkLinkArchivePreview({
+  bookmark,
+}: {
+  bookmark: ZBookmark;
+}) {
+  const asset =
+    bookmark.assets.find((r) => r.assetType == "precrawledArchive") ??
+    bookmark.assets.find((r) => r.assetType == "fullPageArchive");
+
+  const assetSource = useAssetUrl(asset?.id ?? "");
+
+  const originUri = assetSource.uri;
+  const onShouldStartLoadWithRequest = useCallback(
+    (request: ShouldStartLoadRequest) => {
+      // Allow loading the archive asset itself
+      if (
+        originUri &&
+        (request.url === originUri || request.url.startsWith(originUri))
+      ) {
+        return true;
+      }
+      openUrlExternally(request.url);
+      return false;
+    },
+    [originUri],
+  );
+
+  if (!asset) {
+    return (
+      <View className="flex-1 bg-background">
+        <Text>Asset has no offline archive</Text>
+      </View>
+    );
+  }
+
+  const webViewUri: WebViewSourceUri = {
+    uri: assetSource.uri!,
+    headers: assetSource.headers,
+  };
+
+  return (
+    <WebView
+      startInLoadingState={true}
+      mediaPlaybackRequiresUserAction={true}
+      source={webViewUri}
+      decelerationRate={0.998}
+      setSupportMultipleWindows={false}
+      onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+    />
+  );
+}
+
+export function BookmarkLinkScreenshotPreview({
+  bookmark,
+}: {
+  bookmark: ZBookmark;
+}) {
+  const asset = bookmark.assets.find((r) => r.assetType == "screenshot");
+
+  const assetSource = useAssetUrl(asset?.id ?? "");
+  const [imageZoom, setImageZoom] = useState(false);
+
+  if (!asset) {
+    return (
+      <View className="flex-1 bg-background">
+        <Text>Asset has no screenshot</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex flex-1 gap-2">
+      <ImageView
+        visible={imageZoom}
+        imageIndex={0}
+        onRequestClose={() => setImageZoom(false)}
+        doubleTapToZoomEnabled={true}
+        images={[assetSource]}
+      />
+      <Pressable onPress={() => setImageZoom(true)}>
+        <BookmarkAssetImage
+          assetId={asset.id}
+          className="h-full w-full"
+          contentFit="contain"
+        />
+      </Pressable>
+    </View>
+  );
+}

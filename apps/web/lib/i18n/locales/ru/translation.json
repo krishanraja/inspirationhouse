@@ -1,0 +1,1272 @@
+{
+  "common": {
+    "roles": {
+      "user": "Пользователь",
+      "admin": "Администратор"
+    },
+    "role": "Роль",
+    "experimental": "Экспериментально",
+    "search": "Поиск",
+    "url": "URL",
+    "name": "Имя",
+    "email": "Email",
+    "actions": "Действия",
+    "created_at": "Создано",
+    "key": "Ключ",
+    "something_went_wrong": "Что-то пошло не так",
+    "video": "Видео",
+    "note": "Заметка",
+    "attachments": "Вложения",
+    "screenshot": "Снимок экрана",
+    "archive": "Архив",
+    "password": "Пароль",
+    "action": "Действие",
+    "tags": "Метки",
+    "home": "Главная",
+    "highlights": "Основные моменты",
+    "source": "Источник",
+    "bookmark_types": {
+      "title": "Вид закладки",
+      "link": "Ссылка",
+      "text": "Текст",
+      "media": "Медиа"
+    },
+    "type": "Тип",
+    "size": "Размер",
+    "updated_at": "Обновлено",
+    "title": "Заголовок",
+    "description": "Описание",
+    "summary": "Краткое содержание",
+    "quota": "Квота",
+    "bookmarks": "Закладки",
+    "storage": "Хранилище",
+    "pdf": "Архивированный PDF",
+    "default": "По умолчанию",
+    "id": "ID",
+    "last_used": "Последнее использование"
+  },
+  "lists": {
+    "new_list": "Новый список",
+    "new_nested_list": "Новый вложенный список",
+    "all_lists": "Все списки",
+    "favourites": "Избранное",
+    "search_query": "Поисковый запрос",
+    "search_query_help": "Узнайте больше о языке поисковых запросов.",
+    "no_parent": "Нет родителя",
+    "smart_list": "Умный список",
+    "edit_list": "Редактировать список",
+    "parent_list": "Список родителей",
+    "list_type": "Тип списка",
+    "manual_list": "Список вручную",
+    "merge_list": "Объединить список",
+    "destination_list": "Список назначения",
+    "delete_after_merge": "Удалить исходный список после объединения",
+    "no_destination": "Нет назначения",
+    "description": "Описание (Необязательно)",
+    "share_list": "Поделиться списком",
+    "rss": {
+      "title": "RSS-лента",
+      "description": "Включить RSS-ленту для этого списка",
+      "feed_url": "URL RSS-ленты"
+    },
+    "public_list": {
+      "title": "Публичный список",
+      "description": "Разрешить другим просматривать этот список",
+      "share_link": "Поделиться ссылкой"
+    },
+    "delete_list": {
+      "title": "Удалить список",
+      "description": "Удаление списка не удаляет ни одну из закладок в этом списке.",
+      "delete_children": "Удалить дочерние списки (рекурсивно)",
+      "delete_children_description": "Если не отмечено, все прямые дочерние списки станут корневыми списками"
+    },
+    "shared": "Общий",
+    "collaborators": {
+      "manage": "Управление сотрудниками",
+      "view": "Просмотр сотрудников",
+      "collaborators": "Сотрудники",
+      "add": "Добавить сотрудника",
+      "current": "Текущие сотрудники",
+      "enter_email": "Введите адрес электронной почты",
+      "please_enter_email": "Пожалуйста, введите адрес электронной почты",
+      "added_successfully": "Сотрудник успешно добавлен",
+      "failed_to_add": "Не удалось добавить сотрудника",
+      "removed": "Сотрудник удален",
+      "failed_to_remove": "Не удалось удалить сотрудника",
+      "role_updated": "Роль обновлена",
+      "failed_to_update_role": "Не удалось обновить роль",
+      "viewer": "Наблюдатель",
+      "editor": "Редактор",
+      "owner": "Владелец",
+      "viewer_description": "Может просматривать закладки в списке",
+      "editor_description": "Может добавлять и удалять закладки",
+      "no_collaborators": "Пока нет сотрудников. Добавьте кого-нибудь, чтобы начать совместную работу!",
+      "no_collaborators_readonly": "Нет соавторов для этого списка.",
+      "people_with_access": "Люди, у которых есть доступ к этому списку",
+      "add_or_remove": "Добавьте или удалите людей, которые могут получить доступ к этому списку",
+      "invitation_sent": "Приглашение успешно отправлено",
+      "invitation_revoked": "Приглашение отозвано",
+      "failed_to_revoke": "Не удалось отозвать приглашение",
+      "pending": "В ожидании",
+      "revoke": "Отозвать",
+      "declined": "Отклонено"
+    },
+    "leave_list": {
+      "title": "Покинуть список",
+      "confirm_message": "Вы уверены, что хотите покинуть {{icon}} {{name}}?",
+      "warning": "Вы больше не сможете просматривать или получать доступ к закладкам в этом списке. Владелец списка может добавить вас обратно, если это необходимо.",
+      "action": "Покинуть список",
+      "success": "Вы покинули \"{{icon}} {{name}}\""
+    },
+    "invitations": {
+      "pending": "Ожидающие приглашения",
+      "description": "Просмотрите и ответьте на приглашения к совместной работе над списком",
+      "invited_by": "Пригласил",
+      "accept": "Принять",
+      "decline": "Отклонить",
+      "accepted": "Приглашение принято",
+      "declined": "Приглашение отклонено",
+      "failed_to_accept": "Не удалось принять приглашение",
+      "failed_to_decline": "Не удалось отклонить приглашение"
+    },
+    "shared_lists": "Общие списки",
+    "privacy": {
+      "public": "Общий",
+      "shared": "Общий доступ",
+      "private": "Личный"
+    },
+    "summary_list_one": "{{count}} список",
+    "summary_list_few": "{{count}} списка",
+    "summary_list_many": "{{count}} списков",
+    "summary_list_other": "{{count}} списка",
+    "summary_bookmark_one": "{{count}} закладка",
+    "summary_bookmark_few": "{{count}} закладки",
+    "summary_bookmark_many": "{{count}} закладок",
+    "summary_bookmark_other": "{{count}} закладки",
+    "items_count_one": "{{count}} элемент",
+    "items_count_few": "{{count}} элемента",
+    "items_count_many": "{{count}} элементов",
+    "items_count_other": "{{count}} элемента"
+  },
+  "settings": {
+    "user_settings": "Настройки пользователя",
+    "info": {
+      "user_info": "Информация о пользователе",
+      "options": "Опции",
+      "basic_details": "Основные сведения",
+      "change_password": "Сменить пароль",
+      "confirm_new_password": "Подтвердить новый пароль",
+      "interface_lang": "Язык интерфейса",
+      "current_password": "Текущий пароль",
+      "new_password": "Новый пароль",
+      "user_settings": {
+        "user_settings_updated": "Настройки пользователя обновлены!",
+        "bookmark_click_action": {
+          "title": "Действие при нажатии на закладку",
+          "open_external_url": "Открыть оригинальный URL",
+          "open_bookmark_details": "Открыть детали закладки"
+        },
+        "archive_display_behaviour": {
+          "hide": "Скрыть архивированные закладки в тегах и списках",
+          "title": "Архивированные закладки",
+          "show": "Показывать архивированные закладки в тегах и списках"
+        }
+      },
+      "reader_settings": {
+        "local_overrides_title": "Активны настройки для этого устройства",
+        "using_default": "Используются настройки клиента по умолчанию",
+        "clear_override_hint": "Удалите переопределение устройства, чтобы использовать глобальную настройку ({{value}})",
+        "font_size": "Размер шрифта",
+        "font_family": "Тип шрифта",
+        "preview_inline": "(предпросмотр)",
+        "tooltip_preview": "Несохраненные изменения предпросмотра",
+        "save_to_all_devices": "Все устройства",
+        "tooltip_local": "Настройки устройства отличаются от глобальных",
+        "reset_preview": "Сбросить предпросмотр",
+        "mono": "Моноширинный",
+        "line_height": "Высота строки",
+        "tooltip_default": "Настройки чтения",
+        "title": "Настройки читалки",
+        "serif": "С засечками",
+        "preview": "Предварительный просмотр",
+        "not_set": "Не задано",
+        "clear_local_overrides": "Сбросить настройки для устройства",
+        "preview_text": "Шустрая бурая лиса перепрыгивает ленивого пса. Вот так будет выглядеть текст в режиме чтения.",
+        "local_overrides_cleared": "Настройки для устройства сброшены",
+        "local_overrides_description": "На этом устройстве параметры читалки отличаются от ваших глобальных настроек:",
+        "clear_defaults": "Сбросить все значения по умолчанию",
+        "description": "Настройте параметры текста по умолчанию для режима чтения. Эти параметры синхронизируются на всех ваших устройствах.",
+        "defaults_cleared": "Настройки читалки по умолчанию сброшены",
+        "save_hint": "Сохранить настройки только для этого устройства или синхронизировать на всех устройствах",
+        "save_as_default": "Сохранить как значения по умолчанию",
+        "save_to_device": "Это устройство",
+        "sans": "Без засечек",
+        "tooltip_preview_and_local": "Несохраненные изменения предпросмотра; настройки устройства отличаются от глобальных",
+        "adjust_hint": "Отрегулируйте настройки выше, чтобы просмотреть изменения"
+      },
+      "avatar": {
+        "upload": "Загрузить аватар",
+        "change": "Сменить аватар",
+        "remove_confirm_title": "Удалить аватар?",
+        "updated": "Аватар обновлён",
+        "removed": "Аватар удалён",
+        "description": "Загрузите квадратное изображение, которое будет вашим аватаром.",
+        "remove_confirm_description": "Текущее фото профиля будет удалено.",
+        "title": "Фото профиля",
+        "remove": "Удалить аватар"
+      }
+    },
+    "import": {
+      "import_bookmarks_from_karakeep_export": "Импортировать закладки из экспорта Karakeep",
+      "import_export": "Импорт / Экспорт",
+      "import_export_bookmarks": "Импорт / Экспорт закладок",
+      "import_bookmarks_from_pocket_export": "Импортировать закладки из экспорта Pocket",
+      "import_bookmarks_from_matter_export": "Импортировать закладки из экспорта Matter",
+      "import_bookmarks_from_omnivore_export": "Импортировать закладки из экспорта Omnivore",
+      "imported_bookmarks": "Импортировано закладок",
+      "import_bookmarks_from_html_file": "Импортировать закладки из HTML файла",
+      "export_links_and_notes": "Экспортировать ссылки и заметки",
+      "import_bookmarks_from_linkwarden_export": "Импортировать закладки из экспорта Linkwarden",
+      "import_bookmarks_from_tab_session_manager_export": "Импортировать закладки из Tab Session Manager",
+      "import_bookmarks_from_mymind_export": "Импортировать закладки из экспорта mymind",
+      "import_bookmarks_from_instapaper_export": "Импортировать закладки из экспорта Instapaper",
+      "import_bookmarks_from_readwise_reader_export": "Импорт закладок из экспорта Readwise Reader",
+      "import_bookmarks_from_onetab_export": "Импортировать закладки из экспорта OneTab"
+    },
+    "api_keys": {
+      "key_success": "Ключ был успешно создан",
+      "key_success_please_copy": "Пожалуйста, скопируйте ключ и сохраните в безопасном месте. После закрытия окна, вы больше не сможете его посмотреть.",
+      "new_api_key": "Новый API ключ",
+      "new_api_key_desc": "Дайте вашему API ключу уникальное имя",
+      "api_keys": "API ключи",
+      "regenerate_api_key": "Обновить ключ API",
+      "key_regenerated": "Ключ успешно обновлен",
+      "key_regenerated_please_copy": "Пожалуйста, скопируйте новый ключ и сохраните его в надёжном месте. Старый ключ был отозван и больше не будет работать.",
+      "regenerate_warning": "Вы уверены, что хотите обновить ключ API \"{{name}}\"?",
+      "regenerate_confirmation": "Это отзовёт текущий ключ и создаст новый. Любые приложения, использующие текущий ключ, перестанут работать.",
+      "scopes": {
+        "scopes": "Области доступа",
+        "choose_at_least_one": "Выберите хотя бы одну область доступа или выберите полный доступ.",
+        "scope_details": "Сведения об области доступа {{scope}}",
+        "access": {
+          "none": "Нет",
+          "read": "Чтение",
+          "readwrite": "Чтение/запись"
+        },
+        "full_access": {
+          "label": "Полный доступ",
+          "description": "Доступ ко всем поддерживаемым операциям API."
+        },
+        "limited_scopes": {
+          "label": "Ограниченные области доступа",
+          "description": "Выберите типы ресурсов, к которым этот ключ может иметь доступ."
+        },
+        "resources": {
+          "assets": {
+            "label": "Активы",
+            "description": "Доступ к файлам и другому сохраненному контенту закладок."
+          },
+          "backups": {
+            "label": "Резервные копии",
+            "description": "Управление резервными копиями аккаунта."
+          },
+          "bookmarks": {
+            "label": "Закладки",
+            "description": "Доступ к закладкам и управление ими."
+          },
+          "feeds": {
+            "label": "Ленты",
+            "description": "Управление RSS-лентами и связанными данными лент."
+          },
+          "highlights": {
+            "label": "Цитаты",
+            "description": "Управление сохраненными цитатами из закладок."
+          },
+          "lists": {
+            "label": "Списки",
+            "description": "Управление списками и членством в списках."
+          },
+          "prompts": {
+            "label": "Промпты",
+            "description": "Управление сохраненными конфигурациями ИИ-промптов."
+          },
+          "rules": {
+            "label": "Правила",
+            "description": "Доступ к правилам автоматизации."
+          },
+          "tags": {
+            "label": "Теги",
+            "description": "Доступ к тегам и их изменение."
+          },
+          "users": {
+            "label": "Учетная запись пользователя",
+            "description": "Доступ к профилю и настройкам аккаунта."
+          },
+          "webhooks": {
+            "label": "Вебхуки",
+            "description": "Доступ к конфигурации вебхуков."
+          },
+          "subscriptions": {
+            "label": "Подписки",
+            "description": "Доступ к управлению подписками."
+          },
+          "importSessions": {
+            "label": "Сеансы импорта",
+            "description": "Доступ к сеансам импорта."
+          }
+        },
+        "admin_resources": {
+          "bookmarks": {
+            "label": "Админ: закладки",
+            "description": "Доступ к инструментам управления закладками."
+          },
+          "jobs": {
+            "label": "Админ: задачи",
+            "description": "Доступ к управлению фоновыми задачами."
+          },
+          "system": {
+            "label": "Администратор: система",
+            "description": "Доступ к состоянию системы и диагностике."
+          },
+          "users": {
+            "label": "Администратор: пользователи",
+            "description": "Доступ к административному управлению пользователями."
+          },
+          "subscriptions": {
+            "label": "Администрирование: подписки",
+            "description": "Управление уровнями подписки пользователей."
+          }
+        }
+      }
+    },
+    "ai": {
+      "ai_settings": "Настройки ИИ",
+      "tagging_rules": "Правила создания меток",
+      "prompt_preview": "Предпросмотр запроса",
+      "text_prompt": "Запрос для текста",
+      "images_prompt": "Запрос для изображения",
+      "tagging_rule_description": "Запросы, которые вы добавите сюда, будут включены как правила для модели во время генерации меток. Вы можете просмотреть итоговые запросы в разделе предпросмотра запроса.",
+      "text_tagging": "Пометка текста тегами",
+      "image_tagging": "Пометка изображений тегами",
+      "summarization": "Суммирование",
+      "summarization_prompt": "Подсказка для суммирования",
+      "all_tagging": "Все теги",
+      "tag_style": "Стиль тегов",
+      "auto_summarization_description": "Автоматически генерируйте сводки для своих закладок с помощью ИИ.",
+      "auto_tagging": "Автоматическая расстановка тегов",
+      "titlecase_spaces": "Заглавные с пробелами",
+      "lowercase_underscores": "Строчные с подчеркиваниями",
+      "inference_language": "Язык логического вывода",
+      "titlecase_hyphens": "Заглавные с дефисами",
+      "lowercase_hyphens": "Строчные с дефисами",
+      "lowercase_spaces": "Строчные с пробелами",
+      "inference_language_description": "Выберите язык для тегов и сводок, которые генерирует ИИ.",
+      "tag_style_description": "Выберите, как форматировать автосгенерированные теги.",
+      "auto_tagging_description": "Автоматически генерируйте теги для ваших закладок с помощью ИИ.",
+      "camelCase": "camelCase",
+      "auto_summarization": "Автоматическое создание сводок",
+      "no_preference": "Без предпочтений",
+      "curated_tags": "Подобранные теги",
+      "curated_tags_description": "При необходимости ограничьте добавление тегов ИИ только тегами из этого списка. Если теги не выбраны, ИИ генерирует теги свободно.",
+      "curated_tags_updated": "Подобранные теги успешно обновлены!",
+      "curated_tags_update_failed": "Не удалось обновить подобранные теги"
+    },
+    "feeds": {
+      "rss_subscriptions": "RSS подписки",
+      "add_a_subscription": "Добавить подписку",
+      "feed_enabled": "RSS-канал включён",
+      "feed_disabled": "RSS-канал отключён"
+    },
+    "broken_links": {
+      "last_crawled_at": "Последний раз сканирован",
+      "crawling_failed": "Сканирование не удалось",
+      "description": "Просмотрите ссылки, которые не удалось загрузить, повторите попытку или удалите старые закладки.",
+      "category_all": "Требуют внимания",
+      "category_blocked": "Доступ заблокирован",
+      "category_missing": "Не найдено",
+      "category_errors": "Другие ошибки",
+      "category_all_hint": "Ссылки для проверки",
+      "category_blocked_hint": "Ограничено или превышен лимит запросов",
+      "category_missing_hint": "Страница отсутствует или удалена",
+      "category_errors_hint": "Ошибки сервера или сканирования",
+      "blocked_hint": "Заблокированный запрос не всегда означает сломанную ссылку. Некоторые сайты ограничивают автоматический доступ. Перед удалением откройте исходную страницу, чтобы проверить.",
+      "search": "Поиск по заголовку или URL…",
+      "sort_recent": "Недавно проверенные",
+      "sort_oldest": "Сначала давно проверенные",
+      "sort_domain": "Сайт А–Я",
+      "result_count_one": "{{count}} ссылка для проверки",
+      "result_count_other": "{{count}} ссылки для проверки",
+      "result_count_few": "{{count}} ссылки для проверки",
+      "result_count_many": "{{count}} ссылок для проверки",
+      "retry_selected": "Повторить для выбранных",
+      "empty": "Сломанные ссылки не найдены",
+      "empty_description": "Ни для одной из сохранённых ссылок сейчас нет ошибок сканирования.",
+      "select_visible": "Выбрать все видимые ссылки",
+      "bookmark": "Закладка",
+      "issue": "Проблема",
+      "never_crawled": "Нет даты сканирования",
+      "issue_blocked": "Доступ заблокирован",
+      "issue_missing": "Не найдено",
+      "issue_server": "Ошибка сервера",
+      "issue_http": "Ошибка HTTP",
+      "issue_failed": "Сканирование не удалось",
+      "issue_blocked_hint": "Сайт ограничил этот запрос",
+      "issue_missing_hint": "Возможно, страница была удалена",
+      "issue_server_hint": "Сайт не смог выполнить запрос",
+      "issue_http_hint": "Сайт вернул неожиданный ответ",
+      "issue_failed_hint": "Успешный ответ не был получен",
+      "queued": "В очереди",
+      "queued_count_one": "{{count}} ссылка поставлена в очередь на повторное сканирование.",
+      "queued_count_other": "{{count}} ссылки поставлены в очередь на повторное сканирование.",
+      "deleted_count_one": "{{count}} закладка удалена.",
+      "deleted_count_other": "{{count}} закладки удалены.",
+      "deleted_count_few": "{{count}} закладки удалены.",
+      "deleted_count_many": "{{count}} закладок удалено.",
+      "queued_count_few": "{{count}} ссылки поставлены в очередь на повторное сканирование.",
+      "queued_count_many": "{{count}} ссылок поставлено в очередь на повторное сканирование.",
+      "action_failed": "Не удалось: {{count}} из {{total}}.",
+      "delete_title_one": "Удалить {{count}} закладку?",
+      "delete_title_other": "Удалить {{count}} закладки?",
+      "delete_title_few": "Удалить {{count}} закладки?",
+      "delete_title_many": "Удалить {{count}} закладок?",
+      "delete_description": "Выбранные закладки и их сохранённые файлы, выделения и заметки будут удалены навсегда. Это действие нельзя отменить.",
+      "crawling_status": "Статус сканирования",
+      "broken_links": "Сломанные ссылки"
+    },
+    "back_to_app": "Вернуться в приложение",
+    "webhooks": {
+      "webhooks": "Веб-хуки",
+      "events": {
+        "created": "Создано",
+        "title": "События",
+        "crawled": "Просканировано",
+        "edited": "Отредактировано"
+      },
+      "description": "Вы можете использовать веб-хуки для запуска действий при создании, изменении или сканировании закладок.",
+      "auth_token": "Токен аутентификации",
+      "add_auth_token": "Добавить токен аутентификации",
+      "edit_auth_token": "Изменить токен авторизации",
+      "delete_webhook": "Удалить веб-хук",
+      "create_webhook": "Создать веб-хук",
+      "delete_webhook_confirmation": "Вы уверены, что хотите удалить этот веб-хук?",
+      "edit_webhook": "Редактировать веб-хук",
+      "webhook_url": "URL веб-хука"
+    },
+    "manage_assets": {
+      "bookmark_link": "Ссылка на закладку",
+      "asset_link": "Ссылка на ресурс",
+      "delete_asset": "Удалить ресурс",
+      "delete_asset_confirmation": "Вы уверены, что хотите удалить этот ресурс?",
+      "manage_assets": "Управление ресурсами",
+      "no_assets": "У вас пока нет ресурсов.",
+      "asset_type": "Тип ресурса"
+    },
+    "rules": {
+      "rules": "Механизм правил",
+      "rule_name": "Название правила",
+      "description": "Вы можете использовать правила для запуска действий при возникновении события.",
+      "ceate_rule": "Создать правило",
+      "edit_rule": "Редактировать правило",
+      "save_rule": "Сохранить правило",
+      "delete_rule": "Удалить правило",
+      "delete_rule_confirmation": "Вы уверены, что хотите удалить это правило?",
+      "whenever": "Когда ...",
+      "if": "Если ...",
+      "enter_rule_name": "Введите имя правила",
+      "describe_what_this_rule_does": "Опишите, что делает это правило",
+      "rule_has_been_created": "Правило создано!",
+      "rule_has_been_updated": "Правило обновлено!",
+      "rule_has_been_deleted": "Правило удалено!",
+      "no_rules_created_yet": "Пока нет правил",
+      "create_your_first_rule": "Создайте своё первое правило, чтобы автоматизировать рабочий процесс",
+      "conditions_types": {
+        "always": "Всегда",
+        "url_contains": "URL содержит",
+        "imported_from_feed": "Импортировано из ленты",
+        "bookmark_type_is": "Тип закладки:",
+        "has_tag": "Имеет тег",
+        "is_favourited": "В избранном",
+        "is_archived": "В архиве",
+        "and": "Все следующие утверждения верны",
+        "or": "Если что-то из этого правда",
+        "url_does_not_contain": "URL не содержит",
+        "title_contains": "Заголовок содержит",
+        "title_does_not_contain": "Заголовок не содержит",
+        "bookmark_source_is": "Источник закладки:"
+      },
+      "actions_types": {
+        "add_tag": "Добавить тег",
+        "remove_tag": "Удалить тег",
+        "add_to_list": "Добавить в список",
+        "remove_from_list": "Удалить из списка",
+        "download_full_page_archive": "Скачать полный архив страницы",
+        "favourite_bookmark": "Любимая закладка",
+        "archive_bookmark": "Архивировать закладку"
+      },
+      "events_types": {
+        "bookmark_added": "Закладка добавлена",
+        "tag_added": "Этот тег добавляется к закладке",
+        "tag_removed": "Этот тег удален из закладки",
+        "added_to_list": "Закладка добавлена в этот список",
+        "removed_from_list": "Закладка удалена из этого списка",
+        "favourited": "Закладка добавлена в избранное",
+        "archived": "Закладка архивирована"
+      }
+    },
+    "stats": {
+      "usage_statistics": "Статистика использования",
+      "insights_description": "Статистика о ваших привычках и коллекции закладок",
+      "failed_to_load": "Не удалось загрузить статистику",
+      "overview": {
+        "total_bookmarks": "Всего закладок",
+        "all_saved_items": "Все сохраненные элементы",
+        "favorites": "Избранное",
+        "starred_bookmarks": "Избранные закладки",
+        "archived": "В архиве",
+        "archived_items": "Архивные элементы",
+        "tags": "Теги",
+        "unique_tags_created": "Уникальные теги созданы",
+        "lists": "Списки",
+        "bookmark_collections": "Коллекции закладок",
+        "highlights": "Выделения",
+        "text_highlights": "Текстовые выделения",
+        "storage_used": "Использовано места в хранилище",
+        "total_asset_storage": "Всего места в хранилище активов",
+        "this_month": "В этом месяце",
+        "bookmarks_added": "Закладки добавлены"
+      },
+      "bookmark_types": {
+        "title": "Типы закладок",
+        "links": "Ссылки",
+        "text_notes": "Текстовые заметки",
+        "assets": "Активы"
+      },
+      "recent_activity": {
+        "title": "Недавняя активность",
+        "this_week": "На этой неделе",
+        "this_month": "В этом месяце",
+        "this_year": "В этом году"
+      },
+      "top_domains": {
+        "title": "Топ доменов",
+        "no_domains_found": "Домены не найдены"
+      },
+      "most_used_tags": {
+        "title": "Самые используемые теги",
+        "no_tags_found": "Теги не найдены"
+      },
+      "activity_patterns": {
+        "activity_by_hour": "Активность по часам",
+        "activity_by_day": "Активность по дням",
+        "busiest_around": "Пик активности около {{hour}}"
+      },
+      "storage_breakdown": {
+        "title": "Разбивка хранилища"
+      },
+      "bookmark_sources": {
+        "title": "Источники закладок",
+        "empty": "Нет доступных исходных данных"
+      }
+    },
+    "subscription": {
+      "subscription": "Подписка",
+      "manage_subscription": "Управляйте своей подпиской и платёжной информацией",
+      "current_plan": "Текущий тариф",
+      "billing_period": "Расчётный период",
+      "paid_plan": "Платный тариф",
+      "unlock_bigger_quota": "Получите большую квоту и поддержите проект",
+      "subscribe_now": "Подписаться сейчас",
+      "manage_billing": "Управление оплатой",
+      "subscription_canceled": "Ваша подписка отменена и закончится {{date}}. Вы можете возобновить её в любое время.",
+      "usage_quotas": "Использование и квоты",
+      "track_usage": "Отслеживайте текущее использование по сравнению с лимитами вашего тарифного плана",
+      "total_bookmarks_saved": "Всего сохранённых закладок",
+      "assets_file_storage": "Ресурсы и хранилище файлов",
+      "unlimited_usage": "Неограниченное использование",
+      "quota_limit_reached": "Лимит квоты достигнут",
+      "approaching_quota_limit": "Приближаетесь к лимиту квоты",
+      "loading_usage": "Загрузка информации об использовании…",
+      "free": "Бесплатно",
+      "paid": "Платный",
+      "monthly": "Ежемесячно",
+      "yearly": "Ежегодно",
+      "per_month": "месяц",
+      "per_year": "год",
+      "excl_vat": "без НДС",
+      "yearly_savings": "Скидка {{percent}}%",
+      "pro_feature_bookmarks": "50 000 закладок",
+      "pro_feature_storage": "50 ГБ хранилища",
+      "pro_feature_ai_tagging": "Тегирование на базе ИИ",
+      "pro_feature_full_text_search": "Полнотекстовый поиск"
+    },
+    "import_sessions": {
+      "title": "Импорт сессий",
+      "description": "Просматривайте и управляйте своими сессиями массового импорта. Сессии создаются автоматически при импорте закладок.",
+      "load_error": "Не удалось загрузить сессии импорта",
+      "no_sessions": "Пока нет сессий импорта",
+      "no_sessions_detail": "Сессии импорта появятся здесь автоматически при импорте закладок",
+      "created_at": "Создано {{time}}",
+      "progress": "Выполнение",
+      "status": {
+        "pending": "В ожидании",
+        "completed": "Завершено",
+        "failed": "Ошибка",
+        "staging": "Подготовка",
+        "running": "Запущено",
+        "paused": "Приостановлено",
+        "archived": "Архивировано"
+      },
+      "badges": {
+        "pending": "{{count}} в ожидании",
+        "processing": "{{count}} в обработке",
+        "completed": "{{count}} завершено",
+        "failed": "{{count}} не удалось"
+      },
+      "imported_to": "Импортировано в:",
+      "view_list": "Смотреть список",
+      "delete_dialog_title": "Удалить сессию импорта",
+      "delete_dialog_description": "Вы уверены, что хотите удалить \"{{name}}\"? Это действие нельзя отменить. Сами закладки не будут удалены.",
+      "delete_session": "Удалить сессию",
+      "pause_session": "Приостановить",
+      "resume_session": "Возобновить",
+      "view_details": "Посмотреть детали",
+      "detail": {
+        "page_title": "Детали сессии импорта",
+        "back_to_import": "Вернуться к импорту",
+        "filter_all": "Все",
+        "filter_accepted": "Принято",
+        "filter_rejected": "Отклонено",
+        "filter_duplicates": "Дубликаты",
+        "filter_pending": "Ожидает обработки",
+        "table_title": "Название / URL",
+        "table_type": "Тип",
+        "table_result": "Результат",
+        "table_reason": "Причина",
+        "table_bookmark": "Закладка",
+        "result_accepted": "Принято",
+        "result_rejected": "Отклонено",
+        "result_skipped_duplicate": "Дубликат",
+        "result_pending": "Ожидает обработки",
+        "result_processing": "В обработке",
+        "no_results": "По этому фильтру ничего не найдено.",
+        "view_bookmark": "Посмотреть закладку",
+        "load_more": "Загрузить еще",
+        "no_title": "Без названия",
+        "archived_results": "Результаты отдельных закладок больше не сохраняются для архивированных сеансов импорта."
+      },
+      "finalize_dialog_title": "Завершить сеанс импорта",
+      "finalize_dialog_description": "Добавить «{{name}}» в очередь для фоновой обработки? Начнется импорт подготовленных закладок.",
+      "finalize_staging": "Завершить"
+    },
+    "backups": {
+      "backups": "Резервные копии",
+      "page_title": "Резервные копии",
+      "page_description": "Автоматическое создание резервных копий ваших закладок и управление ими. Резервные копии сжимаются и надёжно хранятся.",
+      "configuration": {
+        "title": "Настройка резервного копирования",
+        "enable_automatic_backups": "Включить автоматическое резервное копирование",
+        "enable_automatic_backups_description": "Автоматически создавать резервные копии ваших закладок",
+        "backup_frequency": "Периодичность резервного копирования",
+        "backup_frequency_description": "Как часто следует создавать резервные копии",
+        "retention_period": "Срок хранения (в днях)",
+        "retention_period_description": "Сколько дней хранить резервные копии до их удаления",
+        "frequency": {
+          "daily": "Ежедневно",
+          "weekly": "Еженедельно"
+        },
+        "select_frequency": "Выбрать периодичность",
+        "save_settings": "Сохранить настройки"
+      },
+      "list": {
+        "title": "Ваши резервные копии",
+        "create_backup_now": "Создать резервную копию сейчас",
+        "no_backups": "У вас ещё нет резервных копий. Включите автоматическое резервное копирование или создайте его вручную.",
+        "table": {
+          "created_at": "Создано",
+          "bookmarks": "Закладки",
+          "size": "Размер",
+          "status": "Статус",
+          "actions": "Действия"
+        },
+        "status": {
+          "success": "Успешно",
+          "failed": "Ошибка",
+          "pending": "В ожидании"
+        },
+        "actions": {
+          "download_backup": "Скачать резервную копию",
+          "delete_backup": "Удалить резервную копию"
+        }
+      },
+      "dialogs": {
+        "delete_backup_title": "Удалить резервную копию?",
+        "delete_backup_description": "Вы уверены, что хотите удалить эту резервную копию? Это действие нельзя отменить."
+      },
+      "toasts": {
+        "backup_queued": "Задание на резервное копирование поставлено в очередь! Оно будет обработано в ближайшее время.",
+        "backup_deleted": "Резервная копия удалена!"
+      }
+    },
+    "maintenance": {
+      "clear_filters": "Сбросить фильтры",
+      "clear_selection": "Снять выделение",
+      "delete_selected": "Удалить выбранные",
+      "try_again": "Попробовать снова",
+      "sort": "Порядок сортировки",
+      "no_matches": "Совпадений не найдено",
+      "adjust_filters": "Попробуйте другой запрос или сбросьте фильтры.",
+      "select_item": "Выбрать {{name}}",
+      "selected": "Выбрано: {{count}}",
+      "showing": "Показано {{shown}} из {{total}}",
+      "load_more": "Загрузить ещё"
+    }
+  },
+  "actions": {
+    "remove_from_list": "Удалить из списка",
+    "refresh": "Обновить",
+    "unarchive": "Вернуть из архива",
+    "favorite": "В избранное",
+    "unfavorite": "Удалить из избранного",
+    "recrawl": "Пересканировать",
+    "change_layout": "Изменить разметку",
+    "save": "Сохранить",
+    "create": "Создать",
+    "summarize_with_ai": "Суммировать с ИИ",
+    "sign_out": "Выйти",
+    "close": "Закрыть",
+    "add_to_list": "Добавить в список",
+    "select": "Выбрать",
+    "close_bulk_edit": "Закрыть массовое редактирование",
+    "bulk_edit": "Массовое редактирование",
+    "manage_lists": "Управление списками",
+    "fetch_now": "Получить сейчас",
+    "edit_title": "Редактировать заголовок",
+    "ignore": "Игнорировать",
+    "delete": "Удалить",
+    "cancel": "Отменить",
+    "archive": "В архив",
+    "edit": "Редактировать",
+    "merge": "Слить",
+    "add": "Добавить",
+    "edit_tags": "Редактировать метки",
+    "copy_link": "Скопировать ссылку",
+    "unselect_all": "Отменить выбор",
+    "select_all": "Выбрать все",
+    "apply_all": "Применить всё",
+    "sort": {
+      "title": "Сортировка",
+      "newest_first": "Сначала новые",
+      "oldest_first": "Сначала старые",
+      "relevant_first": "Сначала самые релевантные"
+    },
+    "open_editor": "Открыть редактор",
+    "toggle_show_archived": "Показать архивированные",
+    "confirm": "Подтвердить",
+    "regenerate": "Обновить",
+    "load_more": "Загрузить еще",
+    "edit_notes": "Редактировать заметки",
+    "preserve_as_pdf": "Сохранить как PDF",
+    "preserve_video": "Сохранить видео",
+    "offline_copies": "Автономные копии",
+    "preserve_offline_archive": "Сохранить оффлайн архив",
+    "download_full_page_archive_file": "Скачать файл архива",
+    "download_pdf_file": "Скачать PDF-файл",
+    "remove": "Удалить",
+    "more": "Больше",
+    "replace_banner": "Заменить баннер",
+    "add_banner": "Добавить баннер",
+    "download": "Скачать",
+    "rename": "Переименовать"
+  },
+  "editor": {
+    "text_toolbar": {
+      "markdown_shortcuts": {
+        "inline_code": {
+          "example": "`Код`",
+          "label": "Встроенный код"
+        },
+        "heading": {
+          "label": "Оглавление",
+          "example": "# H1, ## H2, ### H3"
+        },
+        "italic": {
+          "example": "*Курсив* или _Курсив_ или CTRL+i",
+          "label": "Курсив"
+        },
+        "blockquote": {
+          "label": "Цитата",
+          "example": "> Цитата"
+        },
+        "ordered_list": {
+          "example": "1. Элемент списка",
+          "label": "Упорядоченный список"
+        },
+        "block_code": {
+          "example": "``` + пробел",
+          "label": "Блок кода"
+        },
+        "label": "Горячие клавиши Markdown",
+        "bold": {
+          "label": "Жирный",
+          "example": "**текст** или CTRL+b"
+        },
+        "unordered_list": {
+          "example": "- Элемент списка",
+          "label": "Неупорядоченный список"
+        }
+      },
+      "undo": "Отменить",
+      "redo": "Повторить",
+      "bold": "Жирный",
+      "italic": "Курсив",
+      "underline": "Подчёркивание",
+      "strikethrough": "Зачеркнуть",
+      "code": "Код",
+      "highlight": "Выделить",
+      "align_left": "Выровнить слева",
+      "align_center": "Выровнить по центру",
+      "align_right": "Выровнить справа"
+    },
+    "placeholder": "Вставьте ссылку или изображение, напишите заметку или перетащите изображение сюда…",
+    "new_item": "НОВЫЙ ЭЛЕМЕНТ",
+    "import_as_text": "Импортировать как текстовую закладку",
+    "disabled_submissions": "Редактирование отключено",
+    "multiple_urls_dialog_desc": "Ввод содержит несколько ссылок на разных строках. Вы хотите импортировать их как разные закладки?",
+    "multiple_urls_dialog_title": "Импрортировать ссылки как отдельные закладки?",
+    "import_as_separate_bookmarks": "Импортировать как разные закладки",
+    "placeholder_v2": "Вставьте ссылку, напишите заметку или перетащите изображение…"
+  },
+  "admin": {
+    "server_stats": {
+      "total_users": "Всего пользователей",
+      "server_version": "Версия сервера",
+      "total_bookmarks": "Всего закладок",
+      "server_stats": "Статистика сервера"
+    },
+    "users_list": {
+      "users_list": "Список пользователей",
+      "reset_password": "Сбросить пароль",
+      "asset_sizes": "Размеры ресурсов",
+      "confirm_password": "Подтвердить пароль",
+      "local_user": "Локальный пользователь",
+      "num_bookmarks": "Закладок",
+      "change_role": "Изменить роль",
+      "delete_user": "Удалить пользователя",
+      "create_user": "Создать пользователя",
+      "delete_user_confirm_description": "Вы уверены, что хотите удалить пользователя \"{{name}}\"?",
+      "unlimited": "Неограниченный"
+    },
+    "background_jobs": {
+      "background_jobs": "Фоновые задачи",
+      "actions": {
+        "reindex_all_bookmarks": "Переиндексировать все закладки",
+        "clean_assets": "Очистить оборванные ресурсы и повторно синхронизировать метаданные",
+        "reprocess_assets_fix_mode": "Повторно обработать необработанные активы",
+        "recrawl_failed_links_only": "Повторно просканировать только ссылки с ошибками",
+        "recrawl_all_links": "Повторно просканировать все ссылки",
+        "without_inference": "Без инференции",
+        "regenerate_ai_tags_for_failed_bookmarks_only": "Заново создать AI-теги только для закладок с ошибками",
+        "regenerate_ai_tags_for_all_bookmarks": "Заново создать AI-теги для всех закладок",
+        "regenerate_ai_summaries_for_failed_bookmarks_only": "Заново сгенерировать AI-сводки только для закладок с ошибками",
+        "regenerate_ai_summaries_for_all_bookmarks": "Заново сгенерировать AI-сводки для всех закладок",
+        "migrate_large_link_html_content": "Переместить большой встроенный HTML-контент в ресурсы",
+        "recrawl_pending_links_only": "Переиндексировать только отложенные ссылки",
+        "regenerate_ai_tags_for_pending_bookmarks_only": "Заново сгенерировать AI-теги только для отложенных закладок",
+        "regenerate_ai_summaries_for_pending_bookmarks_only": "Заново сгенерировать AI-резюме только для отложенных закладок",
+        "regenerate_embeddings_for_pending_bookmarks_only": "Перегенерировать внедрения только для ожидающих закладок",
+        "regenerate_embeddings_for_failed_bookmarks_only": "Перегенерировать внедрения только для неудачных закладок",
+        "regenerate_embeddings_for_all_bookmarks": "Перегенерировать внедрения для всех закладок"
+      },
+      "jobs": {
+        "crawler": {
+          "title": "Задачи краулера",
+          "description": "Веб-сканирование и извлечение контента из URL-адресов"
+        },
+        "inference": {
+          "title": "Задачи логического вывода",
+          "description": "AI-тегирование и суммирование контента"
+        },
+        "indexing": {
+          "title": "Задачи индексирования",
+          "description": "Обновления поискового индекса"
+        },
+        "asset_preprocessing": {
+          "title": "Задачи предварительной обработки ресурсов",
+          "description": "Предварительная обработка изображений и документов (скриншоты, извлечение текста и т. д.)"
+        },
+        "video": {
+          "title": "Задачи скачивания видео",
+          "description": "Извлечение и скачивание видео"
+        },
+        "webhook": {
+          "title": "Задачи веб-хука",
+          "description": "Внешние уведомления веб-хука"
+        },
+        "feed": {
+          "title": "Задачи RSS-ленты",
+          "description": "Обработка RSS-ленты и обновление контента"
+        },
+        "admin_maintenance": {
+          "title": "Административное обслуживание",
+          "description": "Административная очистка и обслуживание ресурсов"
+        },
+        "embeddings": {
+          "title": "Задачи внедрения",
+          "description": "Генерация векторных внедрений для закладок"
+        }
+      },
+      "monitor_and_manage": "Мониторинг и управление очередями фоновых задач и задачами системной обработки",
+      "active": "Активные",
+      "available_actions": "Доступные действия",
+      "status": {
+        "title": "Описание состояний задач",
+        "queued": {
+          "title": "В очереди",
+          "description": "Задания ждут своей очереди на обработку. Они начнутся автоматически, когда ресурсы будут доступны."
+        },
+        "unprocessed": {
+          "title": "Необработанные",
+          "description": "Закладки, которые еще не были обработаны. Скорее всего, они уже поставлены в очередь на обработку, если нет, возможно, потребуется повторно поставить их в очередь вручную."
+        },
+        "failed": {
+          "title": "С ошибками",
+          "description": "Закладки, при обработке которых произошли ошибки. Им может потребоваться ручная обработка."
+        }
+      }
+    },
+    "admin_settings": "Настройки администратора",
+    "service_connections": {
+      "title": "Подключения служб",
+      "description": "Мониторинг работоспособности и связности зависимостей внешней системы",
+      "search_engine": "Поисковая система",
+      "browser": "Браузер",
+      "queue_system": "Система очередей",
+      "status": {
+        "not_configured": "Не настроено",
+        "connected": "Подключено",
+        "disconnected": "Отключено"
+      },
+      "vector_store": "Векторное хранилище"
+    },
+    "admin_tools": {
+      "admin_tools": "Инструменты админа",
+      "bookmark_debugger": "Отладчик закладок",
+      "bookmark_id": "ID закладки",
+      "bookmark_id_placeholder": "Введите ID закладки",
+      "lookup": "Поиск",
+      "debug_info": "Отладочная информация",
+      "basic_info": "Основная информация",
+      "status": "Статус",
+      "content": "Контент",
+      "html_preview": "Предпросмотр HTML (первые 1000 символов)",
+      "summary": "Сводка",
+      "url": "URL",
+      "source_url": "Исходный URL",
+      "asset_type": "Тип актива",
+      "file_name": "Имя файла",
+      "owner_user_id": "ID пользователя-владельца",
+      "tagging_status": "Статус тегов",
+      "summarization_status": "Статус суммирования",
+      "crawl_status": "Статус сканирования",
+      "crawl_status_code": "Код статуса HTTP",
+      "crawled_at": "Просканировано",
+      "recrawl": "Перепроверить",
+      "reindex": "Переиндексировать",
+      "retag": "Переметить тегами",
+      "resummarize": "Пересоздать сводку",
+      "bookmark_not_found": "Закладка не найдена",
+      "action_success": "Действие выполнено успешно",
+      "action_failed": "Действие не выполнено",
+      "recrawl_queued": "Задача перепроверки поставлена в очередь",
+      "reindex_queued": "Задача переиндексации поставлена в очередь",
+      "retag_queued": "Задача переметки тегами поставлена в очередь",
+      "resummarize_queued": "Задача пересоздания сводки поставлена в очередь",
+      "view": "Вид",
+      "fetch_error": "Ошибка при получении закладки",
+      "embedding_status": "Статус внедрения",
+      "regenerate_embedding": "Перегенерировать внедрение",
+      "regenerate_embedding_queued": "Задача на регенерацию внедрений поставлена в очередь"
+    }
+  },
+  "layouts": {
+    "grid": "Сетка",
+    "list": "Список",
+    "compact": "Компактно",
+    "masonry": "Плитка"
+  },
+  "options": {
+    "theme": "Тема",
+    "dark_mode": "Тёмный режим",
+    "light_mode": "Светлый режим",
+    "system_mode": "Системный режим",
+    "apps_extensions": "Приложения и расширения",
+    "documentation": "Документация",
+    "follow_us_on_x": "Подписывайтесь на нас в X"
+  },
+  "tags": {
+    "your_tags_info": "Метки, которые вами были хоть раз прикреплены",
+    "all_tags": "Все метки",
+    "ai_tags_info": "Метки, которые были приклеплены только автоматически (от ИИ)",
+    "unused_tags_info": "Метки, которые не были прикреплены к любой закладке",
+    "ai_tags": "ИИ метки",
+    "unused_tags": "Неиспользованные метки",
+    "delete_all_unused_tags": "Удалить все неиспользованные метки",
+    "drag_and_drop_merging_info": "Перетащите метки друг на друга, чтобы их слить",
+    "sort_by_name": "Сортировать по имени",
+    "drag_and_drop_merging": "Слияние перетаскиванием",
+    "your_tags": "Ваши метки",
+    "create_tag": "Создать тег",
+    "create_tag_description": "Создать новый тег, не прикрепляя его ни к одной закладке",
+    "tag_name": "Имя тега",
+    "enter_tag_name": "Введите имя тега",
+    "sort_by_usage": "Сортировать по использованию",
+    "sort_by_relevance": "Сортировать по релевантности",
+    "no_custom_tags": "Пока нет пользовательских тегов",
+    "no_ai_tags": "Пока нет тегов ИИ",
+    "no_unused_tags": "У вас нет неиспользуемых тегов",
+    "no_unused_tags_match_your_search": "Нет неиспользуемых тегов, соответствующих вашему поиску",
+    "no_tags_match_your_search": "Нет тегов, соответствующих вашему поиску",
+    "search_placeholder": "Поиск тегов...",
+    "search_or_create_placeholder": "Поиск или создание тегов…",
+    "rename_tag": "Переименовать тег",
+    "items_count": "{{count}} элементов",
+    "attached_by_you": "{{count}} вами",
+    "attached_by_ai": "{{count}} ИИ"
+  },
+  "preview": {
+    "view_original": "Посмотреть оригинал",
+    "cached_content": "Содержимое кеша",
+    "reader_view": "Режим чтения",
+    "page_overview": "Обзор страницы",
+    "try_reader_view": "Попробовать режим чтения",
+    "archived_page": "Архивная страница",
+    "tabs": {
+      "content": "Содержание",
+      "details": "Подробности"
+    },
+    "archive_info": "Архивы могут неправильно отображаться во встроенном режиме, если для них требуется Javascript. Для достижения наилучших результатов <1>загрузите их и откройте в браузере</1>.",
+    "fetch_error_title": "Контент недоступен",
+    "fetch_error_description": "Не удалось получить контент по этой ссылке. Страница может быть защищена, требовать аутентификации или быть временно недоступна.",
+    "crawling_in_progress": "Получаю содержимое страницы…",
+    "continue_reading": "Продолжить с места, где остановились",
+    "continue_reading_percent": "Продолжить с места, где остановились ({{percent}}%)",
+    "continue_button": "Продолжить"
+  },
+  "toasts": {
+    "bookmarks": {
+      "refetch": "Повторная загрузка была добавлена в очередь!",
+      "full_page_archive": "Запущено создание полного архива страницы",
+      "delete_from_list": "Закладка была удалена из списка",
+      "clipboard_copied": "Ссылка была скопирована в буфер обмена!",
+      "deleted": "Закладка была удалена!",
+      "updated": "Закладка была обновлена!",
+      "preserve_pdf": "Сохранение в формате PDF было запущено",
+      "preserve_video": "Загрузка видео запущена",
+      "update_banner": "Баннер обновлён!",
+      "uploading_banner": "Загрузка баннера..."
+    },
+    "lists": {
+      "created": "Список был создан!",
+      "updated": "Список был обновлён!",
+      "merged": "Список объединен!",
+      "deleted": "Список удален!"
+    },
+    "tags": {
+      "created": "Тег создан!",
+      "failed_to_create": "Не удалось создать тег",
+      "updated": "Тег обновлен!",
+      "failed_to_update": "Не удалось обновить тег"
+    }
+  },
+  "cleanups": {
+    "cleanups": "Очистка",
+    "duplicate_tags": {
+      "merge_all_suggestions": "Слить все предложения?",
+      "title": "Дублирующиеся метки"
+    }
+  },
+  "search": {
+    "has_tag": "Имеет тег",
+    "does_not_have_tag": "Не имеет тега",
+    "or": "Или",
+    "created_on_or_before": "Создано до или после",
+    "not_created_on_or_before": "Не создан до или после",
+    "is_not_favorited": "Не в избранном",
+    "is_archived": "В архиве",
+    "is_not_archived": "Не в архиве",
+    "has_any_tag": "Имеет любой тег",
+    "has_no_tags": "Нет тега",
+    "has_notes": "Есть заметки",
+    "has_no_notes": "Нет заметок",
+    "has_highlights": "Есть выделения",
+    "has_no_highlights": "Нет выделений",
+    "is_in_any_list": "Находится в любом списке",
+    "is_not_in_any_list": "Не состоит ни в одном списке",
+    "created_on_or_after": "Создано после",
+    "not_created_on_or_after": "Не создано после",
+    "url_does_not_contain": "URL не содержит",
+    "is_in_list": "Находится в списке",
+    "is_not_in_list": "Не в списке",
+    "type_is": "Тип:",
+    "type_is_not": "Тип не",
+    "and": "И",
+    "is_favorited": "В избранном",
+    "url_contains": "URL содержит",
+    "full_text_search": "Полнотекстовый поиск",
+    "is_from_feed": "Из RSS-ленты",
+    "is_not_from_feed": "Не из RSS-ленты",
+    "month_s": " Месяцев",
+    "created_within": "Создано в течение",
+    "created_earlier_than": "Создано раньше, чем",
+    "day_s": " Дней",
+    "week_s": " Недель",
+    "year_s": " Год(а)",
+    "day_s_ago": " Дней назад",
+    "week_s_ago": " Недель назад",
+    "month_s_ago": " Месяцев назад",
+    "year_s_ago": " Год(а) назад",
+    "history": "Недавние поиски",
+    "title_contains": "Содержит в заголовке",
+    "title_does_not_contain": "Не содержит в заголовке",
+    "is_broken_link": "Битые ссылки",
+    "tags": "Теги",
+    "no_suggestions": "Нет предложений",
+    "filters": "Фильтры",
+    "is_not_broken_link": "Рабочие ссылки",
+    "lists": "Списки",
+    "feeds": "Ленты",
+    "is_from_source": "Источник:",
+    "is_not_from_source": "Источника нет",
+    "mode_label": "Режим поиска",
+    "mode_label_description": "Выберите, как Karakeep находит подходящие закладки.",
+    "mode_keyword": "Ключевые слова",
+    "mode_keyword_description": "Поиск точных совпадений слов в заголовках, контенте, URL-адресах и заметках. Почти мгновенно.",
+    "mode_hybrid": "Гибридный",
+    "mode_hybrid_description": "Сочетает точные совпадения с похожими идеями для лучшего баланса. Медленнее, чем поиск по ключевым словам.",
+    "mode_semantic": "Семантический",
+    "mode_semantic_description": "Поиск концептуально похожих закладок, даже без общих слов. Медленнее, чем поиск по ключевым словам.",
+    "keyword_placeholder": "Поиск по заголовкам, тексту, URL-адресам и тегам…",
+    "hybrid_placeholder": "Поиск по словам или смыслу…",
+    "semantic_placeholder": "Опишите то, что вы помните…"
+  },
+  "dialogs": {
+    "bookmarks": {
+      "delete_confirmation_title": "Удалить закладку?",
+      "delete_confirmation_description": "Вы уверены, что хотите удалить эту закладку?",
+      "bulk_delete_confirmation_description": "Вы уверены, что хотите удалить {{count}} закладок?"
+    }
+  },
+  "highlights": {
+    "no_highlights": "У вас пока нет выделенных фрагментов."
+  },
+  "banners": {
+    "no_bookmarks": {
+      "title": "Пока нет закладок",
+      "description": "Сохраняйте интересные статьи, ссылки и страницы, чтобы быстро получить к ним доступ позже."
+    }
+  },
+  "bookmark_editor": {
+    "title": "Редактировать закладку",
+    "subtitle": "Внесите изменения в детали закладки. Когда закончите, нажмите \"Сохранить\".",
+    "author": "Автор",
+    "publisher": "Издатель",
+    "date_published": "Дата публикации",
+    "pick_a_date": "Выберите дату",
+    "save_changes": "Сохранить изменения",
+    "extracted_content": "Извлеченное содержимое"
+  },
+  "view_options": {
+    "title": "Параметры просмотра",
+    "layout": "Расположение",
+    "columns": "Столбцы",
+    "display_options": "Параметры отображения",
+    "show_note_previews": "Показывать заметки",
+    "show_tags": "Показать теги",
+    "show_title": "Показать заголовок",
+    "image_options": "Параметры изображения",
+    "image_fit_cover": "Обложка (Заполнить)",
+    "image_fit_contain": "Содержать (По размеру)"
+  },
+  "version": {
+    "new_release_available": "Доступны примечания к новому выпуску",
+    "whats_new_title": "Что нового в v{{version}}",
+    "release_notes_description": "Вот последние обновления, полученные из примечаний к выпуску GitHub.",
+    "loading_release_notes": "Загрузка примечаний к выпуску…",
+    "unable_to_load_release_notes": "Не удалось загрузить примечания к выпуску прямо сейчас. Пожалуйста, повторите попытку позже.",
+    "no_release_notes": "Примечания к выпуску для этой версии не публиковались.",
+    "release_notes_synced": "Примечания к выпуску синхронизируются с GitHub.",
+    "view_on_github": "Посмотреть на GitHub"
+  },
+  "wrapped": {
+    "title": "Ваш {{year}} Wrapped",
+    "subtitle": "Год в Karakeep",
+    "banner": {
+      "title": "Ваш 2025 Wrapped готов!",
+      "description": "Посмотрите свой год в закладках",
+      "view_now": "Посмотреть сейчас"
+    },
+    "button": "2025 Wrapped",
+    "loading": "Загружаем ваш Wrapped...",
+    "failed_to_load": "Не удалось загрузить вашу статистику Wrapped",
+    "sections": {
+      "total_saves": {
+        "prefix": "Вы сохранили",
+        "suffix": "штук в этом году",
+        "suffix_singular": "штука в этом году"
+      },
+      "first_bookmark": {
+        "title": "Ваше путешествие началось",
+        "description": "Первое сохранение в {{year}}:"
+      },
+      "top_domains": "Ваши популярные сайты",
+      "top_tags": "Ваши популярные теги",
+      "monthly_activity": "Ваш год в сохранениях",
+      "most_active_day": "Ваш самый активный день",
+      "peak_times": {
+        "title": "Когда вы сохраняете",
+        "peak_hour": "Час пик",
+        "peak_day": "День пик"
+      },
+      "how_you_save": "Как вы сохраняете",
+      "what_you_saved": "Что вы сохранили",
+      "summary": {
+        "favorites": "Избранное",
+        "tags_created": "Создано тегов",
+        "highlights": "Главное"
+      },
+      "types": {
+        "links": "Ссылки",
+        "notes": "Заметки",
+        "assets": "Ресурсы"
+      }
+    },
+    "footer": "Сделано с помощью Karakeep",
+    "share": "Поделиться",
+    "download": "Скачать",
+    "close": "Закрыть",
+    "generating": "Генерируется..."
+  },
+  "keyboard_shortcuts": {
+    "title": "Горячие клавиши",
+    "sections": {
+      "navigation": "Навигация",
+      "actions": "Действия",
+      "selection": "Выбор",
+      "other": "Другое"
+    },
+    "move_left": "Переместить влево",
+    "move_down": "Переместить вниз",
+    "move_up": "Переместить вверх",
+    "move_right": "Переместить вправо",
+    "open_bookmark": "Открыть закладку",
+    "clear_focus": "Снять фокус / выйти из массового редактирования",
+    "toggle_favorite": "Добавить в избранное / удалить из избранного",
+    "toggle_archive": "Архивировать / Разархивировать",
+    "delete_bookmark": "Удалить закладку",
+    "toggle_selection": "Выбрать / Отменить выбор",
+    "select_all": "Выбрать все",
+    "deselect_all": "Снять выделение",
+    "show_help": "Показать горячие клавиши",
+    "focus_search_alt": "Фокус на поиск"
+  }
+}

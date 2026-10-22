@@ -1,0 +1,12 @@
+---
+import PricingPage from "../Pricing";
+import Layout from "../layouts/Layout.astro";
+import { PRICING_META_DESCRIPTION } from "../pricing-data";
+---
+
+<Layout
+  title="Pricing"
+  description={PRICING_META_DESCRIPTION}
+>
+  <PricingPage client:load />
+</Layout>

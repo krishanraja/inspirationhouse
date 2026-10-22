@@ -1,0 +1,1265 @@
+{
+  "common": {
+    "tags": "Etiquetas",
+    "roles": {
+      "user": "Usuario",
+      "admin": "Admin"
+    },
+    "attachments": "Adjuntos",
+    "name": "Nombre",
+    "email": "Email",
+    "role": "Rol",
+    "url": "URL",
+    "action": "Acción",
+    "actions": "Acciones",
+    "created_at": "Creado:",
+    "something_went_wrong": "Algo ha salido mal",
+    "search": "Buscar",
+    "screenshot": "Captura de pantalla",
+    "video": "Vídeo",
+    "archive": "Archivo",
+    "home": "Inicio",
+    "password": "Contraseña",
+    "key": "Clave",
+    "experimental": "Experimental",
+    "note": "Nota",
+    "highlights": "Destacados",
+    "source": "Fuente",
+    "type": "Escribe",
+    "size": "Tamaño",
+    "bookmark_types": {
+      "title": "Tipo de marcador",
+      "link": "Enlace",
+      "text": "Texto",
+      "media": "Medios"
+    },
+    "summary": "Resumen",
+    "updated_at": "Actualizado el",
+    "title": "Título",
+    "description": "Descripción",
+    "quota": "Cuota",
+    "bookmarks": "Marcadores",
+    "storage": "Almacenamiento",
+    "pdf": "PDF archivado",
+    "default": "Predeterminado",
+    "id": "ID",
+    "last_used": "Último usado"
+  },
+  "settings": {
+    "info": {
+      "change_password": "Cambiar contraseña",
+      "new_password": "Nueva contraseña",
+      "interface_lang": "Idioma de la interfaz",
+      "user_info": "Información del usuario",
+      "basic_details": "Detalles básicos",
+      "current_password": "Contraseña actual",
+      "confirm_new_password": "Confirmar nueva contraseña",
+      "options": "Ajustes",
+      "user_settings": {
+        "user_settings_updated": "¡La configuración del usuario se ha actualizado!",
+        "bookmark_click_action": {
+          "title": "Acción al hacer clic en el marcador",
+          "open_external_url": "Abrir URL original",
+          "open_bookmark_details": "Abrir detalles del marcador"
+        },
+        "archive_display_behaviour": {
+          "title": "Marcadores archivados",
+          "show": "Mostrar marcadores archivados en etiquetas y listas",
+          "hide": "Ocultar marcadores archivados en etiquetas y listas"
+        }
+      },
+      "reader_settings": {
+        "local_overrides_title": "Ajustes específicos del dispositivo activos",
+        "using_default": "Usando el valor predeterminado del cliente",
+        "clear_override_hint": "Borra la configuración específica del dispositivo para usar la configuración global ({{value}})",
+        "font_size": "Tamaño de fuente",
+        "font_family": "Familia de fuentes",
+        "preview_inline": "(vista previa)",
+        "tooltip_preview": "Cambios de la vista previa sin guardar",
+        "save_to_all_devices": "Todos los dispositivos",
+        "tooltip_local": "Los ajustes del dispositivo difieren de los globales",
+        "reset_preview": "Restablecer vista previa",
+        "mono": "Monoespacio",
+        "line_height": "Altura de la línea",
+        "tooltip_default": "Ajustes de lectura",
+        "title": "Ajustes del lector",
+        "serif": "Con gracias",
+        "preview": "Vista previa",
+        "not_set": "No configurado",
+        "clear_local_overrides": "Borrar la configuración del dispositivo",
+        "preview_text": "El veloz murciélago hindú comía feliz cardillo y kiwi. Así es como aparecerá el texto en tu vista de lectura.",
+        "local_overrides_cleared": "Se han borrado los ajustes específicos del dispositivo",
+        "local_overrides_description": "Este dispositivo tiene ajustes de lector que difieren de los valores predeterminados globales:",
+        "clear_defaults": "Borrar todos los valores predeterminados",
+        "description": "Configura los ajustes de texto predeterminados para la vista de lectura. Estos ajustes se sincronizan en todos tus dispositivos.",
+        "defaults_cleared": "Se han borrado los valores predeterminados del lector",
+        "save_hint": "Guarda la configuración sólo para este dispositivo o sincronízala en todos los dispositivos",
+        "save_as_default": "Guardar como predeterminado",
+        "save_to_device": "Este dispositivo",
+        "sans": "Sin gracias",
+        "tooltip_preview_and_local": "Cambios de la vista previa sin guardar; los ajustes del dispositivo difieren de los globales",
+        "adjust_hint": "Ajusta la configuración de arriba para previsualizar los cambios"
+      },
+      "avatar": {
+        "upload": "Subir avatar",
+        "change": "Cambiar avatar",
+        "remove_confirm_title": "¿Eliminar avatar?",
+        "updated": "Avatar actualizado",
+        "removed": "Avatar eliminado",
+        "description": "Sube una imagen cuadrada para usarla como tu avatar.",
+        "remove_confirm_description": "Esto borrará tu foto de perfil actual.",
+        "title": "Foto de perfil",
+        "remove": "Eliminar avatar"
+      }
+    },
+    "back_to_app": "Volver a la aplicación",
+    "ai": {
+      "ai_settings": "Ajustes de la IA",
+      "tagging_rules": "Reglas de etiquetado",
+      "tagging_rule_description": "Los prompts que añadas aquí se incluirán como reglas durante la generación de etiquetas. Puedes comprobar el prompt final en la sección de previsualización.",
+      "prompt_preview": "Previsualización",
+      "text_prompt": "Prompt para texto",
+      "images_prompt": "Prompt para Imagen",
+      "summarization": "Resumen",
+      "summarization_prompt": "Indicación de resumen",
+      "all_tagging": "Todo el etiquetado",
+      "text_tagging": "Etiquetado de texto",
+      "image_tagging": "Etiquetado de imágenes",
+      "tag_style": "Estilo de etiqueta",
+      "auto_summarization_description": "Genera resúmenes automáticamente para tus marcadores usando IA.",
+      "auto_tagging": "Etiquetado automático",
+      "titlecase_spaces": "Mayúsculas y minúsculas con espacios",
+      "lowercase_underscores": "Minúsculas con guiones bajos",
+      "inference_language": "Idioma de Inferencia",
+      "titlecase_hyphens": "Mayúsculas y minúsculas con guiones",
+      "lowercase_hyphens": "Minúsculas con guiones",
+      "lowercase_spaces": "Minúsculas con espacios",
+      "inference_language_description": "Elige el idioma para las etiquetas y los resúmenes generados por la IA.",
+      "tag_style_description": "Elige cómo quieres que se formateen las etiquetas que se generan automáticamente.",
+      "auto_tagging_description": "Genera etiquetas automáticamente para tus marcadores usando IA.",
+      "camelCase": "camelCase",
+      "auto_summarization": "Resumen automático",
+      "no_preference": "Sin preferencia",
+      "curated_tags": "Etiquetas seleccionadas",
+      "curated_tags_description": "Opcionalmente, restringe el etiquetado de la IA para que solo use etiquetas de esta lista. Cuando no se seleccionan etiquetas, la IA genera etiquetas libremente.",
+      "curated_tags_updated": "¡Etiquetas seleccionadas actualizadas correctamente!",
+      "curated_tags_update_failed": "Error al actualizar las etiquetas seleccionadas"
+    },
+    "user_settings": "Ajustes de usuario",
+    "feeds": {
+      "add_a_subscription": "Añadir subscripción",
+      "rss_subscriptions": "Subscripciones RSS",
+      "feed_enabled": "Fuente RSS activada",
+      "feed_disabled": "Fuente RSS desactivada"
+    },
+    "import": {
+      "import_export": "Importar / Exportar",
+      "import_export_bookmarks": "Importar / Exportar marcadores",
+      "import_bookmarks_from_pocket_export": "Importar marcadores desde exportación de Pocket",
+      "import_bookmarks_from_matter_export": "Importar marcadores desde exportación de Matter",
+      "export_links_and_notes": "Exportar links y notas",
+      "imported_bookmarks": "Marcadores importados",
+      "import_bookmarks_from_karakeep_export": "Importar marcadores desde exportación de Karakeep",
+      "import_bookmarks_from_html_file": "Importar marcadores desde archivo HTML",
+      "import_bookmarks_from_omnivore_export": "Importar marcadores desde exportación de Omnivore",
+      "import_bookmarks_from_linkwarden_export": "Importar marcadores desde Linkwarden",
+      "import_bookmarks_from_tab_session_manager_export": "Importar marcadores desde Tab Session Manager",
+      "import_bookmarks_from_mymind_export": "Importar marcadores desde la exportación de mymind",
+      "import_bookmarks_from_instapaper_export": "Importar marcadores desde la exportación de Instapaper",
+      "import_bookmarks_from_readwise_reader_export": "Importar marcadores desde la exportación de Readwise Reader",
+      "import_bookmarks_from_onetab_export": "Importar marcadores desde la exportación de OneTab"
+    },
+    "api_keys": {
+      "api_keys": "Claves APIs",
+      "new_api_key": "Crear clave API",
+      "new_api_key_desc": "Dale a la clave API un nombre único",
+      "key_success": "Clave creada correctamente",
+      "key_success_please_copy": "Copia la clave y guárdala en un lugar seguro. Una vez cierres este mensaje, no podrás volver a verla.",
+      "regenerate_api_key": "Regenerar clave API",
+      "key_regenerated": "La clave se ha regenerado correctamente",
+      "key_regenerated_please_copy": "Copia la nueva clave y guárdala en un lugar seguro. La clave antigua ha sido revocada y ya no funcionará.",
+      "regenerate_warning": "¿Estás seguro de que quieres regenerar la clave API \"{{name}}\"?",
+      "regenerate_confirmation": "Esto revocará la clave actual y generará una nueva. Cualquier aplicación que utilice la clave actual dejará de funcionar.",
+      "scopes": {
+        "scopes": "Ámbitos",
+        "choose_at_least_one": "Elige al menos un ámbito o selecciona acceso completo.",
+        "scope_details": "Detalles del ámbito {{scope}}",
+        "access": {
+          "none": "Ninguno",
+          "read": "Lectura",
+          "readwrite": "Lectura/escritura"
+        },
+        "full_access": {
+          "label": "Acceso completo",
+          "description": "Acceder a todas las operaciones de la API compatibles."
+        },
+        "limited_scopes": {
+          "label": "Ámbitos limitados",
+          "description": "Elige los tipos de recursos a los que puede acceder esta clave."
+        },
+        "resources": {
+          "assets": {
+            "label": "Recursos",
+            "description": "Acceder a archivos y otros contenidos de marcadores almacenados."
+          },
+          "backups": {
+            "label": "Copias de seguridad",
+            "description": "Gestionar copias de seguridad de la cuenta."
+          },
+          "bookmarks": {
+            "label": "Marcadores",
+            "description": "Acceder y gestionar marcadores."
+          },
+          "feeds": {
+            "label": "Feeds",
+            "description": "Gestionar feeds RSS y datos de feeds relacionados."
+          },
+          "highlights": {
+            "label": "Destacados",
+            "description": "Gestionar fragmentos destacados de marcadores guardados."
+          },
+          "lists": {
+            "label": "Listas",
+            "description": "Administre las listas y la pertenencia a ellas."
+          },
+          "prompts": {
+            "label": "Prompts",
+            "description": "Administre la configuración de prompts de IA guardados."
+          },
+          "rules": {
+            "label": "Reglas",
+            "description": "Acceda a las reglas de automatización."
+          },
+          "tags": {
+            "label": "Etiquetas",
+            "description": "Acceda a las etiquetas y modifíquelas."
+          },
+          "users": {
+            "label": "Cuenta de usuario",
+            "description": "Acceda al perfil y a la configuración de la cuenta."
+          },
+          "webhooks": {
+            "label": "Webhooks",
+            "description": "Acceda a la configuración de webhooks."
+          },
+          "subscriptions": {
+            "label": "Suscripciones",
+            "description": "Acceda a la gestión de suscripciones."
+          },
+          "importSessions": {
+            "label": "Sesiones de importación",
+            "description": "Acceda a las sesiones de importación."
+          }
+        },
+        "admin_resources": {
+          "bookmarks": {
+            "label": "Admin: marcadores",
+            "description": "Acceda a las herramientas administrativas de marcadores."
+          },
+          "jobs": {
+            "label": "Admin: tareas",
+            "description": "Acceda a los controles de tareas en segundo plano."
+          },
+          "system": {
+            "label": "Admin: sistema",
+            "description": "Acceda al estado y diagnósticos del sistema."
+          },
+          "users": {
+            "label": "Admin: usuarios",
+            "description": "Acceda a la gestión administrativa de usuarios."
+          },
+          "subscriptions": {
+            "label": "Administrador: suscripciones",
+            "description": "Gestionar los niveles de suscripción de los usuarios."
+          }
+        }
+      }
+    },
+    "broken_links": {
+      "broken_links": "Enlaces rotos",
+      "last_crawled_at": "Última vez indexado:",
+      "crawling_status": "Estado de la indexación",
+      "crawling_failed": "Indexado fallido",
+      "description": "Revisa los enlaces que no se pudieron obtener, vuelve a intentarlo o elimina marcadores antiguos.",
+      "category_all": "Requieren atención",
+      "category_blocked": "Acceso bloqueado",
+      "category_missing": "No encontrado",
+      "category_errors": "Otros errores",
+      "category_all_hint": "Enlaces para revisar",
+      "category_blocked_hint": "Restringido o con límite de solicitudes",
+      "category_missing_hint": "Página inexistente o eliminada",
+      "category_errors_hint": "Errores del servidor o de indexación",
+      "blocked_hint": "Una solicitud bloqueada no siempre significa que el enlace esté roto. Algunos sitios restringen el acceso automatizado. Abre la página original para comprobarlo antes de eliminarlo.",
+      "search": "Buscar por título o URL…",
+      "sort_recent": "Comprobados recientemente",
+      "sort_oldest": "Comprobación más antigua primero",
+      "sort_domain": "Sitio web A–Z",
+      "result_count_one": "{{count}} enlace para revisar",
+      "result_count_other": "{{count}} enlaces para revisar",
+      "result_count_many": "{{count}} enlaces para revisar",
+      "retry_selected": "Reintentar seleccionados",
+      "empty": "No se encontraron enlaces rotos",
+      "empty_description": "Ninguno de tus enlaces guardados tiene actualmente un error de indexación.",
+      "select_visible": "Seleccionar todos los enlaces visibles",
+      "bookmark": "Marcador",
+      "issue": "Problema",
+      "never_crawled": "Sin fecha de indexación",
+      "issue_blocked": "Acceso bloqueado",
+      "issue_missing": "No encontrado",
+      "issue_server": "Error del servidor",
+      "issue_http": "Error HTTP",
+      "issue_failed": "Indexado fallido",
+      "issue_blocked_hint": "El sitio restringió esta solicitud",
+      "issue_missing_hint": "Es posible que la página se haya eliminado",
+      "issue_server_hint": "El sitio no pudo completar la solicitud",
+      "issue_http_hint": "El sitio devolvió una respuesta inesperada",
+      "issue_failed_hint": "No se registró ninguna respuesta correcta",
+      "queued": "En cola",
+      "queued_count_one": "{{count}} enlace en cola para volver a indexarse.",
+      "queued_count_other": "{{count}} enlaces en cola para volver a indexarse.",
+      "deleted_count_one": "{{count}} marcador eliminado.",
+      "deleted_count_other": "{{count}} marcadores eliminados.",
+      "deleted_count_many": "{{count}} marcadores eliminados.",
+      "queued_count_many": "{{count}} enlaces en cola para volver a indexarse.",
+      "action_failed": "Fallaron {{count}} de {{total}}.",
+      "delete_title_one": "¿Eliminar {{count}} marcador?",
+      "delete_title_other": "¿Eliminar {{count}} marcadores?",
+      "delete_title_many": "¿Eliminar {{count}} marcadores?",
+      "delete_description": "Esto elimina permanentemente los marcadores seleccionados y sus archivos guardados, destacados y notas. Esta acción no se puede deshacer."
+    },
+    "manage_assets": {
+      "asset_type": "Tipo de activo",
+      "manage_assets": "Administrar activos",
+      "no_assets": "Aún no tienes ningún activo.",
+      "bookmark_link": "Enlace del marcador",
+      "asset_link": "Enlace del activo",
+      "delete_asset": "Borrar activo",
+      "delete_asset_confirmation": "¿Estás seguro de que quieres eliminar este activo?"
+    },
+    "webhooks": {
+      "events": {
+        "crawled": "Rastreado",
+        "created": "Creado",
+        "edited": "Editado",
+        "title": "Eventos"
+      },
+      "auth_token": "Token de autenticación",
+      "add_auth_token": "Añadir token de autenticación",
+      "edit_auth_token": "Editar token de autenticación",
+      "create_webhook": "Crear webhook",
+      "delete_webhook": "Borrar Webhook",
+      "delete_webhook_confirmation": "¿Estás seguro de que quieres eliminar este webhook?",
+      "edit_webhook": "Editar webhook",
+      "webhook_url": "URL del webhook",
+      "webhooks": "Webhooks",
+      "description": "Puedes usar webhooks para activar acciones cuando se crean, cambian o rastrean marcadores."
+    },
+    "rules": {
+      "rules": "Motor de reglas",
+      "description": "Puedes usar reglas para activar acciones cuando se active un evento.",
+      "rule_name": "Nombre de la regla",
+      "ceate_rule": "Crear regla",
+      "edit_rule": "Editar regla",
+      "save_rule": "Guardar regla",
+      "delete_rule": "Borrar regla",
+      "delete_rule_confirmation": "¿Seguro que quieres borrar esta regla?",
+      "whenever": "Cuando...",
+      "if": "Si...",
+      "enter_rule_name": "Introduce el nombre de la regla",
+      "describe_what_this_rule_does": "Describe lo que hace esta regla",
+      "rule_has_been_created": "¡Se ha creado la regla!",
+      "rule_has_been_updated": "¡La regla se ha actualizado!",
+      "rule_has_been_deleted": "¡Se ha eliminado la regla!",
+      "no_rules_created_yet": "Aún no se han creado reglas",
+      "create_your_first_rule": "Crea tu primera regla para automatizar tu flujo de trabajo",
+      "conditions_types": {
+        "always": "Siempre",
+        "url_contains": "La URL contiene",
+        "imported_from_feed": "Importado desde el feed",
+        "bookmark_type_is": "El tipo de marcador es",
+        "has_tag": "Tiene etiqueta",
+        "is_favourited": "Está marcado como favorito",
+        "is_archived": "Está archivado",
+        "and": "Todo lo siguiente es verdad",
+        "or": "Cualquiera de las siguientes opciones es verdadera",
+        "url_does_not_contain": "La URL no contiene",
+        "title_contains": "El título contiene",
+        "title_does_not_contain": "El título no contiene",
+        "bookmark_source_is": "La fuente del marcador es"
+      },
+      "actions_types": {
+        "add_tag": "Añadir etiqueta",
+        "remove_tag": "Eliminar etiqueta",
+        "add_to_list": "Añadir a la lista",
+        "remove_from_list": "Eliminar de la lista",
+        "download_full_page_archive": "Descargar archivo de página completa",
+        "favourite_bookmark": "Marcar marcador como favorito",
+        "archive_bookmark": "Archivar marcador"
+      },
+      "events_types": {
+        "bookmark_added": "Se ha añadido un marcador",
+        "tag_added": "Esta etiqueta se añade a un marcador",
+        "tag_removed": "Esta etiqueta se elimina de un marcador",
+        "added_to_list": "Se añade un marcador a esta lista",
+        "removed_from_list": "Se elimina un marcador de esta lista",
+        "favourited": "Un marcador se ha marcado como favorito",
+        "archived": "Se archiva un marcador"
+      }
+    },
+    "stats": {
+      "usage_statistics": "Estadísticas de uso",
+      "insights_description": "Información sobre tus hábitos de marcación y colección",
+      "failed_to_load": "No se pudieron cargar las estadísticas",
+      "overview": {
+        "total_bookmarks": "Total de marcadores",
+        "all_saved_items": "Todos los elementos guardados",
+        "favorites": "Favoritos",
+        "starred_bookmarks": "Marcadores destacados",
+        "archived": "Archivado",
+        "archived_items": "Elementos archivados",
+        "tags": "Etiquetas",
+        "unique_tags_created": "Etiquetas únicas creadas",
+        "lists": "Listas",
+        "bookmark_collections": "Colecciones de marcadores",
+        "highlights": "Resaltados",
+        "text_highlights": "Resaltados de texto",
+        "storage_used": "Almacenamiento utilizado",
+        "total_asset_storage": "Almacenamiento total de activos",
+        "this_month": "Este mes",
+        "bookmarks_added": "Marcadores añadidos"
+      },
+      "bookmark_types": {
+        "title": "Tipos de marcadores",
+        "links": "Enlaces",
+        "text_notes": "Notas de texto",
+        "assets": "Activos"
+      },
+      "recent_activity": {
+        "title": "Actividad reciente",
+        "this_week": "Esta semana",
+        "this_month": "Este mes",
+        "this_year": "Este año"
+      },
+      "top_domains": {
+        "title": "Dominios principales",
+        "no_domains_found": "No se encontraron dominios"
+      },
+      "most_used_tags": {
+        "title": "Etiquetas más usadas",
+        "no_tags_found": "No se encontraron etiquetas"
+      },
+      "activity_patterns": {
+        "activity_by_hour": "Actividad por hora",
+        "activity_by_day": "Actividad por día",
+        "busiest_around": "Mayor actividad hacia las {{hour}}"
+      },
+      "storage_breakdown": {
+        "title": "Desglose del almacenamiento"
+      },
+      "bookmark_sources": {
+        "title": "Fuentes de marcadores",
+        "empty": "Sin datos de origen disponibles"
+      }
+    },
+    "subscription": {
+      "subscription": "Suscripción",
+      "manage_subscription": "Gestiona tu suscripción e información de facturación",
+      "current_plan": "Plan actual",
+      "billing_period": "Periodo de facturación",
+      "paid_plan": "Plan de pago",
+      "unlock_bigger_quota": "Desbloquea una cuota mayor y apoya el proyecto",
+      "subscribe_now": "Suscríbete ahora",
+      "manage_billing": "Gestionar la facturación",
+      "subscription_canceled": "Tu suscripción ha sido cancelada y finalizará el {{date}}. Puedes volver a suscribirte en cualquier momento.",
+      "usage_quotas": "Uso y cuotas",
+      "track_usage": "Haz un seguimiento de tu uso actual en comparación con los límites de tu plan",
+      "total_bookmarks_saved": "Total de marcadores guardados",
+      "assets_file_storage": "Almacenamiento de archivos y recursos",
+      "unlimited_usage": "Uso ilimitado",
+      "quota_limit_reached": "Límite de cuota alcanzado",
+      "approaching_quota_limit": "Te estás acercando al límite de la cuota",
+      "loading_usage": "Cargando información de uso...",
+      "free": "Gratis",
+      "paid": "De pago",
+      "monthly": "Mensual",
+      "yearly": "Anual",
+      "per_month": "mes",
+      "per_year": "año",
+      "excl_vat": "excl. IVA",
+      "yearly_savings": "Ahorra {{percent}}%",
+      "pro_feature_bookmarks": "50.000 marcadores",
+      "pro_feature_storage": "50GB de almacenamiento",
+      "pro_feature_ai_tagging": "Etiquetado con IA",
+      "pro_feature_full_text_search": "Búsqueda de texto completo"
+    },
+    "import_sessions": {
+      "title": "Importar sesiones",
+      "description": "Consulta y gestiona tus sesiones de importación masiva. Las sesiones se crean automáticamente al importar marcadores.",
+      "load_error": "No se pudieron cargar las sesiones de importación",
+      "no_sessions": "Aún no hay sesiones de importación",
+      "no_sessions_detail": "Las sesiones de importación aparecerán aquí automáticamente cuando importes marcadores",
+      "created_at": "Creado {{time}}",
+      "progress": "Progreso",
+      "status": {
+        "pending": "Pendiente",
+        "completed": "Completado",
+        "failed": "Falló",
+        "staging": "En preparación",
+        "running": "En curso",
+        "paused": "En pausa",
+        "archived": "Archivada"
+      },
+      "badges": {
+        "pending": "{{count}} pendientes",
+        "processing": "{{count}} procesando",
+        "completed": "{{count}} completados",
+        "failed": "{{count}} fallaron"
+      },
+      "imported_to": "Importado a:",
+      "view_list": "Ver lista",
+      "delete_dialog_title": "Borrar sesión de importación",
+      "delete_dialog_description": "¿Seguro que quieres borrar \"{{name}}\"? Esta acción no se puede deshacer. Los marcadores en sí no se borrarán.",
+      "delete_session": "Eliminar sesión",
+      "pause_session": "Pausar",
+      "resume_session": "Reanudar",
+      "view_details": "Ver detalles",
+      "detail": {
+        "page_title": "Ver detalles de la sesión de importación",
+        "back_to_import": "Volver a la importación",
+        "filter_all": "Todo",
+        "filter_accepted": "Aceptado",
+        "filter_rejected": "Rechazado",
+        "filter_duplicates": "Duplicados",
+        "filter_pending": "Pendientes",
+        "table_title": "Título/URL",
+        "table_type": "Tipo",
+        "table_result": "Resultado",
+        "table_reason": "Razón",
+        "table_bookmark": "Marcador",
+        "result_accepted": "Aceptado",
+        "result_rejected": "Rechazado",
+        "result_skipped_duplicate": "Duplicar",
+        "result_pending": "Pendientes",
+        "result_processing": "Procesando",
+        "no_results": "No se encontraron resultados para este filtro.",
+        "view_bookmark": "Ver marcador",
+        "load_more": "Cargar más",
+        "no_title": "Sin título",
+        "archived_results": "Los resultados de marcadores individuales ya no se conservan para las sesiones de importación archivadas."
+      },
+      "finalize_dialog_title": "Finalizar sesión de importación",
+      "finalize_dialog_description": "¿Poner \"{{name}}\" en la cola para el procesamiento en segundo plano? Los marcadores preparados comenzarán a importarse.",
+      "finalize_staging": "Finalizar"
+    },
+    "backups": {
+      "backups": "Copias de seguridad",
+      "page_title": "Copias de seguridad",
+      "page_description": "Crea y gestiona automáticamente copias de seguridad de tus marcadores. Las copias de seguridad se comprimen y se almacenan de forma segura.",
+      "configuration": {
+        "title": "Configuración de la copia de seguridad",
+        "enable_automatic_backups": "Activar copias de seguridad automáticas",
+        "enable_automatic_backups_description": "Crear automáticamente copias de seguridad de tus marcadores",
+        "backup_frequency": "Frecuencia de copia de seguridad",
+        "backup_frequency_description": "Con qué frecuencia se deben crear copias de seguridad",
+        "retention_period": "Período de retención (días)",
+        "retention_period_description": "Cuántos días conservar las copias de seguridad antes de eliminarlas",
+        "frequency": {
+          "daily": "Diariamente",
+          "weekly": "Semanalmente"
+        },
+        "select_frequency": "Seleccionar frecuencia",
+        "save_settings": "Guardar ajustes"
+      },
+      "list": {
+        "title": "Tus copias de seguridad",
+        "create_backup_now": "Crear copia de seguridad ahora",
+        "no_backups": "Aún no tienes ninguna copia de seguridad. Activa las copias de seguridad automáticas o crea una manualmente.",
+        "table": {
+          "created_at": "Creado en",
+          "bookmarks": "Marcadores",
+          "size": "Tamaño",
+          "status": "Estado",
+          "actions": "Acciones"
+        },
+        "status": {
+          "success": "Éxito",
+          "failed": "Fallido",
+          "pending": "Pendiente"
+        },
+        "actions": {
+          "download_backup": "Descargar copia de seguridad",
+          "delete_backup": "Borrar copia de seguridad"
+        }
+      },
+      "dialogs": {
+        "delete_backup_title": "¿Borrar copia de seguridad?",
+        "delete_backup_description": "¿Seguro que quieres borrar esta copia de seguridad? Esta acción no se puede deshacer."
+      },
+      "toasts": {
+        "backup_queued": "¡Se ha puesto en cola el trabajo de copia de seguridad! Se procesará en breve.",
+        "backup_deleted": "¡Se ha borrado la copia de seguridad!"
+      }
+    },
+    "maintenance": {
+      "clear_filters": "Borrar filtros",
+      "clear_selection": "Borrar selección",
+      "delete_selected": "Eliminar seleccionados",
+      "try_again": "Reintentar",
+      "sort": "Orden",
+      "no_matches": "No se encontraron coincidencias",
+      "adjust_filters": "Prueba con otra búsqueda o borra los filtros.",
+      "select_item": "Seleccionar {{name}}",
+      "selected": "{{count}} seleccionados",
+      "showing": "Mostrando {{shown}} de {{total}}",
+      "load_more": "Cargar más"
+    }
+  },
+  "actions": {
+    "unselect_all": "Deseleccionar todo",
+    "select_all": "Seleccionar todo",
+    "change_layout": "Cambiar diseño",
+    "unfavorite": "Quitar de favoritos",
+    "delete": "Eliminar",
+    "refresh": "Actualizar",
+    "edit_tags": "Editar etiquetas",
+    "remove_from_list": "Eliminar de la lista",
+    "save": "Guardar",
+    "add": "Añadir",
+    "edit": "Editar",
+    "create": "Crear",
+    "fetch_now": "Actualizar ahora",
+    "summarize_with_ai": "Resumir con IA",
+    "edit_title": "Cambiar título",
+    "sign_out": "Cerrar sesión",
+    "close": "Cerrar",
+    "merge": "Unir",
+    "ignore": "Ignorar",
+    "archive": "Archivar",
+    "unarchive": "Desarchivar",
+    "favorite": "Marcar como favorito",
+    "add_to_list": "Añadir a la lista",
+    "select": "Seleccionar",
+    "copy_link": "Copiar enlace",
+    "cancel": "Cancelar",
+    "apply_all": "Aplicar todo",
+    "recrawl": "Volver a crawlear",
+    "close_bulk_edit": "Cerrar editor en masa",
+    "bulk_edit": "Editar en masa",
+    "manage_lists": "Administrar listas",
+    "sort": {
+      "title": "Ordenar",
+      "newest_first": "Más recientes primero",
+      "oldest_first": "Más antiguos primero",
+      "relevant_first": "Más relevantes primero"
+    },
+    "open_editor": "Abrir editor",
+    "toggle_show_archived": "Mostrar archivados",
+    "confirm": "Confirmar",
+    "regenerate": "Regenerar",
+    "load_more": "Cargar más",
+    "edit_notes": "Editar notas",
+    "preserve_as_pdf": "Conservar como PDF",
+    "preserve_video": "Conservar vídeo",
+    "offline_copies": "Copias sin conexión",
+    "preserve_offline_archive": "Preservar archivo sin conexión",
+    "download_full_page_archive_file": "Descargar archivo",
+    "download_pdf_file": "Descargar archivo PDF",
+    "remove": "Eliminar",
+    "more": "Más",
+    "replace_banner": "Reemplazar el banner",
+    "add_banner": "Añadir un banner",
+    "download": "Descargar",
+    "rename": "Cambiar nombre"
+  },
+  "layouts": {
+    "compact": "Compacto",
+    "masonry": "Mampostería",
+    "grid": "Rejilla",
+    "list": "Lista"
+  },
+  "admin": {
+    "admin_settings": "Ajustes de Administrador",
+    "server_stats": {
+      "server_stats": "Estadísticas del servidor",
+      "total_users": "Número de usuarios",
+      "total_bookmarks": "Número de marcadores",
+      "server_version": "Versión del servidor"
+    },
+    "background_jobs": {
+      "background_jobs": "Operaciones en segundo plano",
+      "jobs": {
+        "crawler": {
+          "title": "Trabajos de rastreador",
+          "description": "Rastreo web y extracción de contenido de URLs"
+        },
+        "inference": {
+          "title": "Trabajos de inferencia",
+          "description": "Etiquetado y resumen de contenido impulsado por IA"
+        },
+        "indexing": {
+          "title": "Trabajos de indexación",
+          "description": "Actualizaciones del índice de búsqueda"
+        },
+        "asset_preprocessing": {
+          "title": "Trabajos de preprocesamiento de activos",
+          "description": "Preprocesamiento de imágenes y documentos (capturas de pantalla, extracción de texto, etc.)"
+        },
+        "video": {
+          "title": "Trabajos de descarga de video",
+          "description": "Extracción y descarga de video"
+        },
+        "webhook": {
+          "title": "Trabajos de webhook",
+          "description": "Notificaciones de webhook externas"
+        },
+        "feed": {
+          "title": "Trabajos de fuentes RSS",
+          "description": "Procesamiento de feeds RSS y actualizaciones de contenido"
+        },
+        "admin_maintenance": {
+          "title": "Tareas de mantenimiento del administrador",
+          "description": "Limpieza administrativa y mantenimiento de activos"
+        },
+        "embeddings": {
+          "title": "Trabajos de incrustación",
+          "description": "Generación de incrustaciones vectoriales para marcadores"
+        }
+      },
+      "monitor_and_manage": "Monitoriza y gestiona las colas de trabajos en segundo plano y las tareas de procesamiento del sistema",
+      "active": "Activo",
+      "available_actions": "Acciones disponibles",
+      "status": {
+        "title": "Entendiendo los estados del trabajo",
+        "queued": {
+          "title": "En cola",
+          "description": "Tareas esperando en la cola para ser procesadas. Comenzarán automáticamente cuando haya recursos disponibles."
+        },
+        "unprocessed": {
+          "title": "Sin procesar",
+          "description": "Marcadores que aún no han sido procesados. Lo más probable es que ya estén en cola para ser procesados, si no, es posible que tengas que volver a ponerlos en cola manualmente."
+        },
+        "failed": {
+          "title": "Fallidos",
+          "description": "Marcadores que encontraron errores durante el procesamiento. Estos pueden necesitar atención manual."
+        }
+      },
+      "actions": {
+        "recrawl_failed_links_only": "Volver a rastrear solo los enlaces fallidos",
+        "recrawl_all_links": "Volver a rastrear todos los enlaces",
+        "without_inference": "Sin inferencia",
+        "regenerate_ai_tags_for_failed_bookmarks_only": "Regenerar etiquetas de IA solo para los marcadores fallidos",
+        "regenerate_ai_tags_for_all_bookmarks": "Regenerar etiquetas de IA para todos los marcadores",
+        "regenerate_ai_summaries_for_failed_bookmarks_only": "Regenerar resúmenes de IA solo para los marcadores fallidos",
+        "regenerate_ai_summaries_for_all_bookmarks": "Regenerar resúmenes de IA para todos los marcadores",
+        "reindex_all_bookmarks": "Volver a indexar todos los marcadores",
+        "clean_assets": "Limpiar los activos colgantes y volver a sincronizar los metadatos",
+        "reprocess_assets_fix_mode": "Volver a procesar los activos no procesados",
+        "migrate_large_link_html_content": "Mueve contenido HTML grande en línea a los recursos",
+        "recrawl_pending_links_only": "Volver a rastrear solo los enlaces pendientes",
+        "regenerate_ai_tags_for_pending_bookmarks_only": "Volver a generar etiquetas de IA solo para los marcadores pendientes",
+        "regenerate_ai_summaries_for_pending_bookmarks_only": "Volver a generar resúmenes de IA solo para los marcadores pendientes",
+        "regenerate_embeddings_for_pending_bookmarks_only": "Regenerar incrustaciones solo para marcadores pendientes",
+        "regenerate_embeddings_for_failed_bookmarks_only": "Regenerar incrustaciones solo para marcadores fallidos",
+        "regenerate_embeddings_for_all_bookmarks": "Regenerar incrustaciones para todos los marcadores"
+      }
+    },
+    "users_list": {
+      "users_list": "Lista de usuarios",
+      "create_user": "Crear usuario",
+      "change_role": "Cambiar rol",
+      "reset_password": "Reiniciar contraseña",
+      "delete_user": "Borrar usuario",
+      "num_bookmarks": "Núm. Marcadores",
+      "asset_sizes": "Espacio utilizado",
+      "local_user": "Usuario local",
+      "confirm_password": "Confirmar contraseña",
+      "delete_user_confirm_description": "¿Seguro que quieres eliminar al usuario \"{{name}}\"?",
+      "unlimited": "Ilimitado"
+    },
+    "service_connections": {
+      "title": "Conexiones de servicio",
+      "description": "Supervisar el estado y la conectividad de las dependencias del sistema externo",
+      "search_engine": "Motor de búsqueda",
+      "browser": "Navegador",
+      "queue_system": "Sistema de colas",
+      "status": {
+        "not_configured": "No configurado",
+        "connected": "Conectado",
+        "disconnected": "Desconectado"
+      },
+      "vector_store": "Almacén de vectores"
+    },
+    "admin_tools": {
+      "admin_tools": "Herramientas de administración",
+      "bookmark_debugger": "Depurador de marcadores",
+      "bookmark_id": "ID del marcador",
+      "bookmark_id_placeholder": "Introducir ID del marcador",
+      "lookup": "Búsqueda",
+      "debug_info": "Información de depuración",
+      "basic_info": "Información básica",
+      "status": "Estado",
+      "content": "Contenido",
+      "html_preview": "Vista previa HTML (primeros 1000 caracteres)",
+      "summary": "Resumen",
+      "url": "URL",
+      "source_url": "URL de origen",
+      "asset_type": "Tipo de activo",
+      "file_name": "Nombre del archivo",
+      "owner_user_id": "ID de usuario propietario",
+      "tagging_status": "Estado de etiquetado",
+      "summarization_status": "Estado de resumen",
+      "crawl_status": "Estado de rastreo",
+      "crawl_status_code": "Código de estado HTTP",
+      "crawled_at": "Rastreado en",
+      "recrawl": "Volver a rastrear",
+      "reindex": "Volver a indexar",
+      "retag": "Volver a etiquetar",
+      "resummarize": "Volver a resumir",
+      "bookmark_not_found": "Marcador no encontrado",
+      "action_success": "Acción completada con éxito",
+      "action_failed": "Error en la acción",
+      "recrawl_queued": "Se ha puesto en cola el trabajo de volver a rastrear",
+      "reindex_queued": "Se ha puesto en cola el trabajo de volver a indexar",
+      "retag_queued": "Se ha puesto en cola el trabajo de volver a etiquetar",
+      "resummarize_queued": "Se ha puesto en cola el trabajo de volver a resumir",
+      "view": "Ver",
+      "fetch_error": "Error al obtener el marcador",
+      "embedding_status": "Estado de incrustación",
+      "regenerate_embedding": "Regenerar incrustación",
+      "regenerate_embedding_queued": "El trabajo de regeneración de incrustaciones se ha puesto en cola"
+    }
+  },
+  "options": {
+    "theme": "Tema",
+    "dark_mode": "Modo oscuro",
+    "light_mode": "Modo claro",
+    "system_mode": "Modo del sistema",
+    "apps_extensions": "Apps y extensiones",
+    "documentation": "Documentación",
+    "follow_us_on_x": "Síguenos en X"
+  },
+  "lists": {
+    "all_lists": "Todas las listas",
+    "favourites": "Favoritos",
+    "new_list": "Nueva lista",
+    "new_nested_list": "Nueva lista anidada",
+    "list_type": "Tipo de lista",
+    "manual_list": "Lista manual",
+    "edit_list": "Editar lista",
+    "parent_list": "Lista de padres",
+    "no_parent": "Sin padre",
+    "smart_list": "Lista inteligente",
+    "search_query": "Consulta de búsqueda",
+    "search_query_help": "Más información sobre el lenguaje de consulta de búsqueda.",
+    "merge_list": "Fusionar lista",
+    "destination_list": "Lista de destino",
+    "no_destination": "Sin destino",
+    "description": "Descripción (opcional)",
+    "delete_after_merge": "Eliminar la lista original después de la fusión",
+    "public_list": {
+      "share_link": "Compartir enlace",
+      "title": "Lista pública",
+      "description": "Permitir que otros vean esta lista"
+    },
+    "share_list": "Compartir lista",
+    "rss": {
+      "title": "Fuente RSS",
+      "description": "Activar una fuente RSS para esta lista",
+      "feed_url": "URL de la fuente RSS"
+    },
+    "delete_list": {
+      "title": "Eliminar lista",
+      "description": "Eliminar una lista no elimina ningún marcador de esa lista.",
+      "delete_children": "Eliminar listas secundarias (de forma recursiva)",
+      "delete_children_description": "Si no está marcado, todas las listas secundarias directas se convertirán en listas raíz"
+    },
+    "shared": "Compartido",
+    "collaborators": {
+      "manage": "Gestionar colaboradores",
+      "view": "Ver colaboradores",
+      "collaborators": "Colaboradores",
+      "add": "Añadir colaborador",
+      "current": "Colaboradores actuales",
+      "enter_email": "Introduce la dirección de correo electrónico",
+      "please_enter_email": "Por favor, introduce una dirección de correo electrónico",
+      "added_successfully": "Colaborador añadido correctamente",
+      "failed_to_add": "No se pudo añadir el colaborador",
+      "removed": "Colaborador eliminado",
+      "failed_to_remove": "No se pudo eliminar el colaborador",
+      "role_updated": "Rol actualizado",
+      "failed_to_update_role": "No se pudo actualizar el rol",
+      "viewer": "Visor",
+      "editor": "Editor",
+      "owner": "Propietario",
+      "viewer_description": "Puede ver los marcadores en la lista",
+      "editor_description": "Puede añadir y eliminar marcadores",
+      "no_collaborators": "Aún no hay colaboradores. ¡Añade a alguien para empezar a colaborar!",
+      "no_collaborators_readonly": "No hay colaboradores en esta lista.",
+      "people_with_access": "Personas que tienen acceso a esta lista",
+      "add_or_remove": "Añade o elimina personas que puedan acceder a esta lista",
+      "invitation_sent": "Invitación enviada correctamente",
+      "invitation_revoked": "Invitación revocada",
+      "failed_to_revoke": "No se pudo revocar la invitación",
+      "pending": "Pendiente",
+      "revoke": "Revocar",
+      "declined": "Rechazada"
+    },
+    "leave_list": {
+      "title": "Salir de la lista",
+      "confirm_message": "¿Estás seguro de que quieres salir de {{icon}} {{name}}?",
+      "warning": "Ya no podrás ver ni acceder a los marcadores de esta lista. El propietario de la lista puede volverte a añadir si es necesario.",
+      "action": "Salir de la lista",
+      "success": "Has abandonado \"{{icon}} {{name}}\""
+    },
+    "invitations": {
+      "pending": "Invitaciones pendientes",
+      "description": "Revisa y responde a las invitaciones de colaboración en la lista",
+      "invited_by": "Invitado por",
+      "accept": "Aceptar",
+      "decline": "Rechazar",
+      "accepted": "Invitación aceptada",
+      "declined": "Invitación rechazada",
+      "failed_to_accept": "No se pudo aceptar la invitación",
+      "failed_to_decline": "No se pudo rechazar la invitación"
+    },
+    "shared_lists": "Listas compartidas",
+    "privacy": {
+      "public": "Público",
+      "shared": "Compartido",
+      "private": "Privado"
+    },
+    "summary_list_one": "{{count}} lista",
+    "summary_list_many": "{{count}} listas",
+    "summary_list_other": "{{count}} listas",
+    "summary_bookmark_one": "{{count}} marcador",
+    "summary_bookmark_many": "{{count}} marcadores",
+    "summary_bookmark_other": "{{count}} marcadores",
+    "items_count_one": "{{count}} elemento",
+    "items_count_many": "{{count}} elementos",
+    "items_count_other": "{{count}} elementos"
+  },
+  "tags": {
+    "all_tags": "Todas las etiquetas",
+    "your_tags": "Tus etiquetas",
+    "your_tags_info": "Etiquetas que has añadido al menos una vez",
+    "ai_tags": "Etiquetas IA",
+    "ai_tags_info": "Etiquetas solo usadas automáticamente (por IA)",
+    "drag_and_drop_merging": "Fusionar arrastrando y soltando",
+    "sort_by_name": "Ordenar por nombre",
+    "delete_all_unused_tags": "Eliminar etiquetas no usadas",
+    "unused_tags": "Etiquetas sin usar",
+    "unused_tags_info": "Etiquetas sin marcadores",
+    "drag_and_drop_merging_info": "Arrastra y suelta etiquetas sobre otras para unirlas",
+    "create_tag": "Crear etiqueta",
+    "create_tag_description": "Crea una nueva etiqueta sin adjuntarla a ningún marcador",
+    "tag_name": "Nombre de la etiqueta",
+    "enter_tag_name": "Introduce el nombre de la etiqueta",
+    "sort_by_usage": "Ordenar por uso",
+    "sort_by_relevance": "Ordenar por relevancia",
+    "no_custom_tags": "Aún no hay etiquetas personalizadas",
+    "no_ai_tags": "Aún no hay etiquetas de IA",
+    "no_unused_tags": "No tienes ninguna etiqueta sin usar",
+    "no_unused_tags_match_your_search": "Ninguna etiqueta sin usar coincide con tu búsqueda",
+    "no_tags_match_your_search": "Ninguna etiqueta coincide con tu búsqueda",
+    "search_placeholder": "Buscar etiquetas...",
+    "search_or_create_placeholder": "Buscar o crear etiquetas...",
+    "rename_tag": "Cambiar nombre de etiqueta",
+    "items_count": "{{count}} elementos",
+    "attached_by_you": "{{count}} por ti",
+    "attached_by_ai": "{{count}} por IA"
+  },
+  "preview": {
+    "view_original": "Ver original",
+    "cached_content": "Contenido cacheado",
+    "reader_view": "Vista de lectura",
+    "page_overview": "Resumen de la página",
+    "try_reader_view": "Probar la vista de lectura",
+    "archived_page": "Página archivada",
+    "tabs": {
+      "content": "Contenido",
+      "details": "Detalles"
+    },
+    "archive_info": "Es posible que los archivos no se rendericen correctamente en línea si requieren Javascript. Para obtener mejores resultados, <1>descárgalo y ábrelo en tu navegador</1>.",
+    "fetch_error_title": "Contenido no disponible",
+    "fetch_error_description": "No pudimos obtener el contenido de este enlace. Es posible que la página esté protegida, requiera autenticación o no esté disponible temporalmente.",
+    "crawling_in_progress": "Obteniendo contenido de la página…",
+    "continue_reading": "Continúa donde lo dejaste",
+    "continue_reading_percent": "Continúa donde lo dejaste ({{percent}}%)",
+    "continue_button": "Continuar"
+  },
+  "editor": {
+    "multiple_urls_dialog_title": "¿Importar URLs como marcadores independientes?",
+    "multiple_urls_dialog_desc": "La entrada contiene varias URLs en líneas independientes. ¿Quieres importarlas como distintos marcadores?",
+    "import_as_text": "Importar como marcador de texto",
+    "import_as_separate_bookmarks": "Importar como distintos marcadores",
+    "placeholder": "Pega un enlace o una imagen, escribe una nota o arrastra y suelta una imagen aquí…",
+    "new_item": "NUEVA ENTRADA",
+    "text_toolbar": {
+      "undo": "Deshacer",
+      "redo": "Rehacer",
+      "bold": "Negrita",
+      "underline": "Subrayado",
+      "strikethrough": "Tachado",
+      "code": "Código",
+      "align_left": "Alinear a la izquierda",
+      "align_center": "Alinear al centro",
+      "align_right": "Alinear a la derecha",
+      "markdown_shortcuts": {
+        "label": "Atajos de Markdown",
+        "heading": {
+          "label": "Cabecera",
+          "example": "# H1, ## H2, ### H3"
+        },
+        "bold": {
+          "label": "Negrita",
+          "example": "**texto** o CTRL+B"
+        },
+        "italic": {
+          "label": "Cursiva",
+          "example": "*texto*, _texto_ o CTRL+I"
+        },
+        "ordered_list": {
+          "example": "1. Texto",
+          "label": "Lista ordenada"
+        },
+        "unordered_list": {
+          "example": "- Texto",
+          "label": "Lista sin orden"
+        },
+        "inline_code": {
+          "example": "`Texto`",
+          "label": "Código en línea"
+        },
+        "block_code": {
+          "label": "Código en bloque",
+          "example": "``` + espacio"
+        },
+        "blockquote": {
+          "label": "Cita en Bloque",
+          "example": "> Texto"
+        }
+      },
+      "italic": "Cursiva",
+      "highlight": "Destacar"
+    },
+    "disabled_submissions": "Entradas deshabilitadas",
+    "placeholder_v2": "Pega un enlace, escribe una nota o suelta una imagen…"
+  },
+  "toasts": {
+    "bookmarks": {
+      "updated": "¡El marcador se ha actualizado!",
+      "refetch": "¡Se ha solicitado la actualización!",
+      "deleted": "¡El marcador se ha eliminado!",
+      "full_page_archive": "Se ha pedido un Archivo de Página Completa",
+      "delete_from_list": "El marcador se ha borrado de la lista",
+      "clipboard_copied": "¡El enlace se ha copiado en tu portapapeles!",
+      "preserve_pdf": "Se ha activado la preservación en PDF",
+      "preserve_video": "Se ha activado la descarga del vídeo",
+      "update_banner": "¡El banner ha sido actualizado!",
+      "uploading_banner": "Subiendo banner..."
+    },
+    "lists": {
+      "created": "¡Enlace creado correctamente!",
+      "updated": "¡La lista ha sido actualizada!",
+      "merged": "¡La lista se ha fusionado!",
+      "deleted": "¡La lista ha sido eliminada!"
+    },
+    "tags": {
+      "created": "¡Se ha creado la etiqueta!",
+      "failed_to_create": "No se ha podido crear la etiqueta",
+      "updated": "¡La etiqueta ha sido actualizada!",
+      "failed_to_update": "Error al actualizar la etiqueta"
+    }
+  },
+  "cleanups": {
+    "cleanups": "Limpiezas",
+    "duplicate_tags": {
+      "title": "Etiquetas duplicadas",
+      "merge_all_suggestions": "¿Fusionar todas las sugerencias?"
+    }
+  },
+  "highlights": {
+    "no_highlights": "Aún no tienes nada destacado."
+  },
+  "search": {
+    "full_text_search": "Búsqueda de texto completo",
+    "created_on_or_after": "Creado en o después de",
+    "not_created_on_or_after": "No creado en o después de",
+    "created_on_or_before": "Creado en o antes de",
+    "url_does_not_contain": "La URL no contiene",
+    "is_in_list": "Está en la lista",
+    "or": "O",
+    "is_in_any_list": "Está en cualquier lista",
+    "is_not_in_any_list": "No está en ninguna lista",
+    "is_not_in_list": "No está en la lista",
+    "has_tag": "Tiene etiqueta",
+    "does_not_have_tag": "No tiene etiqueta",
+    "type_is_not": "El tipo no es",
+    "is_favorited": "Está en favoritos",
+    "is_not_favorited": "No está en favoritos",
+    "is_archived": "Está archivado",
+    "has_no_tags": "No tiene etiqueta",
+    "has_notes": "Tiene notas",
+    "has_no_notes": "No tiene notas",
+    "has_highlights": "Tiene destacados",
+    "has_no_highlights": "No tiene destacados",
+    "not_created_on_or_before": "No creado en o antes de",
+    "url_contains": "La URL contiene",
+    "and": "Y",
+    "is_not_archived": "No está archivado",
+    "has_any_tag": "Tiene alguna etiqueta",
+    "type_is": "El tipo es",
+    "is_from_feed": "Es de un feed RSS",
+    "is_not_from_feed": "No es de un feed RSS",
+    "week_s": " Semana(s)",
+    "created_within": "Creado dentro de",
+    "created_earlier_than": "Creado antes de",
+    "day_s": " Día(s)",
+    "month_s": " Mes(es)",
+    "year_s": " Año(s)",
+    "day_s_ago": " Hace día(s)",
+    "week_s_ago": " Hace semana(s)",
+    "month_s_ago": " Hace mes(es)",
+    "year_s_ago": " Hace año(s)",
+    "history": "Búsquedas recientes",
+    "title_contains": "El título contiene",
+    "title_does_not_contain": "El título no contiene",
+    "is_broken_link": "Tiene enlace roto",
+    "tags": "Etiquetas",
+    "no_suggestions": "Sin sugerencias",
+    "filters": "Filtros",
+    "is_not_broken_link": "Tiene enlace que funciona",
+    "lists": "Listas",
+    "feeds": "Feeds",
+    "is_from_source": "El origen es",
+    "is_not_from_source": "El origen no es",
+    "mode_label": "Modo de búsqueda",
+    "mode_label_description": "Elija cómo Karakeep encuentra marcadores coincidentes.",
+    "mode_keyword": "Palabra clave",
+    "mode_keyword_description": "Busca coincidencias exactas en títulos, contenido, URL y notas. Casi instantáneo.",
+    "mode_hybrid": "Híbrido",
+    "mode_hybrid_description": "Combina coincidencias exactas con ideas relacionadas para obtener el mejor equilibrio. Más lento que la búsqueda por palabra clave.",
+    "mode_semantic": "Semántico",
+    "mode_semantic_description": "Encuentra marcadores conceptualmente similares, incluso sin palabras compartidas. Más lento que la búsqueda por palabra clave.",
+    "keyword_placeholder": "Buscar títulos, texto, URL y etiquetas…",
+    "hybrid_placeholder": "Buscar por palabras o por significado…",
+    "semantic_placeholder": "Describa lo que recuerda…"
+  },
+  "dialogs": {
+    "bookmarks": {
+      "delete_confirmation_description": "¿Seguro que quieres borrar este marcador?",
+      "delete_confirmation_title": "¿Borrar marcador?",
+      "bulk_delete_confirmation_description": "¿Estás seguro de que quieres eliminar {{count}} marcadores?"
+    }
+  },
+  "bookmark_editor": {
+    "title": "Editar marcador",
+    "subtitle": "Realiza cambios en los detalles del marcador. Haz clic en guardar cuando hayas terminado.",
+    "author": "Autor",
+    "publisher": "Editor",
+    "date_published": "Fecha de publicación",
+    "pick_a_date": "Elige una fecha",
+    "save_changes": "Guardar cambios",
+    "extracted_content": "Contenido extraído"
+  },
+  "banners": {
+    "no_bookmarks": {
+      "title": "Aún no hay marcadores",
+      "description": "Guarda artículos, enlaces y páginas interesantes para acceder a ellos rápidamente más tarde."
+    }
+  },
+  "view_options": {
+    "title": "Ver opciones",
+    "layout": "Disposición",
+    "columns": "Columnas",
+    "display_options": "Opciones de visualización",
+    "show_note_previews": "Mostrar notas",
+    "show_tags": "Mostrar etiquetas",
+    "show_title": "Mostrar título",
+    "image_options": "Opciones de imagen",
+    "image_fit_cover": "Portada (rellenar)",
+    "image_fit_contain": "Contener (ajustar)"
+  },
+  "version": {
+    "new_release_available": "Nuevas notas de la versión disponibles",
+    "whats_new_title": "¿Qué hay de nuevo en la v{{version}}?",
+    "release_notes_description": "Aquí están las últimas actualizaciones obtenidas de las notas de la versión de GitHub.",
+    "loading_release_notes": "Cargando las notas de la versión…",
+    "unable_to_load_release_notes": "No se pueden cargar las notas de la versión ahora mismo. Por favor, inténtalo de nuevo más tarde.",
+    "no_release_notes": "No se publicaron notas de la versión para esta versión.",
+    "release_notes_synced": "Las notas de la versión están sincronizadas desde GitHub.",
+    "view_on_github": "Ver en GitHub"
+  },
+  "wrapped": {
+    "title": "Tu resumen de {{year}}",
+    "subtitle": "Un año en Karakeep",
+    "banner": {
+      "title": "¡Tu resumen de 2025 está listo!",
+      "description": "Mira tu año en marcadores",
+      "view_now": "Ver ahora"
+    },
+    "button": "Resumen de 2025",
+    "loading": "Cargando tu resumen...",
+    "failed_to_load": "No se pudieron cargar tus estadísticas del resumen",
+    "sections": {
+      "total_saves": {
+        "prefix": "Guardaste",
+        "suffix": "artículos este año",
+        "suffix_singular": "artículo este año"
+      },
+      "first_bookmark": {
+        "title": "Tu aventura ha comenzado",
+        "description": "Primer guardado de {{year}}:"
+      },
+      "top_domains": "Tus sitios principales",
+      "top_tags": "Tus etiquetas destacadas",
+      "monthly_activity": "Tu año en guardados",
+      "most_active_day": "Tu día más activo",
+      "peak_times": {
+        "title": "Cuándo guardas",
+        "peak_hour": "Hora de mayor actividad",
+        "peak_day": "Día de mayor actividad"
+      },
+      "how_you_save": "Cómo guardas",
+      "what_you_saved": "Qué has guardado",
+      "summary": {
+        "favorites": "Favoritos",
+        "tags_created": "Etiquetas creadas",
+        "highlights": "Puntos destacados"
+      },
+      "types": {
+        "links": "Enlaces",
+        "notes": "Notas",
+        "assets": "Activos"
+      }
+    },
+    "footer": "Hecho con Karakeep",
+    "share": "Compartir",
+    "download": "Descargar",
+    "close": "Cerrar",
+    "generating": "Generando..."
+  },
+  "keyboard_shortcuts": {
+    "title": "Atajos de teclado",
+    "sections": {
+      "navigation": "Navegación",
+      "actions": "Acciones",
+      "selection": "Selección",
+      "other": "Otros"
+    },
+    "move_left": "Mover a la izquierda",
+    "move_down": "Mover abajo",
+    "move_up": "Mover arriba",
+    "move_right": "Mover a la derecha",
+    "open_bookmark": "Abrir marcador",
+    "clear_focus": "Limpiar foco / salir de edición masiva",
+    "toggle_favorite": "Alternar favorito",
+    "toggle_archive": "Archivar / Desarchivar",
+    "delete_bookmark": "Eliminar marcador",
+    "toggle_selection": "Alternar selección",
+    "select_all": "Seleccionar todo",
+    "deselect_all": "Deseleccionar todo",
+    "show_help": "Mostrar atajos de teclado",
+    "focus_search_alt": "Enfocar búsqueda"
+  }
+}

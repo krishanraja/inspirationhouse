@@ -1,0 +1,17 @@
+/// <reference types="vitest" />
+
+import tsconfigPaths from "vite-tsconfig-paths";
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  plugins: [tsconfigPaths({ skip: (dir) => dir === ".claude" })],
+  test: {
+    globalSetup: [
+      "./queue-restate/src/tests/setup/startContainers.ts",
+      "./ratelimit-redis/src/tests/setup/startContainers.ts",
+    ],
+    teardownTimeout: 30000,
+    include: ["**/src/tests/**/*.test.ts"],
+    testTimeout: 60000,
+  },
+});

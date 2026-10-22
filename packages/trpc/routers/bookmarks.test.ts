@@ -1,0 +1,1861 @@
+import { eq } from "drizzle-orm";
+import { assert, beforeEach, describe, expect, test, vi } from "vitest";
+
+import {
+  bookmarkLinks,
+  bookmarks,
+  rssFeedImportsTable,
+  tagsOnBookmarks,
+  users,
+} from "@karakeep/db/schema";
+import * as sharedServer from "@karakeep/shared-server";
+import serverConfig from "@karakeep/shared/config";
+import { BookmarkTypes } from "@karakeep/shared/types/bookmarks";
+
+import { WebhooksService } from "../models/webhooks.service";
+import type { APICallerType, CustomTestContext } from "../testUtils";
+import {
+  defaultBeforeEach,
+  getApiKeyCallerForPlainKey,
+  getTestQueueMocks,
+} from "../testUtils";
+
+vi.mock("@karakeep/shared-server", async (original) => {
+  const mod = (await original()) as typeof import("@karakeep/shared-server");
+  return {
+    ...mod,
+    LinkCrawlerQueue: {
+      enqueue: vi.fn(),
+    },
+    LowPriorityCrawlerQueue: {
+      enqueue: vi.fn(),
+    },
+    OpenAIQueue: {
+      enqueue: vi.fn(),
+    },
+    EmbeddingsQueue: {
+      enqueue: vi.fn(),
+    },
+    SearchIndexingQueue: {
+      enqueue: vi.fn(),
+    },
+    RuleEngineQueue: {
+      enqueue: vi.fn(),
+    },
+    triggerSearchReindex: vi.fn(),
+  };
+});
+
+beforeEach<CustomTestContext>(defaultBeforeEach(true));
+
+describe("Bookmark Routes", () => {
+  async function createTestTag(api: APICallerType, tagName: string) {
+    const result = await api.tags.create({ name: tagName });
+    return result.id;
+  }
+
+  async function createTestFeed(
+    api: APICallerType,
+    feedName: string,
+    feedUrl: string,
+  ) {
+    // Create an RSS feed and return its ID
+    const feed = await api.feeds.create({
+      name: feedName,
+      url: feedUrl,
+      enabled: true,
+    });
+    return feed.id;
+  }
+
+  test<CustomTestContext>("create bookmark", async ({ apiCallers }) => {
+    const api = apiCallers[0].bookmarks;
+    const bookmark = await api.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    const res = await api.getBookmark({ bookmarkId: bookmark.id });
+    assert(res.content.type == BookmarkTypes.LINK);
+    expect(res.content.url).toEqual("https://google.com");
+    expect(res.favourited).toEqual(false);
+    expect(res.archived).toEqual(false);
+    expect(res.content.type).toEqual(BookmarkTypes.LINK);
+  });
+
+  test<CustomTestContext>("get readable bookmark content as markdown or text", async ({
+    apiCallers,
+    db,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+    const bookmark = await api.createBookmark({
+      url: "https://example.com/article",
+      type: BookmarkTypes.LINK,
+    });
+    await db
+      .update(bookmarkLinks)
+      .set({
+        htmlContent:
+          '<h1>Hello</h1><p>Read <a href="https://example.com/docs">the docs</a>.</p>',
+      })
+      .where(eq(bookmarkLinks.id, bookmark.id));
+
+    const markdown = await api.getBookmarkReadableContent({
+      bookmarkId: bookmark.id,
+      format: "markdown",
+    });
+    expect(markdown).toMatchObject({
+      bookmarkId: bookmark.id,
+      bookmarkType: BookmarkTypes.LINK,
+      format: "markdown",
+      content: "# Hello\n\nRead [the docs](https://example.com/docs).",
+    });
+    expect(markdown.contentVersion).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+    const text = await api.getBookmarkReadableContent({
+      bookmarkId: bookmark.id,
+      format: "text",
+    });
+    expect(text.content).toContain("HELLO");
+    expect(text.content).toContain("Read the docs");
+    expect(text.contentVersion).not.toBe(markdown.contentVersion);
+  });
+
+  test<CustomTestContext>("api key with read scope can read bookmarks but not write", async ({
+    apiCallers,
+    db,
+  }) => {
+    await apiCallers[0].bookmarks.createBookmark({
+      type: BookmarkTypes.TEXT,
+      text: "seed bookmark",
+    });
+
+    const scopedKey = await apiCallers[0].apiKeys.create({
+      name: "Read Bookmark Key",
+      scopes: ["bookmarks:read", "users:read"],
+    });
+    const apiKeyCaller = await getApiKeyCallerForPlainKey(db, scopedKey.key);
+
+    const bookmarks = await apiKeyCaller.bookmarks.getBookmarks({});
+    expect(bookmarks.bookmarks).toHaveLength(1);
+    await expect(
+      apiKeyCaller.bookmarks.getBookmarkReadableContent({
+        bookmarkId: bookmarks.bookmarks[0].id,
+        format: "markdown",
+      }),
+    ).resolves.toMatchObject({ content: "seed bookmark" });
+
+    await expect(() =>
+      apiKeyCaller.bookmarks.createBookmark({
+        type: BookmarkTypes.TEXT,
+        text: "should fail",
+      }),
+    ).rejects.toThrow(/FORBIDDEN|missing required scope/i);
+  });
+
+  test<CustomTestContext>("api key with readwrite scope can read bookmarks", async ({
+    apiCallers,
+    db,
+  }) => {
+    await apiCallers[0].bookmarks.createBookmark({
+      type: BookmarkTypes.TEXT,
+      text: "seed bookmark",
+    });
+
+    const scopedKey = await apiCallers[0].apiKeys.create({
+      name: "Readwrite Bookmark Key",
+      scopes: ["bookmarks:readwrite"],
+    });
+    const apiKeyCaller = await getApiKeyCallerForPlainKey(db, scopedKey.key);
+
+    const bookmarks = await apiKeyCaller.bookmarks.getBookmarks({});
+    expect(bookmarks.bookmarks).toHaveLength(1);
+  });
+
+  test<CustomTestContext>("fullaccess API key can write bookmarks", async ({
+    apiCallers,
+    db,
+  }) => {
+    const fullAccessKey = await apiCallers[0].apiKeys.create({
+      name: "Full Access Bookmark Key",
+    });
+    const apiKeyCaller = await getApiKeyCallerForPlainKey(
+      db,
+      fullAccessKey.key,
+    );
+
+    const created = await apiKeyCaller.bookmarks.createBookmark({
+      type: BookmarkTypes.TEXT,
+      text: "allowed",
+    });
+
+    expect(created.content.type).toBe(BookmarkTypes.TEXT);
+  });
+
+  test<CustomTestContext>("delete bookmark", async ({ apiCallers }) => {
+    const api = apiCallers[0].bookmarks;
+
+    // Create the bookmark
+    const bookmark = await api.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    // It should exist
+    await api.getBookmark({ bookmarkId: bookmark.id });
+
+    // Delete it
+    await api.deleteBookmark({ bookmarkId: bookmark.id });
+
+    // It shouldn't be there anymore
+    await expect(() =>
+      api.getBookmark({ bookmarkId: bookmark.id }),
+    ).rejects.toThrow(/Bookmark not found/);
+  });
+
+  test<CustomTestContext>("update bookmark", async ({ apiCallers }) => {
+    const api = apiCallers[0].bookmarks;
+
+    // Create the bookmark
+    const bookmark = await api.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    await api.updateBookmark({
+      bookmarkId: bookmark.id,
+      archived: true,
+      favourited: true,
+    });
+
+    let res = await api.getBookmark({ bookmarkId: bookmark.id });
+    expect(res.archived).toBeTruthy();
+    expect(res.favourited).toBeTruthy();
+
+    // Update other common fields
+    const newDate = new Date(Date.now() - 1000 * 60 * 60 * 24); // Yesterday
+    newDate.setMilliseconds(0);
+    await api.updateBookmark({
+      bookmarkId: bookmark.id,
+      title: "New Title",
+      note: "Test Note",
+      summary: "Test Summary",
+      createdAt: newDate,
+    });
+
+    res = await api.getBookmark({ bookmarkId: bookmark.id });
+    expect(res.title).toEqual("New Title");
+    expect(res.note).toEqual("Test Note");
+    expect(res.summary).toEqual("Test Summary");
+    expect(res.createdAt).toEqual(newDate);
+
+    // Update link-specific fields
+    const linkUpdateDate = new Date(Date.now() - 1000 * 60 * 60 * 48); // 2 days ago
+    linkUpdateDate.setMilliseconds(0);
+    await api.updateBookmark({
+      bookmarkId: bookmark.id,
+      url: "https://new-google.com",
+      description: "New Description",
+      author: "New Author",
+      publisher: "New Publisher",
+      datePublished: linkUpdateDate,
+      dateModified: linkUpdateDate,
+    });
+
+    res = await api.getBookmark({ bookmarkId: bookmark.id });
+    assert(res.content.type === BookmarkTypes.LINK);
+    expect(res.content.url).toEqual("https://new-google.com");
+    expect(res.content.description).toEqual("New Description");
+    expect(res.content.author).toEqual("New Author");
+    expect(res.content.publisher).toEqual("New Publisher");
+    expect(res.content.datePublished).toEqual(linkUpdateDate);
+    expect(res.content.dateModified).toEqual(linkUpdateDate);
+  });
+
+  test<CustomTestContext>("update bookmark - non-link type error", async ({
+    apiCallers,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+
+    // Create a TEXT bookmark
+    const bookmark = await api.createBookmark({
+      text: "Initial text",
+      type: BookmarkTypes.TEXT,
+    });
+
+    // Attempt to update link-specific fields
+    await expect(() =>
+      api.updateBookmark({
+        bookmarkId: bookmark.id,
+        url: "https://should-fail.com", // Link-specific field
+      }),
+    ).rejects.toThrow(
+      /Attempting to set link attributes for non-link type bookmark/,
+    );
+  });
+
+  test<CustomTestContext>("list bookmarks", async ({ apiCallers, db }) => {
+    const api = apiCallers[0].bookmarks;
+    const emptyBookmarks = await api.getBookmarks({});
+    expect(emptyBookmarks.bookmarks.length).toEqual(0);
+
+    const bookmark1 = await api.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    const bookmark2 = await api.createBookmark({
+      url: "https://google2.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    {
+      const bookmarks = await api.getBookmarks({});
+      expect(bookmarks.bookmarks.length).toEqual(2);
+    }
+
+    // Archive and favourite bookmark1
+    await api.updateBookmark({
+      bookmarkId: bookmark1.id,
+      archived: true,
+      favourited: true,
+    });
+
+    {
+      const bookmarks = await api.getBookmarks({ archived: false });
+      expect(bookmarks.bookmarks.length).toEqual(1);
+      expect(bookmarks.bookmarks[0].id).toEqual(bookmark2.id);
+    }
+
+    {
+      const bookmarks = await api.getBookmarks({ favourited: true });
+      expect(bookmarks.bookmarks.length).toEqual(1);
+      expect(bookmarks.bookmarks[0].id).toEqual(bookmark1.id);
+    }
+
+    {
+      const bookmarks = await api.getBookmarks({ archived: true });
+      expect(bookmarks.bookmarks.length).toEqual(1);
+      expect(bookmarks.bookmarks[0].id).toEqual(bookmark1.id);
+    }
+
+    // Test tagId filter
+    {
+      const tagId = await createTestTag(apiCallers[0], "testTag");
+      await api.updateTags({
+        bookmarkId: bookmark1.id,
+        attach: [{ tagId }],
+        detach: [],
+      });
+      const tagResult = await api.getBookmarks({ tagId });
+      expect(tagResult.bookmarks.length).toBeGreaterThan(0);
+      expect(
+        tagResult.bookmarks.some((b) => b.id === bookmark1.id),
+      ).toBeTruthy();
+    }
+
+    // Test rssFeedId filter
+    {
+      const feedId = await createTestFeed(
+        apiCallers[0],
+        "Test Feed",
+        "https://rss-feed.com",
+      );
+      const rssBookmark = await api.createBookmark({
+        url: "https://rss-feed.com",
+        type: BookmarkTypes.LINK,
+      });
+      await db.insert(rssFeedImportsTable).values([
+        {
+          rssFeedId: feedId,
+          entryId: "entry-id",
+          bookmarkId: rssBookmark.id,
+        },
+      ]);
+      const rssResult = await api.getBookmarks({ rssFeedId: feedId });
+      expect(rssResult.bookmarks.length).toBeGreaterThan(0);
+      expect(
+        rssResult.bookmarks.some((b) => b.id === rssBookmark.id),
+      ).toBeTruthy();
+    }
+
+    // Test listId filter
+    {
+      const list = await apiCallers[0].lists.create({
+        name: "Test List",
+        type: "manual",
+        icon: "😂",
+      });
+      await apiCallers[0].lists.addToList({
+        listId: list.id,
+        bookmarkId: bookmark1.id,
+      });
+      const listResult = await api.getBookmarks({ listId: list.id });
+      expect(listResult.bookmarks.length).toBeGreaterThan(0);
+      expect(
+        listResult.bookmarks.some((b) => b.id === bookmark1.id),
+      ).toBeTruthy();
+    }
+  });
+
+  test<CustomTestContext>("update tags", async ({ apiCallers }) => {
+    const api = apiCallers[0].bookmarks;
+    const createdBookmark = await api.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    await api.updateTags({
+      bookmarkId: createdBookmark.id,
+      attach: [
+        { tagName: "tag1" },
+        { tagName: "tag2" },
+        { tagName: "tag3" },
+        { tagName: "tag4" },
+      ],
+      detach: [],
+    });
+
+    let bookmark = await api.getBookmark({ bookmarkId: createdBookmark.id });
+    expect(bookmark.tags.map((t) => t.name).sort()).toEqual([
+      "tag1",
+      "tag2",
+      "tag3",
+      "tag4",
+    ]);
+
+    const tag1Id = bookmark.tags.filter((t) => t.name == "tag1")[0].id;
+
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [{ tagName: "tag5" }],
+      detach: [{ tagId: tag1Id }, { tagName: "tag4" }],
+    });
+
+    bookmark = await api.getBookmark({ bookmarkId: bookmark.id });
+    expect(bookmark.tags.map((t) => t.name).sort()).toEqual([
+      "tag2",
+      "tag3",
+      "tag5",
+    ]);
+
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [{ tagId: tag1Id }, { tagName: "tag4" }],
+      detach: [],
+    });
+    bookmark = await api.getBookmark({ bookmarkId: bookmark.id });
+    expect(bookmark.tags.map((t) => t.name).sort()).toEqual([
+      "tag1",
+      "tag2",
+      "tag3",
+      "tag4",
+      "tag5",
+    ]);
+
+    await expect(() =>
+      api.updateTags({ bookmarkId: bookmark.id, attach: [{}], detach: [] }),
+    ).rejects.toThrow(/You must provide either a tagId or a tagName/);
+    await expect(() =>
+      api.updateTags({ bookmarkId: bookmark.id, attach: [], detach: [{}] }),
+    ).rejects.toThrow(/You must provide either a tagId or a tagName/);
+    await expect(() =>
+      api.updateTags({
+        bookmarkId: bookmark.id,
+        attach: [{ tagName: "" }],
+        detach: [{}],
+      }),
+    ).rejects.toThrow(/You must provide either a tagId or a tagName/);
+  });
+
+  test<CustomTestContext>("update tags - comprehensive edge cases", async ({
+    apiCallers,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+
+    // Create two bookmarks
+    const bookmark1 = await api.createBookmark({
+      url: "https://bookmark1.com",
+      type: BookmarkTypes.LINK,
+    });
+    const bookmark2 = await api.createBookmark({
+      url: "https://bookmark2.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    // Test 1: Attach tags by name to bookmark1 (creates new tags)
+    await api.updateTags({
+      bookmarkId: bookmark1.id,
+      attach: [{ tagName: "existing-tag" }, { tagName: "shared-tag" }],
+      detach: [],
+    });
+
+    let b1 = await api.getBookmark({ bookmarkId: bookmark1.id });
+    expect(b1.tags.map((t) => t.name).sort()).toEqual([
+      "existing-tag",
+      "shared-tag",
+    ]);
+
+    const existingTagId = b1.tags.find((t) => t.name === "existing-tag")!.id;
+    const sharedTagId = b1.tags.find((t) => t.name === "shared-tag")!.id;
+
+    // Test 2: Attach existing tag by ID to bookmark2 (tag already exists in DB from bookmark1)
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [{ tagId: existingTagId }],
+      detach: [],
+    });
+
+    let b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    expect(b2.tags.map((t) => t.name)).toEqual(["existing-tag"]);
+
+    // Test 3: Attach existing tag by NAME to bookmark2 (tag already exists in DB)
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [{ tagName: "shared-tag" }],
+      detach: [],
+    });
+
+    b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    expect(b2.tags.map((t) => t.name).sort()).toEqual([
+      "existing-tag",
+      "shared-tag",
+    ]);
+
+    // Test 4: Re-attaching the same tag (idempotency) - should be no-op
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [{ tagId: existingTagId }],
+      detach: [],
+    });
+
+    b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    expect(b2.tags.map((t) => t.name).sort()).toEqual([
+      "existing-tag",
+      "shared-tag",
+    ]);
+
+    // Test 5: Detach non-existent tag by name (should be no-op)
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [],
+      detach: [{ tagName: "non-existent-tag" }],
+    });
+
+    b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    expect(b2.tags.map((t) => t.name).sort()).toEqual([
+      "existing-tag",
+      "shared-tag",
+    ]);
+
+    // Test 6: Mixed attach/detach with pre-existing tags
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [{ tagName: "new-tag" }, { tagId: sharedTagId }], // sharedTagId already attached
+      detach: [{ tagName: "existing-tag" }],
+    });
+
+    b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    expect(b2.tags.map((t) => t.name).sort()).toEqual([
+      "new-tag",
+      "shared-tag",
+    ]);
+
+    // Test 7: Detach by ID and re-attach by name in same operation
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [{ tagName: "new-tag" }], // Already exists, should be idempotent
+      detach: [{ tagId: sharedTagId }],
+    });
+
+    b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    expect(b2.tags.map((t) => t.name).sort()).toEqual(["new-tag"]);
+
+    // Verify bookmark1 still has its original tags (operations on bookmark2 didn't affect it)
+    b1 = await api.getBookmark({ bookmarkId: bookmark1.id });
+    expect(b1.tags.map((t) => t.name).sort()).toEqual([
+      "existing-tag",
+      "shared-tag",
+    ]);
+
+    // Test 8: Attach same tag multiple times in one operation (deduplication)
+    await api.updateTags({
+      bookmarkId: bookmark1.id,
+      attach: [{ tagName: "duplicate-test" }, { tagName: "duplicate-test" }],
+      detach: [],
+    });
+
+    b1 = await api.getBookmark({ bookmarkId: bookmark1.id });
+    const duplicateTagCount = b1.tags.filter(
+      (t) => t.name === "duplicate-test",
+    ).length;
+    expect(duplicateTagCount).toEqual(1); // Should only be attached once
+  });
+
+  test<CustomTestContext>("update tags no-op does not retrigger indexing or update modifiedAt", async ({
+    apiCallers,
+    db,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+    const triggerSearchReindexMock = vi.mocked(
+      sharedServer.triggerSearchReindex,
+    );
+    triggerSearchReindexMock.mockClear();
+
+    const bookmark = await api.createBookmark({
+      url: "https://bookmark.com",
+      type: BookmarkTypes.LINK,
+    });
+    const tag = await apiCallers[0].tags.create({ name: "stable-tag" });
+    await db.insert(tagsOnBookmarks).values({
+      bookmarkId: bookmark.id,
+      tagId: tag.id,
+      attachedBy: "human",
+    });
+
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [],
+      detach: [{ tagId: tag.id }],
+    });
+
+    const [beforeNoopUpdate] = await db
+      .select({ modifiedAt: bookmarks.modifiedAt })
+      .from(bookmarks)
+      .where(eq(bookmarks.id, bookmark.id));
+    assert(beforeNoopUpdate?.modifiedAt);
+
+    triggerSearchReindexMock.mockClear();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [],
+      detach: [{ tagId: tag.id }],
+    });
+
+    const [afterNoopUpdate] = await db
+      .select({ modifiedAt: bookmarks.modifiedAt })
+      .from(bookmarks)
+      .where(eq(bookmarks.id, bookmark.id));
+    assert(afterNoopUpdate?.modifiedAt);
+
+    expect(triggerSearchReindexMock).not.toHaveBeenCalled();
+    expect(afterNoopUpdate.modifiedAt.getTime()).toEqual(
+      beforeNoopUpdate.modifiedAt.getTime(),
+    );
+  });
+
+  test<CustomTestContext>("updateTags with attachedBy field", async ({
+    apiCallers,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+    const bookmark = await api.createBookmark({
+      url: "https://bookmark.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    // Test 1: Attach tags with different attachedBy values
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [
+        { tagName: "ai-tag", attachedBy: "ai" },
+        { tagName: "human-tag", attachedBy: "human" },
+        { tagName: "default-tag" }, // Should default to "human"
+      ],
+      detach: [],
+    });
+
+    let b = await api.getBookmark({ bookmarkId: bookmark.id });
+    expect(b.tags.length).toEqual(3);
+
+    const aiTag = b.tags.find((t) => t.name === "ai-tag");
+    const humanTag = b.tags.find((t) => t.name === "human-tag");
+    const defaultTag = b.tags.find((t) => t.name === "default-tag");
+
+    expect(aiTag?.attachedBy).toEqual("ai");
+    expect(humanTag?.attachedBy).toEqual("human");
+    expect(defaultTag?.attachedBy).toEqual("human");
+
+    // Test 2: Attach existing tag by ID with different attachedBy
+    // First detach the ai-tag
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [],
+      detach: [{ tagId: aiTag!.id }],
+    });
+
+    // Re-attach the same tag but as human
+    await api.updateTags({
+      bookmarkId: bookmark.id,
+      attach: [{ tagId: aiTag!.id, attachedBy: "human" }],
+      detach: [],
+    });
+
+    b = await api.getBookmark({ bookmarkId: bookmark.id });
+    const reAttachedTag = b.tags.find((t) => t.id === aiTag!.id);
+    expect(reAttachedTag?.attachedBy).toEqual("human");
+
+    // Test 3: Attach existing tag by name with AI attachedBy
+    const bookmark2 = await api.createBookmark({
+      url: "https://bookmark2.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    await api.updateTags({
+      bookmarkId: bookmark2.id,
+      attach: [{ tagName: "ai-tag", attachedBy: "ai" }],
+      detach: [],
+    });
+
+    const b2 = await api.getBookmark({ bookmarkId: bookmark2.id });
+    const aiTagOnB2 = b2.tags.find((t) => t.name === "ai-tag");
+    expect(aiTagOnB2?.attachedBy).toEqual("ai");
+    expect(aiTagOnB2?.id).toEqual(aiTag!.id); // Should be the same tag
+  });
+
+  test<CustomTestContext>("update bookmark text", async ({ apiCallers }) => {
+    const api = apiCallers[0].bookmarks;
+    const createdBookmark = await api.createBookmark({
+      text: "HELLO WORLD",
+      type: BookmarkTypes.TEXT,
+    });
+
+    await api.updateBookmarkText({
+      bookmarkId: createdBookmark.id,
+      text: "WORLD HELLO",
+    });
+
+    const bookmark = await api.getBookmark({ bookmarkId: createdBookmark.id });
+    assert(bookmark.content.type == BookmarkTypes.TEXT);
+    expect(bookmark.content.text).toEqual("WORLD HELLO");
+  });
+
+  test<CustomTestContext>("privacy", async ({ apiCallers }) => {
+    const user1Bookmark = await apiCallers[0].bookmarks.createBookmark({
+      type: BookmarkTypes.LINK,
+      url: "https://google.com",
+    });
+    const user2Bookmark = await apiCallers[1].bookmarks.createBookmark({
+      type: BookmarkTypes.LINK,
+      url: "https://google.com",
+    });
+
+    // All interactions with the wrong user should fail
+    await expect(() =>
+      apiCallers[0].bookmarks.deleteBookmark({ bookmarkId: user2Bookmark.id }),
+    ).rejects.toThrow(/Bookmark not found/);
+    await expect(() =>
+      apiCallers[0].bookmarks.getBookmark({ bookmarkId: user2Bookmark.id }),
+    ).rejects.toThrow(/Bookmark not found/);
+    await expect(() =>
+      apiCallers[0].bookmarks.updateBookmark({ bookmarkId: user2Bookmark.id }),
+    ).rejects.toThrow(/Bookmark not found/);
+    await expect(() =>
+      apiCallers[0].bookmarks.updateTags({
+        bookmarkId: user2Bookmark.id,
+        attach: [],
+        detach: [],
+      }),
+    ).rejects.toThrow(/Bookmark not found/);
+
+    // Get bookmarks should only show the correct one
+    expect(
+      (await apiCallers[0].bookmarks.getBookmarks({})).bookmarks.map(
+        (b) => b.id,
+      ),
+    ).toEqual([user1Bookmark.id]);
+    expect(
+      (await apiCallers[1].bookmarks.getBookmarks({})).bookmarks.map(
+        (b) => b.id,
+      ),
+    ).toEqual([user2Bookmark.id]);
+  });
+
+  test<CustomTestContext>("bookmark links dedup", async ({ apiCallers }) => {
+    // Two users with google in their bookmarks
+    const bookmark1User1 = await apiCallers[0].bookmarks.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+    expect(bookmark1User1.alreadyExists).toEqual(false);
+
+    const bookmark1User2 = await apiCallers[1].bookmarks.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+    expect(bookmark1User2.alreadyExists).toEqual(false);
+
+    // User1 attempting to re-add google. Should return the existing bookmark
+    const bookmark2User1 = await apiCallers[0].bookmarks.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+    expect(bookmark2User1.alreadyExists).toEqual(true);
+    expect(bookmark2User1.id).toEqual(bookmark1User1.id);
+
+    // User2 attempting to re-add google. Should return the existing bookmark
+    const bookmark2User2 = await apiCallers[1].bookmarks.createBookmark({
+      url: "https://google.com",
+      type: BookmarkTypes.LINK,
+    });
+    expect(bookmark2User2.alreadyExists).toEqual(true);
+    expect(bookmark2User2.id).toEqual(bookmark1User2.id);
+
+    // User1 adding google2. Should not return an existing bookmark
+    const bookmark3User1 = await apiCallers[0].bookmarks.createBookmark({
+      url: "https://google2.com",
+      type: BookmarkTypes.LINK,
+    });
+    expect(bookmark3User1.alreadyExists).toEqual(false);
+  });
+
+  test<CustomTestContext>("re-saving a link restores and refreshes the existing bookmark", async ({
+    apiCallers,
+    db,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+    const user = await apiCallers[0].users.whoami();
+    const triggerSearchReindexMock = getTestQueueMocks().triggerSearchReindex;
+    const triggerWebhookSpy = vi
+      .spyOn(WebhooksService.prototype, "triggerWebhook")
+      .mockResolvedValue();
+    const originallySavedAt = new Date("2026-01-01T00:00:00.000Z");
+    const resavedAt = new Date("2026-01-02T00:00:00.000Z");
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(originallySavedAt);
+      const original = await api.createBookmark({
+        url: "https://example.com/resave",
+        type: BookmarkTypes.LINK,
+      });
+      await api.updateBookmark({
+        bookmarkId: original.id,
+        archived: true,
+      });
+
+      const [beforeResave] = await db
+        .select({
+          dbCreatedAt: bookmarks.dbCreatedAt,
+          createdAt: bookmarks.createdAt,
+        })
+        .from(bookmarks)
+        .where(eq(bookmarks.id, original.id));
+      assert(beforeResave);
+
+      triggerSearchReindexMock.mockClear();
+      triggerWebhookSpy.mockClear();
+      vi.setSystemTime(resavedAt);
+
+      const duplicate = await api.createBookmark({
+        url: "https://example.com/resave",
+        type: BookmarkTypes.LINK,
+      });
+
+      expect(duplicate).toMatchObject({
+        id: original.id,
+        alreadyExists: true,
+        archived: false,
+        createdAt: resavedAt,
+        modifiedAt: resavedAt,
+      });
+
+      const [afterResave] = await db
+        .select({
+          dbCreatedAt: bookmarks.dbCreatedAt,
+          createdAt: bookmarks.createdAt,
+          modifiedAt: bookmarks.modifiedAt,
+          archived: bookmarks.archived,
+        })
+        .from(bookmarks)
+        .where(eq(bookmarks.id, original.id));
+      assert(afterResave);
+
+      expect(afterResave).toMatchObject({
+        archived: false,
+        createdAt: resavedAt,
+        modifiedAt: resavedAt,
+      });
+      expect(afterResave.dbCreatedAt).toEqual(beforeResave.dbCreatedAt);
+      expect(triggerSearchReindexMock).toHaveBeenCalledWith(original.id, {
+        groupId: user.id,
+      });
+      expect(triggerWebhookSpy).toHaveBeenCalledWith(
+        original.id,
+        "edited",
+        user.id,
+        {
+          groupId: user.id,
+        },
+      );
+    } finally {
+      triggerWebhookSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test<CustomTestContext>("re-saving a link only overwrites the metadata it was given", async ({
+    apiCallers,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+
+    const original = await api.createBookmark({
+      url: "https://example.com/resave-metadata",
+      type: BookmarkTypes.LINK,
+      title: "Original title",
+      note: "Original note",
+      favourited: true,
+    });
+
+    const bareResave = await api.createBookmark({
+      url: "https://example.com/resave-metadata",
+      type: BookmarkTypes.LINK,
+    });
+    expect(bareResave).toMatchObject({
+      id: original.id,
+      alreadyExists: true,
+      title: "Original title",
+      note: "Original note",
+      favourited: true,
+    });
+
+    const resaveWithMetadata = await api.createBookmark({
+      url: "https://example.com/resave-metadata",
+      type: BookmarkTypes.LINK,
+      title: "New title",
+      favourited: false,
+    });
+    expect(resaveWithMetadata).toMatchObject({
+      id: original.id,
+      alreadyExists: true,
+      title: "New title",
+      note: "Original note",
+      favourited: false,
+    });
+
+    const persisted = await api.getBookmark({ bookmarkId: original.id });
+    expect(persisted).toMatchObject({
+      title: "New title",
+      note: "Original note",
+      favourited: false,
+    });
+  });
+
+  test<CustomTestContext>("re-saving a link from an exempt source stays a no-op", async ({
+    apiCallers,
+    db,
+  }) => {
+    const api = apiCallers[0].bookmarks;
+    const triggerWebhookSpy = vi
+      .spyOn(WebhooksService.prototype, "triggerWebhook")
+      .mockResolvedValue();
+    const originallySavedAt = new Date("2026-01-01T00:00:00.000Z");
+    const resavedAt = new Date("2026-01-02T00:00:00.000Z");
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(originallySavedAt);
+      const original = await api.createBookmark({
+        url: "https://example.com/resave-exempt",
+        type: BookmarkTypes.LINK,
+        source: "rss",
+      });
+      await api.updateBookmark({
+        bookmarkId: original.id,
+        archived: true,
+      });
+
+      triggerWebhookSpy.mockClear();
+      vi.setSystemTime(resavedAt);
+
+      const duplicate = await api.createBookmark({
+        url: "https://example.com/resave-exempt",
+        type: BookmarkTypes.LINK,
+        source: "rss",
+      });
+      expect(duplicate).toMatchObject({
+        id: original.id,
+        alreadyExists: true,
+        archived: true,
+        createdAt: originallySavedAt,
+      });
+
+      const [afterResave] = await db
+        .select({
+          createdAt: bookmarks.createdAt,
+          archived: bookmarks.archived,
+        })
+        .from(bookmarks)
+        .where(eq(bookmarks.id, original.id));
+      assert(afterResave);
+      expect(afterResave).toMatchObject({
+        archived: true,
+        createdAt: originallySavedAt,
+      });
+      expect(triggerWebhookSpy).not.toHaveBeenCalled();
+    } finally {
+      triggerWebhookSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  // Ensure that the pagination returns all the results
+  test<CustomTestContext>("pagination", async ({ apiCallers, db }) => {
+    const user = await apiCallers[0].users.whoami();
+    let now = 100_000;
+
+    const bookmarkWithDate = (date_ms: number) => ({
+      userId: user.id,
+      createdAt: new Date(date_ms),
+      type: BookmarkTypes.TEXT as const,
+    });
+
+    // One normal bookmark
+    const values = [bookmarkWithDate(now)];
+    // 10 with a second in between
+    for (let i = 0; i < 10; i++) {
+      now -= 1000;
+      values.push(bookmarkWithDate(now));
+    }
+    // Another ten but at the same second
+    for (let i = 0; i < 10; i++) {
+      values.push(bookmarkWithDate(now));
+    }
+    // And then another one with a second afterwards
+    for (let i = 0; i < 10; i++) {
+      now -= 1000;
+      values.push(bookmarkWithDate(now));
+    }
+    // In total, we should have 31 bookmarks
+
+    const inserted = await db.insert(bookmarks).values(values).returning();
+
+    const validateWithLimit = async (limit: number) => {
+      const results: string[] = [];
+      let cursor = undefined;
+
+      // To avoid running the test forever
+      let i = 0;
+
+      do {
+        const res = await apiCallers[0].bookmarks.getBookmarks({
+          limit,
+          cursor,
+          useCursorV2: true,
+        });
+        results.push(...res.bookmarks.map((b) => b.id));
+        cursor = res.nextCursor;
+        i++;
+      } while (cursor && i < 100);
+
+      expect(results.sort()).toEqual(inserted.map((b) => b.id).sort());
+    };
+
+    await validateWithLimit(1);
+    await validateWithLimit(2);
+    await validateWithLimit(3);
+    await validateWithLimit(10);
+    await validateWithLimit(100);
+  });
+
+  test<CustomTestContext>("getBookmark", async ({ apiCallers }) => {
+    const api = apiCallers[0].bookmarks;
+    const createdBookmark = await api.createBookmark({
+      url: "https://example.com",
+      type: BookmarkTypes.LINK,
+    });
+
+    // Test successful getBookmark with includeContent false
+    const bookmarkWithoutContent = await api.getBookmark({
+      bookmarkId: createdBookmark.id,
+      includeContent: false,
+    });
+    expect(bookmarkWithoutContent.id).toEqual(createdBookmark.id);
+    expect(bookmarkWithoutContent.content).toBeDefined(); // Content should still be present but might be partial
+    expect(bookmarkWithoutContent.content.type).toEqual(BookmarkTypes.LINK);
+    assert(bookmarkWithoutContent.content.type == BookmarkTypes.LINK);
+    expect(bookmarkWithoutContent.content.url).toEqual("https://example.com");
+
+    // Test successful getBookmark with includeContent true
+    const bookmarkWithContent = await api.getBookmark({
+      bookmarkId: createdBookmark.id,
+      includeContent: true,
+    });
+    expect(bookmarkWithContent.id).toEqual(createdBookmark.id);
+    expect(bookmarkWithContent.content).toBeDefined();
+    expect(bookmarkWithContent.content.type).toEqual(BookmarkTypes.LINK);
+    assert(bookmarkWithContent.content.type == BookmarkTypes.LINK);
+    expect(bookmarkWithContent.content.url).toEqual("https://example.com");
+    // Additional checks if content includes more details, e.g., htmlContent if available
+
+    // Test non-existent bookmark
+    await expect(() =>
+      api.getBookmark({ bookmarkId: "non-existent-id" }),
+    ).rejects.toThrow(/Bookmark not found/);
+  });
+
+  test<CustomTestContext>("getBrokenLinks", async ({ apiCallers, db }) => {
+    const api = apiCallers[0].bookmarks;
+
+    // Create a broken link bookmark (simulate by setting crawlStatus to 'failure')
+    const brokenBookmark = await api.createBookmark({
+      url: "https://broken-link.com",
+      type: BookmarkTypes.LINK,
+      title: "Broken page",
+    });
+    await db
+      .update(bookmarkLinks)
+      .set({ crawlStatus: "failure" })
+      .where(eq(bookmarkLinks.id, brokenBookmark.id));
+
+    const result = await api.getBrokenLinks();
+    expect(result.bookmarks.length).toBeGreaterThan(0);
+    expect(
+      result.bookmarks.some((b) => b.id === brokenBookmark.id),
+    ).toBeTruthy();
+    expect(result.bookmarks[0].url).toEqual("https://broken-link.com");
+    expect(result.bookmarks[0].isCrawlingFailure).toBeTruthy();
+    expect(result.bookmarks[0].title).toBe("Broken page");
+    expect(result.bookmarks[0].isCrawling).toBe(false);
+    expect((await apiCallers[1].bookmarks.getBrokenLinks()).bookmarks).toEqual(
+      [],
+    );
+    await db
+      .update(bookmarkLinks)
+      .set({ crawlStatus: "failure", crawlStatusCode: 403 })
+      .where(eq(bookmarkLinks.id, brokenBookmark.id));
+    await api.recrawlBookmark({ bookmarkId: brokenBookmark.id });
+    expect((await api.getBrokenLinks()).bookmarks[0]).toMatchObject({
+      isCrawling: true,
+      isCrawlingFailure: false,
+      statusCode: 403,
+    });
+
+    // Test with no broken links
+    await db
+      .update(bookmarkLinks)
+      .set({ crawlStatus: "success", crawlStatusCode: 200 })
+      .where(eq(bookmarkLinks.id, brokenBookmark.id));
+    const emptyResult = await api.getBrokenLinks();
+    expect(emptyResult.bookmarks.length).toEqual(0);
+  });
+
+  describe("preserveVideo", () => {
+    test<CustomTestContext>("is rejected when on-demand video downloads are disabled", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const bookmark = await api.createBookmark({
+        url: "https://youtube.com/watch?v=abc",
+        type: BookmarkTypes.LINK,
+      });
+      const enqueueMock = getTestQueueMocks().videoWorkerEnqueue;
+      enqueueMock.mockClear();
+
+      const originalValue = serverConfig.crawler.downloadVideoOnDemand;
+      serverConfig.crawler.downloadVideoOnDemand = false;
+      try {
+        await expect(
+          api.preserveVideo({ bookmarkId: bookmark.id }),
+        ).rejects.toThrow(/disabled/);
+      } finally {
+        serverConfig.crawler.downloadVideoOnDemand = originalValue;
+      }
+      expect(enqueueMock).not.toHaveBeenCalled();
+    });
+
+    test<CustomTestContext>("enqueues an on-demand video download for links", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const bookmark = await api.createBookmark({
+        url: "https://youtube.com/watch?v=abc",
+        type: BookmarkTypes.LINK,
+      });
+      const textBookmark = await api.createBookmark({
+        text: "hello",
+        type: BookmarkTypes.TEXT,
+      });
+      const enqueueMock = getTestQueueMocks().videoWorkerEnqueue;
+      enqueueMock.mockClear();
+
+      const originalValue = serverConfig.crawler.downloadVideoOnDemand;
+      serverConfig.crawler.downloadVideoOnDemand = true;
+      try {
+        await api.preserveVideo({ bookmarkId: bookmark.id });
+        expect(enqueueMock).toHaveBeenCalledWith(
+          {
+            bookmarkId: bookmark.id,
+            url: "https://youtube.com/watch?v=abc",
+            onDemand: true,
+          },
+          expect.objectContaining({ groupId: expect.any(String) }),
+        );
+
+        await expect(
+          api.preserveVideo({ bookmarkId: textBookmark.id }),
+        ).rejects.toThrow(/link bookmarks/);
+
+        // Users can't trigger downloads for bookmarks they don't own
+        await expect(
+          apiCallers[1].bookmarks.preserveVideo({ bookmarkId: bookmark.id }),
+        ).rejects.toThrow();
+      } finally {
+        serverConfig.crawler.downloadVideoOnDemand = originalValue;
+      }
+      expect(enqueueMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Bookmark Quotas", () => {
+    test<CustomTestContext>("create bookmark with no quota (unlimited)", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+
+      // User should be able to create bookmarks without any quota restrictions
+      const bookmark1 = await api.createBookmark({
+        url: "https://example1.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark1.alreadyExists).toEqual(false);
+
+      const bookmark2 = await api.createBookmark({
+        url: "https://example2.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark2.alreadyExists).toEqual(false);
+
+      const bookmark3 = await api.createBookmark({
+        text: "Test text bookmark",
+        type: BookmarkTypes.TEXT,
+      });
+      expect(bookmark3.alreadyExists).toEqual(false);
+    });
+
+    test<CustomTestContext>("create bookmark with quota limit", async ({
+      apiCallers,
+      db,
+    }) => {
+      const user = await apiCallers[0].users.whoami();
+      const api = apiCallers[0].bookmarks;
+
+      // Set quota to 2 bookmarks for this user
+      await db
+        .update(users)
+        .set({ bookmarkQuota: 2 })
+        .where(eq(users.id, user.id));
+
+      // First bookmark should succeed
+      const bookmark1 = await api.createBookmark({
+        url: "https://example1.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark1.alreadyExists).toEqual(false);
+
+      // Second bookmark should succeed
+      const bookmark2 = await api.createBookmark({
+        url: "https://example2.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark2.alreadyExists).toEqual(false);
+
+      // Third bookmark should fail due to quota
+      await expect(() =>
+        api.createBookmark({
+          url: "https://example3.com",
+          type: BookmarkTypes.LINK,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 2 bookmarks./,
+      );
+    });
+
+    test<CustomTestContext>("create bookmark with quota limit - different types", async ({
+      apiCallers,
+      db,
+    }) => {
+      const user = await apiCallers[0].users.whoami();
+      const api = apiCallers[0].bookmarks;
+
+      // Set quota to 2 bookmarks for this user
+      await db
+        .update(users)
+        .set({ bookmarkQuota: 2 })
+        .where(eq(users.id, user.id));
+
+      // Create one link bookmark
+      await api.createBookmark({
+        url: "https://example1.com",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Create one text bookmark
+      await api.createBookmark({
+        text: "Test text content",
+        type: BookmarkTypes.TEXT,
+      });
+
+      // Third bookmark (any type) should fail
+      await expect(() =>
+        api.createBookmark({
+          text: "Another text bookmark",
+          type: BookmarkTypes.TEXT,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 2 bookmarks./,
+      );
+    });
+
+    test<CustomTestContext>("quota enforcement after deletion", async ({
+      apiCallers,
+      db,
+    }) => {
+      const user = await apiCallers[0].users.whoami();
+      const api = apiCallers[0].bookmarks;
+
+      // Set quota to 1 bookmark for this user
+      await db
+        .update(users)
+        .set({ bookmarkQuota: 1 })
+        .where(eq(users.id, user.id));
+
+      // Create first bookmark
+      const bookmark1 = await api.createBookmark({
+        url: "https://example1.com",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Second bookmark should fail
+      await expect(() =>
+        api.createBookmark({
+          url: "https://example2.com",
+          type: BookmarkTypes.LINK,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 1 bookmarks./,
+      );
+
+      // Delete the first bookmark
+      await api.deleteBookmark({ bookmarkId: bookmark1.id });
+
+      // Now should be able to create a new bookmark
+      const bookmark2 = await api.createBookmark({
+        url: "https://example2.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark2.alreadyExists).toEqual(false);
+    });
+
+    test<CustomTestContext>("quota isolation between users", async ({
+      apiCallers,
+      db,
+    }) => {
+      const user1 = await apiCallers[0].users.whoami();
+
+      // Set quota to 1 for user1, unlimited for user2
+      await db
+        .update(users)
+        .set({ bookmarkQuota: 1 })
+        .where(eq(users.id, user1.id));
+
+      // User1 creates one bookmark (reaches quota)
+      await apiCallers[0].bookmarks.createBookmark({
+        url: "https://user1-example.com",
+        type: BookmarkTypes.LINK,
+      });
+
+      // User1 cannot create another bookmark
+      await expect(() =>
+        apiCallers[0].bookmarks.createBookmark({
+          url: "https://user1-example2.com",
+          type: BookmarkTypes.LINK,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 1 bookmarks./,
+      );
+
+      // User2 should be able to create multiple bookmarks (no quota)
+      await apiCallers[1].bookmarks.createBookmark({
+        url: "https://user2-example1.com",
+        type: BookmarkTypes.LINK,
+      });
+
+      await apiCallers[1].bookmarks.createBookmark({
+        url: "https://user2-example2.com",
+        type: BookmarkTypes.LINK,
+      });
+
+      await apiCallers[1].bookmarks.createBookmark({
+        text: "User2 text bookmark",
+        type: BookmarkTypes.TEXT,
+      });
+    });
+
+    test<CustomTestContext>("quota with zero limit", async ({
+      apiCallers,
+      db,
+    }) => {
+      const user = await apiCallers[0].users.whoami();
+      const api = apiCallers[0].bookmarks;
+
+      // Set quota to 0 bookmarks for this user
+      await db
+        .update(users)
+        .set({ bookmarkQuota: 0 })
+        .where(eq(users.id, user.id));
+
+      // Any bookmark creation should fail
+      await expect(() =>
+        api.createBookmark({
+          url: "https://example.com",
+          type: BookmarkTypes.LINK,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 0 bookmarks./,
+      );
+
+      await expect(() =>
+        api.createBookmark({
+          text: "Test text",
+          type: BookmarkTypes.TEXT,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 0 bookmarks./,
+      );
+    });
+
+    test<CustomTestContext>("quota does not affect duplicate link detection", async ({
+      apiCallers,
+      db,
+    }) => {
+      const user = await apiCallers[0].users.whoami();
+      const api = apiCallers[0].bookmarks;
+
+      // Set quota to 1 bookmark for this user
+      await db
+        .update(users)
+        .set({ bookmarkQuota: 1 })
+        .where(eq(users.id, user.id));
+
+      // Create first bookmark
+      const bookmark1 = await api.createBookmark({
+        url: "https://example.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark1.alreadyExists).toEqual(false);
+
+      // Try to create the same URL again - should return existing bookmark, not fail with quota
+      const bookmark2 = await api.createBookmark({
+        url: "https://example.com",
+        type: BookmarkTypes.LINK,
+      });
+      expect(bookmark2.alreadyExists).toEqual(true);
+      expect(bookmark2.id).toEqual(bookmark1.id);
+
+      // But creating a different URL should fail due to quota
+      await expect(() =>
+        api.createBookmark({
+          url: "https://different-example.com",
+          type: BookmarkTypes.LINK,
+        }),
+      ).rejects.toThrow(
+        /Bookmark quota exceeded. You can only have 1 bookmarks./,
+      );
+    });
+  });
+
+  describe("Reading Progress", () => {
+    test<CustomTestContext>("saves and retrieves reading progress", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+
+      // Create a link bookmark
+      const bookmark = await api.createBookmark({
+        url: "https://example.com/article",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Save reading progress
+      await api.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 1500,
+        readingProgressAnchor: "This is the anchor text for verification",
+      });
+
+      // Retrieve and verify progress via getReadingProgress
+      const progress = await api.getReadingProgress({
+        bookmarkId: bookmark.id,
+      });
+      expect(progress.readingProgressOffset).toBe(1500);
+      expect(progress.readingProgressAnchor).toBe(
+        "This is the anchor text for verification",
+      );
+    });
+
+    test<CustomTestContext>("updates existing progress (upsert behavior)", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+
+      const bookmark = await api.createBookmark({
+        url: "https://example.com/article",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Save initial progress
+      await api.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 500,
+        readingProgressAnchor: "First anchor",
+      });
+
+      // Update progress
+      await api.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 2000,
+        readingProgressAnchor: "Updated anchor",
+      });
+
+      // Verify updated values
+      const progress = await api.getReadingProgress({
+        bookmarkId: bookmark.id,
+      });
+      expect(progress.readingProgressOffset).toBe(2000);
+      expect(progress.readingProgressAnchor).toBe("Updated anchor");
+    });
+
+    test<CustomTestContext>("two users have independent progress on same bookmark", async ({
+      apiCallers,
+    }) => {
+      const api1 = apiCallers[0].bookmarks;
+      const api2 = apiCallers[1].bookmarks;
+
+      // User 1 creates a bookmark
+      const bookmark = await api1.createBookmark({
+        url: "https://example.com/shared-article",
+        type: BookmarkTypes.LINK,
+      });
+
+      // User 1 saves progress at position 1000
+      await api1.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 1000,
+        readingProgressAnchor: "User 1 anchor",
+      });
+
+      // User 2 creates the same bookmark (different bookmark ID, same URL)
+      const bookmark2 = await api2.createBookmark({
+        url: "https://example.com/shared-article",
+        type: BookmarkTypes.LINK,
+      });
+
+      // User 2 saves progress at position 3000
+      await api2.updateReadingProgress({
+        bookmarkId: bookmark2.id,
+        readingProgressOffset: 3000,
+        readingProgressAnchor: "User 2 anchor",
+      });
+
+      // Verify each user sees their own progress
+      const progress1 = await api1.getReadingProgress({
+        bookmarkId: bookmark.id,
+      });
+      const progress2 = await api2.getReadingProgress({
+        bookmarkId: bookmark2.id,
+      });
+
+      expect(progress1.readingProgressOffset).toBe(1000);
+      expect(progress1.readingProgressAnchor).toBe("User 1 anchor");
+
+      expect(progress2.readingProgressOffset).toBe(3000);
+      expect(progress2.readingProgressAnchor).toBe("User 2 anchor");
+    });
+
+    test<CustomTestContext>("rejects reading progress on TEXT bookmark", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+
+      const bookmark = await api.createBookmark({
+        text: "Some text content",
+        type: BookmarkTypes.TEXT,
+      });
+
+      await expect(() =>
+        api.updateReadingProgress({
+          bookmarkId: bookmark.id,
+          readingProgressOffset: 100,
+        }),
+      ).rejects.toThrow(
+        /Reading progress can only be saved for link bookmarks/,
+      );
+    });
+
+    test<CustomTestContext>("reading progress is deleted when bookmark is deleted", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+
+      const bookmark = await api.createBookmark({
+        url: "https://example.com/to-delete",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Save reading progress
+      await api.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 500,
+        readingProgressAnchor: "Will be deleted",
+      });
+
+      // Verify progress exists
+      const progress = await api.getReadingProgress({
+        bookmarkId: bookmark.id,
+      });
+      expect(progress.readingProgressOffset).toBe(500);
+
+      // Delete the bookmark
+      await api.deleteBookmark({ bookmarkId: bookmark.id });
+
+      // Verify bookmark is gone (and implicitly, the progress cascade deleted)
+      await expect(() =>
+        api.getBookmark({ bookmarkId: bookmark.id }),
+      ).rejects.toThrow(/Bookmark not found/);
+    });
+
+    test<CustomTestContext>("collaborator can save reading progress on shared bookmark", async ({
+      apiCallers,
+    }) => {
+      const ownerApi = apiCallers[0];
+      const collaboratorApi = apiCallers[1];
+
+      // Owner creates a link bookmark
+      const bookmark = await ownerApi.bookmarks.createBookmark({
+        url: "https://example.com/shared-article",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Owner creates a list and adds the bookmark
+      const list = await ownerApi.lists.create({
+        name: "Shared Reading List",
+        icon: "📚",
+        type: "manual",
+      });
+
+      await ownerApi.lists.addToList({
+        listId: list.id,
+        bookmarkId: bookmark.id,
+      });
+
+      // Share the list with collaborator
+      const collaboratorUser = await collaboratorApi.users.whoami();
+      const { invitationId } = await ownerApi.lists.addCollaborator({
+        listId: list.id,
+        email: collaboratorUser.email!,
+        role: "viewer",
+      });
+      await collaboratorApi.lists.acceptInvitation({ invitationId });
+
+      // Collaborator saves their own reading progress on the shared bookmark
+      await collaboratorApi.bookmarks.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 2500,
+        readingProgressAnchor: "Collaborator's position",
+      });
+
+      // Collaborator retrieves their progress
+      const collaboratorProgress =
+        await collaboratorApi.bookmarks.getReadingProgress({
+          bookmarkId: bookmark.id,
+        });
+      expect(collaboratorProgress.readingProgressOffset).toBe(2500);
+      expect(collaboratorProgress.readingProgressAnchor).toBe(
+        "Collaborator's position",
+      );
+
+      // Owner's progress should be independent (null since owner hasn't set any)
+      const ownerProgress = await ownerApi.bookmarks.getReadingProgress({
+        bookmarkId: bookmark.id,
+      });
+      expect(ownerProgress.readingProgressOffset).toBeNull();
+    });
+
+    test<CustomTestContext>("user without shared access cannot save reading progress", async ({
+      apiCallers,
+    }) => {
+      const ownerApi = apiCallers[0];
+      const unauthorizedApi = apiCallers[1];
+
+      // Owner creates a bookmark (not shared with anyone)
+      const bookmark = await ownerApi.bookmarks.createBookmark({
+        url: "https://example.com/private-article",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Unauthorized user tries to save reading progress
+      await expect(() =>
+        unauthorizedApi.bookmarks.updateReadingProgress({
+          bookmarkId: bookmark.id,
+          readingProgressOffset: 1000,
+        }),
+      ).rejects.toThrow(/Bookmark not found/);
+    });
+
+    test<CustomTestContext>("owner and collaborator have independent reading progress on same bookmark", async ({
+      apiCallers,
+    }) => {
+      const ownerApi = apiCallers[0];
+      const collaboratorApi = apiCallers[1];
+
+      // Owner creates a link bookmark
+      const bookmark = await ownerApi.bookmarks.createBookmark({
+        url: "https://example.com/shared-reading",
+        type: BookmarkTypes.LINK,
+      });
+
+      // Owner creates a list and adds the bookmark
+      const list = await ownerApi.lists.create({
+        name: "Shared List",
+        icon: "📚",
+        type: "manual",
+      });
+
+      await ownerApi.lists.addToList({
+        listId: list.id,
+        bookmarkId: bookmark.id,
+      });
+
+      // Share with collaborator
+      const collaboratorUser = await collaboratorApi.users.whoami();
+      const { invitationId } = await ownerApi.lists.addCollaborator({
+        listId: list.id,
+        email: collaboratorUser.email!,
+        role: "viewer",
+      });
+      await collaboratorApi.lists.acceptInvitation({ invitationId });
+
+      // Owner saves progress at position 1000
+      await ownerApi.bookmarks.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 1000,
+        readingProgressAnchor: "Owner position",
+      });
+
+      // Collaborator saves progress at position 5000
+      await collaboratorApi.bookmarks.updateReadingProgress({
+        bookmarkId: bookmark.id,
+        readingProgressOffset: 5000,
+        readingProgressAnchor: "Collaborator position",
+      });
+
+      // Verify each user sees their own progress
+      const ownerProgress = await ownerApi.bookmarks.getReadingProgress({
+        bookmarkId: bookmark.id,
+      });
+      const collaboratorProgress =
+        await collaboratorApi.bookmarks.getReadingProgress({
+          bookmarkId: bookmark.id,
+        });
+
+      expect(ownerProgress.readingProgressOffset).toBe(1000);
+      expect(ownerProgress.readingProgressAnchor).toBe("Owner position");
+
+      expect(collaboratorProgress.readingProgressOffset).toBe(5000);
+      expect(collaboratorProgress.readingProgressAnchor).toBe(
+        "Collaborator position",
+      );
+    });
+  });
+
+  describe("checkUrl", () => {
+    test<CustomTestContext>("returns null for non-existent URL", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const result = await api.checkUrl({
+        url: "https://nonexistent.example.com",
+      });
+      expect(result.bookmarkId).toBeNull();
+    });
+
+    test<CustomTestContext>("returns bookmark id for exact URL match", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const bookmark = await api.createBookmark({
+        url: "https://example.com/page",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api.checkUrl({
+        url: "https://example.com/page",
+      });
+      expect(result.bookmarkId).toEqual(bookmark.id);
+    });
+
+    test<CustomTestContext>("matches URL ignoring trailing slash", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const bookmark = await api.createBookmark({
+        url: "https://example.com/page/",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api.checkUrl({
+        url: "https://example.com/page",
+      });
+      expect(result.bookmarkId).toEqual(bookmark.id);
+    });
+
+    test<CustomTestContext>("matches URL ignoring hash fragment", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      const bookmark = await api.createBookmark({
+        url: "https://example.com/page",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api.checkUrl({
+        url: "https://example.com/page#section",
+      });
+      expect(result.bookmarkId).toEqual(bookmark.id);
+    });
+
+    test<CustomTestContext>("does not match different URLs on same domain", async ({
+      apiCallers,
+    }) => {
+      const api = apiCallers[0].bookmarks;
+      await api.createBookmark({
+        url: "https://example.com/page-one",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api.checkUrl({
+        url: "https://example.com/page-two",
+      });
+      expect(result.bookmarkId).toBeNull();
+    });
+
+    test<CustomTestContext>("does not return bookmarks from other users", async ({
+      apiCallers,
+    }) => {
+      const api1 = apiCallers[0].bookmarks;
+      const api2 = apiCallers[1].bookmarks;
+
+      await api1.createBookmark({
+        url: "https://example.com/private",
+        type: BookmarkTypes.LINK,
+      });
+
+      const result = await api2.checkUrl({
+        url: "https://example.com/private",
+      });
+      expect(result.bookmarkId).toBeNull();
+    });
+  });
+});

@@ -1,0 +1,1254 @@
+{
+  "common": {
+    "url": "網址",
+    "name": "名稱",
+    "email": "電子郵件",
+    "password": "密碼",
+    "action": "操作",
+    "actions": "操作",
+    "created_at": "建立於",
+    "key": "金鑰",
+    "role": "角色",
+    "roles": {
+      "user": "使用者",
+      "admin": "管理員"
+    },
+    "something_went_wrong": "發生錯誤",
+    "experimental": "實驗性功能",
+    "search": "搜尋",
+    "tags": "標籤",
+    "note": "筆記",
+    "attachments": "附件",
+    "screenshot": "螢幕截圖",
+    "video": "影片",
+    "archive": "封存",
+    "home": "首頁",
+    "highlights": "標記重點",
+    "source": "來源",
+    "bookmark_types": {
+      "title": "書籤類型",
+      "link": "連結",
+      "text": "文字",
+      "media": "媒體"
+    },
+    "type": "類型",
+    "size": "大小",
+    "updated_at": "更新於",
+    "title": "標題",
+    "description": "描述",
+    "summary": "摘要",
+    "quota": "配額",
+    "bookmarks": "書籤",
+    "storage": "儲存空間",
+    "pdf": "已封存的 PDF",
+    "default": "預設",
+    "id": "ID",
+    "last_used": "上次使用"
+  },
+  "layouts": {
+    "masonry": "瀑布式",
+    "grid": "網格",
+    "list": "清單",
+    "compact": "緊湊"
+  },
+  "actions": {
+    "change_layout": "變更版面配置",
+    "archive": "封存",
+    "unarchive": "取消封存",
+    "favorite": "加入最愛",
+    "unfavorite": "移除最愛",
+    "delete": "刪除",
+    "refresh": "重新整理",
+    "edit_tags": "編輯標籤",
+    "add_to_list": "新增至清單",
+    "select": "選取",
+    "select_all": "全選",
+    "unselect_all": "取消全選",
+    "copy_link": "複製連結",
+    "close_bulk_edit": "關閉批次編輯",
+    "bulk_edit": "批次編輯",
+    "manage_lists": "管理清單",
+    "remove_from_list": "從清單移除",
+    "save": "儲存",
+    "add": "新增",
+    "edit": "編輯",
+    "create": "建立",
+    "fetch_now": "立即抓取",
+    "summarize_with_ai": "使用 AI 摘要",
+    "edit_title": "編輯標題",
+    "sign_out": "登出",
+    "close": "關閉",
+    "merge": "合併",
+    "cancel": "取消",
+    "apply_all": "全部套用",
+    "ignore": "忽略",
+    "sort": {
+      "title": "排序",
+      "newest_first": "最新在前",
+      "oldest_first": "最舊在前",
+      "relevant_first": "最相關優先"
+    },
+    "recrawl": "重新抓取",
+    "open_editor": "開啟編輯器",
+    "toggle_show_archived": "顯示已封存",
+    "confirm": "確認",
+    "regenerate": "重新產生",
+    "load_more": "載入更多",
+    "edit_notes": "編輯註解",
+    "preserve_as_pdf": "儲存為 PDF",
+    "preserve_video": "保存影片",
+    "offline_copies": "離線副本",
+    "preserve_offline_archive": "保留離線封存檔",
+    "download_full_page_archive_file": "下載封存檔",
+    "download_pdf_file": "下載 PDF 檔案",
+    "remove": "移除",
+    "more": "更多",
+    "replace_banner": "更換橫幅",
+    "add_banner": "新增橫幅",
+    "download": "下載",
+    "rename": "重新命名"
+  },
+  "settings": {
+    "back_to_app": "返回應用程式",
+    "user_settings": "使用者設定",
+    "info": {
+      "user_info": "使用者資訊",
+      "basic_details": "基本資料",
+      "change_password": "變更密碼",
+      "current_password": "目前密碼",
+      "new_password": "新密碼",
+      "confirm_new_password": "確認新密碼",
+      "options": "選項",
+      "interface_lang": "介面語言",
+      "user_settings": {
+        "archive_display_behaviour": {
+          "hide": "在標籤和列表中隱藏已封存的書籤",
+          "title": "已封存的書籤",
+          "show": "在標籤和列表中顯示已封存的書籤"
+        },
+        "user_settings_updated": "使用者設定已更新！",
+        "bookmark_click_action": {
+          "title": "書籤點擊動作",
+          "open_external_url": "開啟原始網址",
+          "open_bookmark_details": "開啟書籤詳細資訊"
+        }
+      },
+      "reader_settings": {
+        "local_overrides_title": "裝置專用設定已啟動",
+        "using_default": "使用用戶端預設值",
+        "clear_override_hint": "清除裝置覆寫以使用全域設定（{{value}}）",
+        "font_size": "字型大小",
+        "font_family": "字型",
+        "preview_inline": "（預覽）",
+        "tooltip_preview": "未儲存的預覽變更",
+        "save_to_all_devices": "所有裝置",
+        "tooltip_local": "裝置設定與全域不同",
+        "reset_preview": "重設預覽",
+        "mono": "等寬字體",
+        "line_height": "行高",
+        "tooltip_default": "閱讀設定",
+        "title": "閱讀器設定",
+        "serif": "襯線體",
+        "preview": "預覽",
+        "not_set": "未設定",
+        "clear_local_overrides": "清除裝置設定",
+        "preview_text": "敏捷的棕色狐狸跳過懶惰的狗。您的閱讀器檢視文字會像這樣顯示。",
+        "local_overrides_cleared": "裝置專用設定已清除",
+        "local_overrides_description": "此裝置具有與全域預設值不同的閱讀器設定：",
+        "clear_defaults": "清除所有預設值",
+        "description": "設定閱讀器檢視的預設文字設定。這些設定會在您的所有裝置之間同步。",
+        "defaults_cleared": "閱讀器預設值已清除",
+        "save_hint": "僅儲存此裝置的設定，或跨所有裝置同步",
+        "save_as_default": "儲存為預設值",
+        "save_to_device": "此裝置",
+        "sans": "無襯線體",
+        "tooltip_preview_and_local": "未儲存的預覽變更數目；裝置設定與全域不同",
+        "adjust_hint": "調整以上設定以預覽變更"
+      },
+      "avatar": {
+        "upload": "上傳頭像",
+        "change": "變更頭像",
+        "remove_confirm_title": "要移除頭像嗎？",
+        "updated": "頭像已更新",
+        "removed": "頭像已移除",
+        "description": "上傳一張正方形圖片做為您的頭像。",
+        "remove_confirm_description": "這會清除您目前的個人資料相片。",
+        "title": "個人資料相片",
+        "remove": "移除頭像"
+      }
+    },
+    "ai": {
+      "ai_settings": "AI 設定",
+      "tagging_rules": "標籤規則",
+      "tagging_rule_description": "您在此處新增的提示詞將作為規則提供給模型用於產生標籤。您可以在提示詞預覽區域檢視最終提示詞。",
+      "prompt_preview": "提示詞預覽",
+      "text_prompt": "文字提示詞",
+      "images_prompt": "圖片提示詞",
+      "all_tagging": "所有標籤",
+      "text_tagging": "文字標籤",
+      "image_tagging": "圖片標籤",
+      "summarization": "摘要",
+      "summarization_prompt": "摘要提示詞",
+      "tag_style": "標籤樣式",
+      "auto_summarization_description": "使用 AI 自動為你的書籤產生摘要。",
+      "auto_tagging": "自動標記",
+      "titlecase_spaces": "首字大寫，含空格",
+      "lowercase_underscores": "小寫，含底線",
+      "inference_language": "推論語言",
+      "titlecase_hyphens": "首字大寫，含連字號",
+      "lowercase_hyphens": "小寫，含連字號",
+      "lowercase_spaces": "小寫，含空格",
+      "inference_language_description": "選擇 AI 產生的標籤和摘要的語言。",
+      "tag_style_description": "選擇自動產生的標籤應如何格式化。",
+      "auto_tagging_description": "使用 AI 自動為你的書籤產生標籤。",
+      "camelCase": "駝峰式大小寫",
+      "auto_summarization": "自動摘要",
+      "no_preference": "無偏好",
+      "curated_tags": "精選標籤",
+      "curated_tags_description": "您可以選擇性地將 AI 標記限制為僅使用此列表中的標籤。未選擇任何標籤時，AI 會自由產生標籤。",
+      "curated_tags_updated": "精選標籤已成功更新！",
+      "curated_tags_update_failed": "無法更新精選標籤"
+    },
+    "feeds": {
+      "rss_subscriptions": "RSS 訂閱",
+      "add_a_subscription": "新增訂閱",
+      "feed_enabled": "已啟用 RSS 摘要",
+      "feed_disabled": "已停用 RSS 摘要"
+    },
+    "import": {
+      "import_export": "匯入／匯出",
+      "import_export_bookmarks": "匯入／匯出書籤",
+      "import_bookmarks_from_html_file": "從 HTML 檔案匯入書籤",
+      "import_bookmarks_from_pocket_export": "從 Pocket 匯出檔案匯入書籤",
+      "import_bookmarks_from_matter_export": "從 Matter 匯出檔案匯入書籤",
+      "import_bookmarks_from_omnivore_export": "從 Omnivore 匯出檔案匯入書籤",
+      "import_bookmarks_from_karakeep_export": "從 Karakeep 匯出檔案匯入書籤",
+      "export_links_and_notes": "匯出連結和筆記",
+      "imported_bookmarks": "已匯入的書籤",
+      "import_bookmarks_from_linkwarden_export": "從 Linkwarden 匯出檔案匯入書籤",
+      "import_bookmarks_from_tab_session_manager_export": "從 Tab Session Manager 匯入書籤",
+      "import_bookmarks_from_mymind_export": "從 mymind 匯入書籤匯出檔案",
+      "import_bookmarks_from_instapaper_export": "從 Instapaper 匯出檔案匯入書籤",
+      "import_bookmarks_from_readwise_reader_export": "從 Readwise Reader 匯出檔匯入書籤",
+      "import_bookmarks_from_onetab_export": "從 OneTab 匯出檔匯入書籤"
+    },
+    "api_keys": {
+      "api_keys": "API 金鑰",
+      "new_api_key": "新增 API 金鑰",
+      "new_api_key_desc": "為您的 API 金鑰指定一個獨一無二的名稱",
+      "key_success": "金鑰建立成功",
+      "key_success_please_copy": "請複製金鑰並儲存至安全的位置。關閉對話框後，您將無法再次存取此金鑰。",
+      "regenerate_api_key": "重新產生 API 金鑰",
+      "key_regenerated": "金鑰已成功重新產生",
+      "key_regenerated_please_copy": "請複製新的金鑰並妥善存放。舊的金鑰已被撤銷，將無法再使用。",
+      "regenerate_warning": "確定要重新產生 API 金鑰「{{name}}」嗎？",
+      "regenerate_confirmation": "這會撤銷目前的金鑰並產生新的金鑰。使用目前金鑰的任何應用程式都將停止運作。",
+      "scopes": {
+        "scopes": "權限範圍",
+        "choose_at_least_one": "請至少選擇一個權限範圍或選擇「完整存取權」。",
+        "scope_details": "{{scope}} 權限範圍詳情",
+        "access": {
+          "none": "無",
+          "read": "讀取",
+          "readwrite": "讀取/寫入"
+        },
+        "full_access": {
+          "label": "完整存取權",
+          "description": "存取所有支援的 API 操作。"
+        },
+        "limited_scopes": {
+          "label": "有限權限範圍",
+          "description": "選擇此金鑰可以存取的資源類型。"
+        },
+        "resources": {
+          "assets": {
+            "label": "資產",
+            "description": "存取檔案及其他儲存的書籤內容。"
+          },
+          "backups": {
+            "label": "備份",
+            "description": "管理帳號備份。"
+          },
+          "bookmarks": {
+            "label": "書籤",
+            "description": "存取並管理書籤。"
+          },
+          "feeds": {
+            "label": "饋送",
+            "description": "管理 RSS 饋送及相關饋送資料。"
+          },
+          "highlights": {
+            "label": "重點畫記",
+            "description": "管理儲存的書籤重點畫記。"
+          },
+          "lists": {
+            "label": "清單",
+            "description": "管理清單及其成員。"
+          },
+          "prompts": {
+            "label": "提示詞",
+            "description": "管理已儲存的 AI 提示詞配置。"
+          },
+          "rules": {
+            "label": "規則",
+            "description": "存取自動化規則。"
+          },
+          "tags": {
+            "label": "標籤",
+            "description": "存取並修改標籤。"
+          },
+          "users": {
+            "label": "使用者帳戶",
+            "description": "存取帳戶個人資料與設定。"
+          },
+          "webhooks": {
+            "label": "Webhook",
+            "description": "存取 Webhook 配置。"
+          },
+          "subscriptions": {
+            "label": "訂閱",
+            "description": "存取訂閱管理。"
+          },
+          "importSessions": {
+            "label": "匯入工作階段",
+            "description": "存取匯入工作階段。"
+          }
+        },
+        "admin_resources": {
+          "bookmarks": {
+            "label": "管理員：書籤",
+            "description": "存取管理員書籤工具。"
+          },
+          "jobs": {
+            "label": "管理員：工作",
+            "description": "存取背景工作控制。"
+          },
+          "system": {
+            "label": "管理：系統",
+            "description": "訪問系統狀態與診斷。"
+          },
+          "users": {
+            "label": "管理：使用者",
+            "description": "訪問管理使用者管理。"
+          },
+          "subscriptions": {
+            "label": "管理：訂閱",
+            "description": "管理使用者訂閱方案。"
+          }
+        }
+      }
+    },
+    "webhooks": {
+      "webhooks": "Webhook",
+      "events": {
+        "title": "事件",
+        "created": "已建立",
+        "edited": "已編輯",
+        "crawled": "已抓取"
+      },
+      "delete_webhook_confirmation": "您確定要刪除這個 Webhook 嗎？",
+      "edit_webhook": "編輯 Webhook",
+      "webhook_url": "Webhook 網址",
+      "description": "您可以使用 Webhook 在建立、變更或抓取書籤時觸發操作。",
+      "auth_token": "驗證權杖",
+      "add_auth_token": "新增驗證權杖",
+      "edit_auth_token": "編輯驗證權杖",
+      "create_webhook": "建立 Webhook",
+      "delete_webhook": "刪除 Webhook"
+    },
+    "broken_links": {
+      "broken_links": "失效連結",
+      "last_crawled_at": "最後抓取時間",
+      "crawling_status": "抓取狀態",
+      "crawling_failed": "抓取失敗",
+      "description": "檢視無法取得的連結，重新嘗試抓取或刪除舊書籤。",
+      "category_all": "需要處理",
+      "category_blocked": "存取遭封鎖",
+      "category_missing": "找不到",
+      "category_errors": "其他錯誤",
+      "category_all_hint": "待檢查的連結",
+      "category_blocked_hint": "受到限制或速率限制",
+      "category_missing_hint": "頁面不存在或已移除",
+      "category_errors_hint": "伺服器錯誤或抓取失敗",
+      "blocked_hint": "請求遭封鎖不一定代表連結已失效。有些網站會限制自動化存取。刪除前請先開啟原始頁面確認。",
+      "search": "依標題或網址搜尋…",
+      "sort_recent": "最近檢查",
+      "sort_oldest": "最早檢查優先",
+      "sort_domain": "網站 A–Z",
+      "result_count_other": "{{count}} 個待檢查的連結",
+      "retry_selected": "重試所選項目",
+      "empty": "未發現失效連結",
+      "empty_description": "您儲存的連結目前都沒有回報抓取錯誤。",
+      "select_visible": "選取所有顯示的連結",
+      "bookmark": "書籤",
+      "issue": "問題",
+      "never_crawled": "無抓取日期",
+      "issue_blocked": "存取遭封鎖",
+      "issue_missing": "找不到",
+      "issue_server": "伺服器錯誤",
+      "issue_http": "HTTP 錯誤",
+      "issue_failed": "抓取失敗",
+      "issue_blocked_hint": "該網站限制了此請求",
+      "issue_missing_hint": "該頁面可能已被移除",
+      "issue_server_hint": "該網站無法完成請求",
+      "issue_http_hint": "該網站傳回了非預期的回應",
+      "issue_failed_hint": "沒有記錄到成功的回應",
+      "queued": "已排入佇列",
+      "queued_count_other": "已將 {{count}} 個連結排入重新抓取佇列。",
+      "deleted_count_other": "已刪除 {{count}} 個書籤。",
+      "action_failed": "{{total}} 個中有 {{count}} 個失敗。",
+      "delete_title_other": "要刪除 {{count}} 個書籤嗎？",
+      "delete_description": "這將永久刪除所選書籤及其儲存的檔案、標記重點和筆記。此動作無法復原。"
+    },
+    "manage_assets": {
+      "manage_assets": "管理資產",
+      "no_assets": "你還沒有任何資產。",
+      "asset_type": "資產類型",
+      "bookmark_link": "書籤連結",
+      "asset_link": "資產連結",
+      "delete_asset": "刪除資產",
+      "delete_asset_confirmation": "你確定要刪除這個資產嗎？"
+    },
+    "rules": {
+      "conditions_types": {
+        "has_tag": "有標籤",
+        "is_favourited": "已設為最愛",
+        "always": "總是",
+        "url_contains": "網址包含",
+        "imported_from_feed": "從 Feed 匯入",
+        "bookmark_type_is": "書籤類型為",
+        "is_archived": "已封存",
+        "and": "以下全部為真",
+        "or": "以下任一項為真",
+        "url_does_not_contain": "URL 不包含",
+        "title_contains": "標題包含",
+        "title_does_not_contain": "標題不包含",
+        "bookmark_source_is": "書籤來源為"
+      },
+      "rules": "規則引擎",
+      "rule_name": "規則名稱",
+      "description": "您可以使用規則在事件觸發時觸發動作。",
+      "ceate_rule": "建立規則",
+      "edit_rule": "編輯規則",
+      "save_rule": "儲存規則",
+      "delete_rule": "刪除規則",
+      "delete_rule_confirmation": "你確定要刪除此規則嗎？",
+      "whenever": "無論何時...",
+      "if": "如果...",
+      "enter_rule_name": "輸入規則名稱",
+      "describe_what_this_rule_does": "描述此規則的作用",
+      "rule_has_been_created": "規則已建立！",
+      "rule_has_been_updated": "規則已更新！",
+      "rule_has_been_deleted": "規則已刪除！",
+      "no_rules_created_yet": "尚未建立任何規則",
+      "create_your_first_rule": "建立您的第一個規則以自動化您的工作流程",
+      "actions_types": {
+        "add_tag": "新增標籤",
+        "remove_tag": "移除標籤",
+        "add_to_list": "新增至清單",
+        "remove_from_list": "從清單中移除",
+        "download_full_page_archive": "下載完整頁面封存",
+        "favourite_bookmark": "我的最愛書籤",
+        "archive_bookmark": "封存書籤"
+      },
+      "events_types": {
+        "bookmark_added": "已新增書籤",
+        "tag_added": "此標籤已新增至書籤",
+        "tag_removed": "已從書籤中移除此標籤",
+        "added_to_list": "已將書籤新增至此清單",
+        "removed_from_list": "已從此清單中移除書籤",
+        "favourited": "已將書籤設為我的最愛",
+        "archived": "已封存書籤"
+      }
+    },
+    "stats": {
+      "usage_statistics": "使用量統計",
+      "insights_description": "深入瞭解你的書籤習慣和收藏",
+      "failed_to_load": "載入統計資料失敗",
+      "overview": {
+        "total_bookmarks": "書籤總數",
+        "all_saved_items": "所有已儲存項目",
+        "favorites": "我的最愛",
+        "starred_bookmarks": "已加星號的書籤",
+        "archived": "已封存",
+        "archived_items": "已封存的項目",
+        "tags": "標籤",
+        "unique_tags_created": "已建立的唯一標籤",
+        "lists": "清單",
+        "bookmark_collections": "書籤收藏",
+        "highlights": "醒目提示",
+        "text_highlights": "文字醒目提示",
+        "storage_used": "已使用的儲存空間",
+        "total_asset_storage": "資產儲存總量",
+        "this_month": "本月",
+        "bookmarks_added": "已新增書籤"
+      },
+      "bookmark_types": {
+        "title": "書籤類型",
+        "links": "連結",
+        "text_notes": "文字筆記",
+        "assets": "資產"
+      },
+      "recent_activity": {
+        "title": "近期活動",
+        "this_week": "本週",
+        "this_month": "本月",
+        "this_year": "今年"
+      },
+      "top_domains": {
+        "title": "熱門網域",
+        "no_domains_found": "找不到網域"
+      },
+      "most_used_tags": {
+        "title": "最常使用的標籤",
+        "no_tags_found": "找不到標籤"
+      },
+      "activity_patterns": {
+        "activity_by_hour": "依小時區分的活動",
+        "activity_by_day": "每日活動",
+        "busiest_around": "最活躍時段：{{hour}} 左右"
+      },
+      "storage_breakdown": {
+        "title": "儲存空間明細"
+      },
+      "bookmark_sources": {
+        "title": "書籤來源",
+        "empty": "沒有可用的來源資料"
+      }
+    },
+    "subscription": {
+      "subscription": "訂閱",
+      "manage_subscription": "管理你的訂閱和帳單資訊",
+      "current_plan": "目前方案",
+      "billing_period": "帳單週期",
+      "paid_plan": "付費方案",
+      "unlock_bigger_quota": "解鎖更大的配額並支持這個專案",
+      "subscribe_now": "立即訂閱",
+      "manage_billing": "管理帳單",
+      "subscription_canceled": "你的訂閱已取消，將於 {{date}} 結束。你可以隨時重新訂閱。",
+      "usage_quotas": "使用量和配額",
+      "track_usage": "追蹤你目前的使用量，看看有沒有超過方案限制",
+      "total_bookmarks_saved": "已儲存的書籤總數",
+      "assets_file_storage": "資產和檔案儲存空間",
+      "unlimited_usage": "無限制使用",
+      "quota_limit_reached": "已達到配額上限",
+      "approaching_quota_limit": "快要達到配額上限了",
+      "loading_usage": "正在載入使用量資訊...",
+      "free": "免費",
+      "paid": "已付費",
+      "monthly": "每月",
+      "yearly": "每年",
+      "per_month": "月",
+      "per_year": "年",
+      "excl_vat": "不含增值稅",
+      "yearly_savings": "節省 {{percent}}%",
+      "pro_feature_bookmarks": "50,000 個書籤",
+      "pro_feature_storage": "50GB 儲存空間",
+      "pro_feature_ai_tagging": "AI 驅動標籤",
+      "pro_feature_full_text_search": "全文檢索"
+    },
+    "import_sessions": {
+      "title": "匯入工作階段",
+      "description": "檢視和管理你的大量匯入工作階段。當你匯入書籤時，會自動建立工作階段。",
+      "load_error": "載入匯入工作階段失敗",
+      "no_sessions": "還沒有匯入工作階段",
+      "no_sessions_detail": "當您匯入書籤時，匯入工作階段會自動出現在這裡",
+      "created_at": "已於 {{time}} 建立",
+      "progress": "進度",
+      "status": {
+        "pending": "等待中",
+        "completed": "已完成",
+        "failed": "失敗",
+        "staging": "預備",
+        "running": "執行中",
+        "paused": "已暫停",
+        "archived": "已封存"
+      },
+      "badges": {
+        "pending": "{{count}} 等待中",
+        "processing": "{{count}} 處理中",
+        "completed": "{{count}} 已完成",
+        "failed": "{{count}} 失敗"
+      },
+      "imported_to": "匯入至：",
+      "view_list": "檢視清單",
+      "delete_dialog_title": "刪除匯入工作階段",
+      "delete_dialog_description": "確定要刪除「{{name}}」嗎？此動作無法復原。書籤本身不會被刪除。",
+      "delete_session": "刪除工作階段",
+      "pause_session": "暫停",
+      "resume_session": "繼續",
+      "view_details": "檢視詳細資料",
+      "detail": {
+        "page_title": "匯入工作階段詳細資料",
+        "back_to_import": "返回匯入",
+        "filter_all": "全部",
+        "filter_accepted": "已接受",
+        "filter_rejected": "已拒絕",
+        "filter_duplicates": "重複",
+        "filter_pending": "待處理",
+        "table_title": "標題／網址",
+        "table_type": "類型",
+        "table_result": "結果",
+        "table_reason": "原因",
+        "table_bookmark": "書籤",
+        "result_accepted": "已接受",
+        "result_rejected": "已拒絕",
+        "result_skipped_duplicate": "重複",
+        "result_pending": "待處理",
+        "result_processing": "處理中",
+        "no_results": "這個篩選器沒有找到任何結果。",
+        "view_bookmark": "檢視書籤",
+        "load_more": "載入更多",
+        "no_title": "無標題",
+        "archived_results": "目前不再為封存的匯入會話保留個別書籤結果。"
+      },
+      "finalize_dialog_title": "完成匯入工作階段",
+      "finalize_dialog_description": "將「{{name}}」放入背景處理佇列？暫存的書籤將開始匯入。",
+      "finalize_staging": "完成"
+    },
+    "backups": {
+      "backups": "備份",
+      "page_title": "備份",
+      "page_description": "自動建立和管理你的書籤備份。備份會經過壓縮並安全地儲存。",
+      "configuration": {
+        "title": "備份設定",
+        "enable_automatic_backups": "啟用自動備份",
+        "enable_automatic_backups_description": "自動建立你的書籤備份",
+        "backup_frequency": "備份頻率",
+        "backup_frequency_description": "應該多久建立一次備份",
+        "retention_period": "保留期限（天）",
+        "retention_period_description": "備份在刪除前應保留多少天",
+        "frequency": {
+          "daily": "每日",
+          "weekly": "每週"
+        },
+        "select_frequency": "選取頻率",
+        "save_settings": "儲存設定"
+      },
+      "list": {
+        "title": "你的備份",
+        "create_backup_now": "立即建立備份",
+        "no_backups": "你還沒有任何備份。啟用自動備份或手動建立一個。",
+        "table": {
+          "created_at": "建立於",
+          "bookmarks": "書籤",
+          "size": "大小",
+          "status": "狀態",
+          "actions": "動作"
+        },
+        "status": {
+          "success": "成功",
+          "failed": "失敗",
+          "pending": "等待中"
+        },
+        "actions": {
+          "download_backup": "下載備份",
+          "delete_backup": "刪除備份"
+        }
+      },
+      "dialogs": {
+        "delete_backup_title": "刪除備份？",
+        "delete_backup_description": "你確定要刪除這個備份嗎？這個動作無法還原。"
+      },
+      "toasts": {
+        "backup_queued": "備份工作已排入佇列！它會很快處理。",
+        "backup_deleted": "備份已刪除！"
+      }
+    },
+    "maintenance": {
+      "clear_filters": "清除篩選條件",
+      "clear_selection": "清除選取",
+      "delete_selected": "刪除所選項目",
+      "try_again": "再試一次",
+      "sort": "排序方式",
+      "no_matches": "找不到符合的項目",
+      "adjust_filters": "請嘗試其他搜尋或清除篩選條件。",
+      "select_item": "選取 {{name}}",
+      "selected": "已選取 {{count}} 個",
+      "showing": "顯示 {{shown}} / {{total}}",
+      "load_more": "載入更多"
+    }
+  },
+  "admin": {
+    "admin_settings": "管理員設定",
+    "server_stats": {
+      "server_stats": "伺服器統計資訊",
+      "total_users": "使用者總數",
+      "total_bookmarks": "書籤總數",
+      "server_version": "伺服器版本"
+    },
+    "background_jobs": {
+      "background_jobs": "背景作業",
+      "jobs": {
+        "crawler": {
+          "title": "爬蟲程式任務",
+          "description": "從網址提取網頁內容並進行網頁爬蟲"
+        },
+        "inference": {
+          "title": "推論任務",
+          "description": "AI驅動的內容標記和摘要"
+        },
+        "indexing": {
+          "title": "索引任務",
+          "description": "搜尋索引更新"
+        },
+        "asset_preprocessing": {
+          "title": "資產預處理任務",
+          "description": "圖片和文件預處理（螢幕截圖、文字提取等等）"
+        },
+        "video": {
+          "title": "影片下載任務",
+          "description": "影片提取和下載"
+        },
+        "webhook": {
+          "title": "Webhook 任務",
+          "description": "外部 Webhook 通知"
+        },
+        "feed": {
+          "title": "RSS Feed 任務",
+          "description": "RSS feed 處理和內容更新"
+        },
+        "admin_maintenance": {
+          "title": "管理員維護工作",
+          "description": "管理清理與資產維護"
+        },
+        "embeddings": {
+          "title": "嵌入工作",
+          "description": "書籤向量嵌入生成"
+        }
+      },
+      "monitor_and_manage": "監控和管理背景任務佇列和系統處理任務",
+      "active": "啟用中",
+      "available_actions": "可用動作",
+      "status": {
+        "title": "了解任務狀態",
+        "queued": {
+          "title": "已排隊",
+          "description": "正在排隊等候處理的任務。當資源可用時，它們將自動啟動。"
+        },
+        "unprocessed": {
+          "title": "未處理",
+          "description": "尚未處理的書籤。它們很可能已經排隊等待處理，如果沒有，你可能需要手動重新排隊。"
+        },
+        "failed": {
+          "title": "失敗",
+          "description": "處理過程中遇到錯誤的書籤。這些可能需要手動處理。"
+        }
+      },
+      "actions": {
+        "recrawl_failed_links_only": "僅重新爬取失敗連結",
+        "recrawl_all_links": "重新爬取所有連結",
+        "without_inference": "不推論",
+        "regenerate_ai_tags_for_failed_bookmarks_only": "僅為失敗的書籤重新產生 AI 標籤",
+        "regenerate_ai_tags_for_all_bookmarks": "為所有書籤重新產生 AI 標籤",
+        "regenerate_ai_summaries_for_failed_bookmarks_only": "僅為失敗的書籤重新產生 AI 摘要",
+        "regenerate_ai_summaries_for_all_bookmarks": "為所有書籤重新產生 AI 摘要",
+        "reindex_all_bookmarks": "重新索引所有書籤",
+        "clean_assets": "清除懸置資產並重新同步中繼資料",
+        "reprocess_assets_fix_mode": "重新處理未處理的資產",
+        "migrate_large_link_html_content": "將大型內嵌 HTML 內容移至資產",
+        "recrawl_pending_links_only": "僅重新檢索待處理的連結",
+        "regenerate_ai_tags_for_pending_bookmarks_only": "僅針對待處理的書籤重新產生 AI 標籤",
+        "regenerate_ai_summaries_for_pending_bookmarks_only": "僅針對待處理的書籤重新產生 AI 摘要",
+        "regenerate_embeddings_for_pending_bookmarks_only": "僅為待處理書籤重新生成嵌入",
+        "regenerate_embeddings_for_failed_bookmarks_only": "僅為失敗書籤重新生成嵌入",
+        "regenerate_embeddings_for_all_bookmarks": "為所有書籤重新生成嵌入"
+      }
+    },
+    "users_list": {
+      "users_list": "使用者清單",
+      "create_user": "建立使用者",
+      "change_role": "變更角色",
+      "reset_password": "重設密碼",
+      "delete_user": "刪除使用者",
+      "num_bookmarks": "書籤數量",
+      "asset_sizes": "資源大小",
+      "local_user": "本機使用者",
+      "confirm_password": "確認密碼",
+      "delete_user_confirm_description": "你確定要刪除使用者「{{name}}」嗎？",
+      "unlimited": "無限制"
+    },
+    "service_connections": {
+      "title": "服務連線",
+      "description": "監控外部系統依賴的健康狀態和連線能力",
+      "search_engine": "搜尋引擎",
+      "browser": "瀏覽器",
+      "queue_system": "佇列系統",
+      "status": {
+        "not_configured": "未配置",
+        "connected": "已連線",
+        "disconnected": "已中斷連線"
+      },
+      "vector_store": "向量儲存"
+    },
+    "admin_tools": {
+      "admin_tools": "管理員工具",
+      "bookmark_debugger": "書籤偵錯工具",
+      "bookmark_id": "書籤 ID",
+      "bookmark_id_placeholder": "輸入書籤 ID",
+      "lookup": "查詢",
+      "debug_info": "偵錯資訊",
+      "basic_info": "基本資訊",
+      "status": "狀態",
+      "content": "內容",
+      "html_preview": "HTML 預覽（前 1000 個字元）",
+      "summary": "摘要",
+      "url": "網址",
+      "source_url": "來源網址",
+      "asset_type": "資產類型",
+      "file_name": "檔案名稱",
+      "owner_user_id": "擁有者使用者 ID",
+      "tagging_status": "標籤狀態",
+      "summarization_status": "摘要狀態",
+      "crawl_status": "爬網狀態",
+      "crawl_status_code": "HTTP 狀態代碼",
+      "crawled_at": "已爬取時間",
+      "recrawl": "重新爬取",
+      "reindex": "重新索引",
+      "retag": "重新標記",
+      "resummarize": "重新摘要",
+      "bookmark_not_found": "找不到書籤",
+      "action_success": "動作已成功完成",
+      "action_failed": "動作失敗",
+      "recrawl_queued": "重新爬取作業已排入佇列",
+      "reindex_queued": "重新索引作業已排入佇列",
+      "retag_queued": "重新標記作業已排入佇列",
+      "resummarize_queued": "重新摘要作業已排入佇列",
+      "view": "檢視",
+      "fetch_error": "擷取書籤時發生錯誤",
+      "embedding_status": "嵌入狀態",
+      "regenerate_embedding": "重新生成嵌入",
+      "regenerate_embedding_queued": "嵌入重新生成工作已排入隊列"
+    }
+  },
+  "options": {
+    "theme": "主題",
+    "dark_mode": "深色模式",
+    "light_mode": "淺色模式",
+    "system_mode": "跟隨系統",
+    "apps_extensions": "應用程式和擴充功能",
+    "documentation": "文件",
+    "follow_us_on_x": "在 X 上追蹤我們"
+  },
+  "lists": {
+    "all_lists": "所有清單",
+    "favourites": "最愛",
+    "new_list": "新增清單",
+    "new_nested_list": "新增巢狀清單",
+    "search_query_help": "了解更多關於搜尋查詢語言的資訊。",
+    "edit_list": "編輯清單",
+    "no_parent": "無上層",
+    "list_type": "清單類型",
+    "manual_list": "手動清單",
+    "smart_list": "智慧清單",
+    "search_query": "搜尋查詢",
+    "parent_list": "上層清單",
+    "description": "描述（可選）",
+    "merge_list": "合併清單",
+    "destination_list": "目標清單",
+    "delete_after_merge": "合併後刪除原始清單",
+    "no_destination": "無目標",
+    "rss": {
+      "description": "為此清單啟用 RSS 訂閱",
+      "feed_url": "RSS 訂閱網址",
+      "title": "RSS 訂閱"
+    },
+    "share_list": "分享清單",
+    "public_list": {
+      "title": "公開清單",
+      "description": "允許其他人檢視此清單",
+      "share_link": "分享連結"
+    },
+    "delete_list": {
+      "title": "刪除清單",
+      "description": "刪除清單唔會刪除個清單入面嘅任何書籤。",
+      "delete_children": "刪除子清單（遞迴）",
+      "delete_children_description": "如果唔剔選，所有直接嘅子清單會變成根清單"
+    },
+    "shared": "已共用",
+    "collaborators": {
+      "manage": "管理協作者",
+      "view": "檢視協作者",
+      "collaborators": "協作者",
+      "add": "新增協作者",
+      "current": "目前的協作者",
+      "enter_email": "輸入電子郵件地址",
+      "please_enter_email": "請輸入電子郵件地址",
+      "added_successfully": "已成功新增協作者",
+      "failed_to_add": "新增協作者失敗",
+      "removed": "已移除協作者",
+      "failed_to_remove": "移除協作者失敗",
+      "role_updated": "已更新角色",
+      "failed_to_update_role": "更新角色失敗",
+      "viewer": "檢視者",
+      "editor": "編輯者",
+      "owner": "擁有者",
+      "viewer_description": "可以在清單中檢視書籤",
+      "editor_description": "可以新增和移除書籤",
+      "no_collaborators": "目前還沒有協作者。新增一位來開始協作吧！",
+      "no_collaborators_readonly": "沒有此清單的協作者。",
+      "people_with_access": "可以存取此清單的人員",
+      "add_or_remove": "新增或移除可存取此清單的人員",
+      "invitation_sent": "邀請已成功送出",
+      "invitation_revoked": "邀請已撤銷",
+      "failed_to_revoke": "撤銷邀請失敗",
+      "pending": "等待中",
+      "revoke": "撤銷",
+      "declined": "已拒絕"
+    },
+    "leave_list": {
+      "title": "離開清單",
+      "confirm_message": "您確定要離開 {{icon}} {{name}} 嗎？",
+      "warning": "您將無法再檢視或存取此清單中的書籤。清單擁有者可以隨時將您重新加入。",
+      "action": "離開清單",
+      "success": "您已離開「{{icon}} {{name}}」"
+    },
+    "invitations": {
+      "pending": "等待中的邀請",
+      "description": "檢閱及回覆清單協作邀請",
+      "invited_by": "邀請人",
+      "accept": "接受",
+      "decline": "拒絕",
+      "accepted": "邀請已接受",
+      "declined": "邀請已拒絕",
+      "failed_to_accept": "接受邀請失敗",
+      "failed_to_decline": "拒絕邀請失敗"
+    },
+    "shared_lists": "共用清單",
+    "privacy": {
+      "public": "公開",
+      "shared": "已共用",
+      "private": "私人"
+    },
+    "summary_list_one": "{{count}} 清單",
+    "summary_list_other": "{{count}} 清單",
+    "summary_bookmark_one": "{{count}} 書籤",
+    "summary_bookmark_other": "{{count}} 書籤",
+    "items_count_one": "{{count}} 個項目",
+    "items_count_other": "{{count}} 個項目"
+  },
+  "tags": {
+    "all_tags": "所有標籤",
+    "your_tags": "您的標籤",
+    "your_tags_info": "您至少使用過一次的標籤",
+    "ai_tags": "AI 標籤",
+    "ai_tags_info": "僅由 AI 自動加入的標籤",
+    "unused_tags": "未使用的標籤",
+    "unused_tags_info": "未附加至任何書籤的標籤",
+    "delete_all_unused_tags": "刪除所有未使用的標籤",
+    "drag_and_drop_merging": "拖曳合併",
+    "drag_and_drop_merging_info": "將標籤拖曳到其他標籤上即可合併",
+    "sort_by_name": "依名稱排序",
+    "create_tag": "建立標籤",
+    "create_tag_description": "建立新標籤，但不要連接到任何書籤",
+    "tag_name": "標籤名稱",
+    "enter_tag_name": "輸入標籤名稱",
+    "sort_by_usage": "依照使用次數排序",
+    "sort_by_relevance": "依照關聯性排序",
+    "no_custom_tags": "還沒有自訂標籤",
+    "no_ai_tags": "還沒有 AI 標籤",
+    "no_unused_tags": "您沒有任何未使用的標籤",
+    "no_unused_tags_match_your_search": "沒有符合您搜尋的未使用標籤",
+    "no_tags_match_your_search": "沒有符合您搜尋的標籤",
+    "search_placeholder": "搜尋標籤...",
+    "search_or_create_placeholder": "搜尋或建立標籤...",
+    "rename_tag": "重新命名標籤",
+    "items_count": "{{count}} 個項目",
+    "attached_by_you": "{{count}} 個由您建立",
+    "attached_by_ai": "{{count}} 個由 AI 建立"
+  },
+  "preview": {
+    "view_original": "檢視原始內容",
+    "cached_content": "快取內容",
+    "reader_view": "閱讀器檢視",
+    "page_overview": "頁面概覽",
+    "try_reader_view": "試試閱讀器檢視",
+    "archived_page": "已封存的頁面",
+    "tabs": {
+      "content": "內容",
+      "details": "詳細資訊"
+    },
+    "archive_info": "如果封存檔需要 Javascript，可能無法正確地內嵌呈現。為了獲得最佳效果，<1>請下載並在瀏覽器中開啟</1>。",
+    "fetch_error_title": "內容無法使用",
+    "fetch_error_description": "我們無法取得此連結的內容。此頁面可能受到保護、需要驗證或暫時無法使用。",
+    "crawling_in_progress": "正在抓取頁面內容…",
+    "continue_reading": "從上次中斷的地方繼續",
+    "continue_reading_percent": "從上次中斷的地方繼續（{{percent}}%）",
+    "continue_button": "繼續"
+  },
+  "editor": {
+    "multiple_urls_dialog_title": "要將多個網址匯入為個別的書籤嗎？",
+    "multiple_urls_dialog_desc": "輸入內容包含分別位於不同行數的多個網址。您是否要將它們匯入為個別的書籤？",
+    "import_as_text": "匯入為文字書籤",
+    "import_as_separate_bookmarks": "匯入為個別書籤",
+    "placeholder": "貼上連結或圖片、撰寫筆記，或將圖片拖曳至此處…",
+    "new_item": "新增項目",
+    "disabled_submissions": "提交功能已停用",
+    "text_toolbar": {
+      "align_center": "置中對齊",
+      "align_right": "靠右對齊",
+      "markdown_shortcuts": {
+        "label": "Markdown 快捷鍵",
+        "bold": {
+          "example": "**text** 或 CTRL+b",
+          "label": "粗體"
+        },
+        "italic": {
+          "label": "斜體",
+          "example": "*Italic* 或 _Italic_ 或 CTRL+i"
+        },
+        "ordered_list": {
+          "label": "有序清單",
+          "example": "1. 清單項目"
+        },
+        "inline_code": {
+          "example": "`程式碼`",
+          "label": "行內程式碼"
+        },
+        "block_code": {
+          "label": "程式碼區塊",
+          "example": "``` + 空白鍵"
+        },
+        "blockquote": {
+          "example": "> 引用區塊",
+          "label": "引用區塊"
+        },
+        "unordered_list": {
+          "label": "無序清單",
+          "example": "- 清單項目"
+        },
+        "heading": {
+          "label": "標題",
+          "example": "# H1, ## H2, ### H3"
+        }
+      },
+      "undo": "復原",
+      "redo": "重做",
+      "bold": "粗體",
+      "italic": "斜體",
+      "underline": "底線",
+      "strikethrough": "刪除線",
+      "code": "程式碼",
+      "highlight": "醒目標示",
+      "align_left": "靠左對齊"
+    },
+    "placeholder_v2": "貼上連結、寫筆記或放入圖片…"
+  },
+  "toasts": {
+    "bookmarks": {
+      "updated": "書籤已更新！",
+      "deleted": "書籤已刪除！",
+      "refetch": "已將重新抓取加入佇列！",
+      "full_page_archive": "已觸發完整網頁封存建立",
+      "delete_from_list": "已從清單中移除書籤",
+      "clipboard_copied": "連結已複製到剪貼簿！",
+      "preserve_pdf": "已觸發 PDF 儲存",
+      "preserve_video": "已觸發影片下載",
+      "update_banner": "橫幅已更新！",
+      "uploading_banner": "正在上傳橫幅..."
+    },
+    "lists": {
+      "created": "清單已建立！",
+      "updated": "清單已更新！",
+      "merged": "清單已合併！",
+      "deleted": "清單已刪除！"
+    },
+    "tags": {
+      "created": "已建立標籤！",
+      "failed_to_create": "建立標籤失敗",
+      "updated": "標籤已更新！",
+      "failed_to_update": "無法更新標籤"
+    }
+  },
+  "cleanups": {
+    "cleanups": "清理",
+    "duplicate_tags": {
+      "title": "重複的標籤",
+      "merge_all_suggestions": "要合併所有建議嗎？"
+    }
+  },
+  "search": {
+    "is_not_favorited": "未加入最愛",
+    "is_archived": "已封存",
+    "is_not_archived": "未封存",
+    "has_any_tag": "有任何標籤",
+    "does_not_have_tag": "無此標籤",
+    "type_is_not": "類型不為",
+    "is_favorited": "已加入最愛",
+    "has_no_tags": "無標籤",
+    "has_notes": "有筆記",
+    "has_no_notes": "無筆記",
+    "has_highlights": "有標記重點",
+    "has_no_highlights": "無標記重點",
+    "is_in_any_list": "在任何清單中",
+    "is_not_in_any_list": "不在任何清單中",
+    "created_on_or_after": "建立於此日期或之後",
+    "not_created_on_or_after": "未建立於此日期或之後",
+    "full_text_search": "全文搜尋",
+    "and": "且",
+    "or": "或",
+    "created_on_or_before": "建立於此日期或之前",
+    "not_created_on_or_before": "未建立於此日期或之前",
+    "url_contains": "網址包含",
+    "url_does_not_contain": "網址不包含",
+    "has_tag": "有標籤",
+    "is_in_list": "在清單中",
+    "is_not_in_list": "不在清單中",
+    "type_is": "類型為",
+    "is_from_feed": "來自 RSS 訂閱",
+    "is_not_from_feed": "不是來自 RSS 訂閱",
+    "created_within": "建立於",
+    "created_earlier_than": "建立於早於",
+    "day_s": " 幾天",
+    "week_s": " 幾週",
+    "month_s": " 幾個月",
+    "year_s": " 幾年",
+    "day_s_ago": " 幾天前",
+    "week_s_ago": " 幾週前",
+    "month_s_ago": " 幾個月前",
+    "year_s_ago": " 幾年前",
+    "history": "近期搜尋",
+    "title_contains": "標題包含",
+    "title_does_not_contain": "標題不包含",
+    "is_broken_link": "連結已損毀",
+    "tags": "標籤",
+    "no_suggestions": "沒有任何建議",
+    "filters": "篩選器",
+    "is_not_broken_link": "擁有可用的連結",
+    "lists": "清單",
+    "feeds": "動態饋給",
+    "is_from_source": "來源是",
+    "is_not_from_source": "來源不是",
+    "mode_label": "搜尋模式",
+    "mode_label_description": "選擇 Karakeep 尋找匹配書籤的方式。",
+    "mode_keyword": "關鍵字",
+    "mode_keyword_description": "匹配標題、內容、URL 和筆記中的精確字詞。幾乎是瞬間完成。",
+    "mode_hybrid": "混合",
+    "mode_hybrid_description": "結合精確匹配與相關概念以達到最佳平衡。比關鍵字搜尋慢。",
+    "mode_semantic": "語義",
+    "mode_semantic_description": "尋找概念相似的書籤，即使沒有共同的字詞。比關鍵字搜尋慢。",
+    "keyword_placeholder": "搜尋標題、內容、URL 和標籤…",
+    "hybrid_placeholder": "按字詞或含義搜尋…",
+    "semantic_placeholder": "描述您記得的內容…"
+  },
+  "dialogs": {
+    "bookmarks": {
+      "delete_confirmation_title": "刪除書籤？",
+      "delete_confirmation_description": "您確定要刪除這個書籤嗎？",
+      "bulk_delete_confirmation_description": "您確定要刪除 {{count}} 個書籤嗎？"
+    }
+  },
+  "highlights": {
+    "no_highlights": "您目前尚未有任何標記重點。"
+  },
+  "bookmark_editor": {
+    "date_published": "發佈日期",
+    "title": "編輯書籤",
+    "subtitle": "變更書籤詳細資訊。完成後點擊儲存。",
+    "author": "作者",
+    "publisher": "發佈者",
+    "pick_a_date": "選擇日期",
+    "save_changes": "儲存變更",
+    "extracted_content": "已擷取內容"
+  },
+  "banners": {
+    "no_bookmarks": {
+      "title": "還沒有書籤",
+      "description": "儲存有趣的的文章、連結和頁面，以便日後快速存取。"
+    }
+  },
+  "view_options": {
+    "title": "檢視選項",
+    "layout": "版面配置",
+    "columns": "欄位",
+    "display_options": "顯示選項",
+    "show_note_previews": "顯示註解",
+    "show_tags": "顯示標籤",
+    "show_title": "顯示標題",
+    "image_options": "圖片選項",
+    "image_fit_cover": "封面（填滿）",
+    "image_fit_contain": "包含（符合）"
+  },
+  "version": {
+    "new_release_available": "有新的版本更新說明",
+    "whats_new_title": "v{{version}} 最新消息",
+    "release_notes_description": "以下是從 GitHub 版本更新說明取得的最新更新。",
+    "loading_release_notes": "載入版本更新說明中…",
+    "unable_to_load_release_notes": "目前無法載入版本更新說明。請稍後再試。",
+    "no_release_notes": "此版本沒有發佈版本更新說明。",
+    "release_notes_synced": "版本更新說明已從 GitHub 同步。",
+    "view_on_github": "在 GitHub 上檢視"
+  },
+  "wrapped": {
+    "title": "您的 {{year}} 年度回顧",
+    "subtitle": "Karakeep 年度大事記",
+    "banner": {
+      "title": "您的 2025 年度回顧已準備就緒！",
+      "description": "看看你這年的書籤",
+      "view_now": "立即檢視"
+    },
+    "button": "2025 年度回顧",
+    "loading": "正在載入您的年度回顧...",
+    "failed_to_load": "載入您的年度回顧資料失敗",
+    "sections": {
+      "total_saves": {
+        "prefix": "您已儲存",
+        "suffix": "今年儲存的項目數",
+        "suffix_singular": "今年儲存的項目"
+      },
+      "first_bookmark": {
+        "title": "你的旅程開始了",
+        "description": "{{year}} 年首次儲存："
+      },
+      "top_domains": "你的熱門網站",
+      "top_tags": "你的熱門標籤",
+      "monthly_activity": "你這一年儲存的內容",
+      "most_active_day": "你最活躍的一天",
+      "peak_times": {
+        "title": "你何時儲存",
+        "peak_hour": "尖峰時段",
+        "peak_day": "尖峰日"
+      },
+      "how_you_save": "你如何儲存",
+      "what_you_saved": "你儲存了什麼",
+      "summary": {
+        "favorites": "最愛",
+        "tags_created": "已建立的標籤",
+        "highlights": "精選"
+      },
+      "types": {
+        "links": "連結",
+        "notes": "筆記",
+        "assets": "資產"
+      }
+    },
+    "footer": "使用 Karakeep 製作",
+    "share": "分享",
+    "download": "下載",
+    "close": "關閉",
+    "generating": "正在產生..."
+  },
+  "keyboard_shortcuts": {
+    "title": "鍵盤快捷鍵",
+    "sections": {
+      "navigation": "導覽",
+      "actions": "操作",
+      "selection": "選取",
+      "other": "其他"
+    },
+    "move_left": "向左移動",
+    "move_down": "向下移動",
+    "move_up": "向上移動",
+    "move_right": "向右移動",
+    "open_bookmark": "開啟書籤",
+    "clear_focus": "清除焦點 / 退出批量編輯",
+    "toggle_favorite": "切換收藏",
+    "toggle_archive": "封存 / 取消封存",
+    "delete_bookmark": "刪除書籤",
+    "toggle_selection": "切換選取",
+    "select_all": "全選",
+    "deselect_all": "取消全選",
+    "show_help": "顯示鍵盤快捷鍵",
+    "focus_search_alt": "聚焦搜尋"
+  }
+}

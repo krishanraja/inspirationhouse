@@ -1,0 +1,1090 @@
+import * as dns from "dns";
+import { TRPCError } from "@trpc/server";
+import { and, asc, count, eq, gt, gte, inArray, or, sum } from "drizzle-orm";
+import { z } from "zod";
+
+import {
+  assets,
+  bookmarkAssets,
+  bookmarkLinks,
+  bookmarks,
+  sessions,
+  subscriptions,
+  users,
+} from "@karakeep/db/schema";
+import {
+  AdminMaintenanceQueue,
+  AssetPreprocessingQueue,
+  buildCrawlIdempotencyKey,
+  EmbeddingsQueue,
+  FeedQueue,
+  LinkCrawlerQueue,
+  LowPriorityCrawlerQueue,
+  OpenAIQueue,
+  QueuePriority,
+  SearchIndexingQueue,
+  triggerSearchReindex,
+  VideoWorkerQueue,
+  WebhookQueue,
+  zSystemAdminMaintenanceTaskSchema,
+} from "@karakeep/shared-server";
+import serverConfig from "@karakeep/shared/config";
+import logger from "@karakeep/shared/logger";
+import { PluginManager, PluginType } from "@karakeep/shared/plugins";
+import { getSearchClient } from "@karakeep/shared/search";
+import {
+  resetPasswordSchema,
+  updateUserSchema,
+  zAdminCreateUserSchema,
+  zAdminGetUserSchema,
+  zAdminUserSchema,
+  zAdminJobModifiedWithinSecondsSchema,
+} from "@karakeep/shared/types/admin";
+import { BookmarkTypes } from "@karakeep/shared/types/bookmarks";
+import { setUrlHostnameFromResolvedAddress } from "@karakeep/shared/utils/url";
+import { getVectorStoreClient } from "@karakeep/shared/vectorStore";
+
+import { setUserPassword } from "../auth";
+import { createAdminScopedProcedure, router } from "../index";
+import { Bookmark } from "../models/bookmarks";
+import { User } from "../models/users";
+import { syncStripeDataToDatabase } from "./subscriptions";
+
+const adminBookmarksProcedure = createAdminScopedProcedure("bookmarks");
+const adminJobsProcedure = createAdminScopedProcedure("jobs");
+const adminSystemProcedure = createAdminScopedProcedure("system");
+const adminUsersProcedure = createAdminScopedProcedure("users");
+
+function modifiedWithin(modifiedWithinSeconds?: number) {
+  return modifiedWithinSeconds === undefined
+    ? undefined
+    : gte(
+        bookmarks.modifiedAt,
+        new Date(Date.now() - modifiedWithinSeconds * 1000),
+      );
+}
+
+export const adminAppRouter = router({
+  stats: adminSystemProcedure
+    .output(
+      z.object({
+        numUsers: z.number(),
+        numBookmarks: z.number(),
+      }),
+    )
+    .query(async ({ ctx }) => {
+      const [[{ value: numUsers }], [{ value: numBookmarks }]] =
+        await Promise.all([
+          ctx.db.select({ value: count() }).from(users),
+          ctx.db.select({ value: count() }).from(bookmarks),
+        ]);
+
+      return {
+        numUsers,
+        numBookmarks,
+      };
+    }),
+  backgroundJobsStats: adminJobsProcedure
+    .output(
+      z.object({
+        crawlStats: z.object({
+          queued: z.number(),
+          pending: z.number(),
+          failed: z.number(),
+        }),
+        inferenceStats: z.object({
+          queued: z.number(),
+          pending: z.number(),
+          failed: z.number(),
+        }),
+        indexingStats: z.object({
+          queued: z.number(),
+        }),
+        embeddingsStats: z.object({
+          queued: z.number(),
+          pending: z.number(),
+          failed: z.number(),
+        }),
+        adminMaintenanceStats: z.object({
+          queued: z.number(),
+        }),
+        videoStats: z.object({
+          queued: z.number(),
+        }),
+        webhookStats: z.object({
+          queued: z.number(),
+        }),
+        assetPreprocessingStats: z.object({
+          queued: z.number(),
+        }),
+        feedStats: z.object({
+          queued: z.number(),
+        }),
+      }),
+    )
+    .query(async ({ ctx }) => {
+      const [
+        // Crawls
+        queuedCrawls,
+        queuedLowPriorityCrawls,
+        [{ value: pendingCrawls }],
+        [{ value: failedCrawls }],
+
+        // Indexing
+        queuedIndexing,
+
+        // Embeddings
+        queuedEmbeddings,
+        [{ value: pendingEmbeddings }],
+        [{ value: failedEmbeddings }],
+
+        // Inference
+        queuedInferences,
+        [{ value: pendingInference }],
+        [{ value: failedInference }],
+
+        // Admin maintenance
+        queuedAdminMaintenance,
+
+        // Video
+        queuedVideo,
+
+        // Webhook
+        queuedWebhook,
+
+        // Asset Preprocessing
+        queuedAssetPreprocessing,
+
+        // Feed
+        queuedFeed,
+      ] = await Promise.all([
+        // Crawls
+        LinkCrawlerQueue.stats(),
+        LowPriorityCrawlerQueue.stats(),
+        ctx.db
+          .select({ value: count() })
+          .from(bookmarkLinks)
+          .where(eq(bookmarkLinks.crawlStatus, "pending")),
+        ctx.db
+          .select({ value: count() })
+          .from(bookmarkLinks)
+          .where(eq(bookmarkLinks.crawlStatus, "failure")),
+
+        // Indexing
+        SearchIndexingQueue.stats(),
+
+        // Embeddings
+        EmbeddingsQueue.stats(),
+        ctx.db
+          .select({ value: count() })
+          .from(bookmarks)
+          .where(eq(bookmarks.embeddingStatus, "pending")),
+        ctx.db
+          .select({ value: count() })
+          .from(bookmarks)
+          .where(eq(bookmarks.embeddingStatus, "failure")),
+
+        // Inference
+        OpenAIQueue.stats(),
+        ctx.db
+          .select({ value: count() })
+          .from(bookmarks)
+          .where(
+            or(
+              eq(bookmarks.taggingStatus, "pending"),
+              eq(bookmarks.summarizationStatus, "pending"),
+            ),
+          ),
+        ctx.db
+          .select({ value: count() })
+          .from(bookmarks)
+          .where(
+            or(
+              eq(bookmarks.taggingStatus, "failure"),
+              eq(bookmarks.summarizationStatus, "failure"),
+            ),
+          ),
+
+        // Admin maintenance
+        AdminMaintenanceQueue.stats(),
+
+        // Video
+        VideoWorkerQueue.stats(),
+
+        // Webhook
+        WebhookQueue.stats(),
+
+        // Asset Preprocessing
+        AssetPreprocessingQueue.stats(),
+
+        // Feed
+        FeedQueue.stats(),
+      ]);
+
+      return {
+        crawlStats: {
+          queued:
+            queuedCrawls.pending +
+            queuedCrawls.pending_retry +
+            queuedLowPriorityCrawls.pending +
+            queuedLowPriorityCrawls.pending_retry,
+          pending: pendingCrawls,
+          failed: failedCrawls,
+        },
+        inferenceStats: {
+          queued: queuedInferences.pending + queuedInferences.pending_retry,
+          pending: pendingInference,
+          failed: failedInference,
+        },
+        indexingStats: {
+          queued: queuedIndexing.pending + queuedIndexing.pending_retry,
+        },
+        embeddingsStats: {
+          queued: queuedEmbeddings.pending + queuedEmbeddings.pending_retry,
+          pending: pendingEmbeddings,
+          failed: failedEmbeddings,
+        },
+        adminMaintenanceStats: {
+          queued:
+            queuedAdminMaintenance.pending +
+            queuedAdminMaintenance.pending_retry,
+        },
+        videoStats: {
+          queued: queuedVideo.pending + queuedVideo.pending_retry,
+        },
+        webhookStats: {
+          queued: queuedWebhook.pending + queuedWebhook.pending_retry,
+        },
+        assetPreprocessingStats: {
+          queued:
+            queuedAssetPreprocessing.pending +
+            queuedAssetPreprocessing.pending_retry,
+        },
+        feedStats: {
+          queued: queuedFeed.pending + queuedFeed.pending_retry,
+        },
+      };
+    }),
+  recrawlLinks: adminBookmarksProcedure
+    .input(
+      z.object({
+        crawlStatus: z.enum(["success", "failure", "pending", "all"]),
+        runInference: z.boolean(),
+        modifiedWithinSeconds: zAdminJobModifiedWithinSecondsSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const bookmarkIds = await ctx.db
+        .select({ id: bookmarkLinks.id })
+        .from(bookmarkLinks)
+        .innerJoin(bookmarks, eq(bookmarkLinks.id, bookmarks.id))
+        .where(
+          and(
+            input.crawlStatus === "all"
+              ? undefined
+              : eq(bookmarkLinks.crawlStatus, input.crawlStatus),
+            modifiedWithin(input.modifiedWithinSeconds),
+          ),
+        );
+
+      await Promise.all(
+        bookmarkIds.map((b) => {
+          const payload = {
+            bookmarkId: b.id,
+            runInference: input.runInference,
+          };
+          return LowPriorityCrawlerQueue.enqueue(payload, {
+            priority: QueuePriority.Low,
+            idempotencyKey: buildCrawlIdempotencyKey(payload),
+          });
+        }),
+      );
+    }),
+  reindexAllBookmarks: adminBookmarksProcedure
+    .input(
+      z
+        .object({
+          modifiedWithinSeconds:
+            zAdminJobModifiedWithinSecondsSchema.optional(),
+        })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input?.modifiedWithinSeconds === undefined) {
+        const searchIdx = await getSearchClient();
+        await searchIdx?.clearIndex();
+      }
+      const bookmarkIds = await ctx.db
+        .select({ id: bookmarks.id })
+        .from(bookmarks)
+        .where(modifiedWithin(input?.modifiedWithinSeconds));
+
+      await Promise.all(
+        bookmarkIds.map((b) =>
+          triggerSearchReindex(b.id, {
+            priority: QueuePriority.Low,
+          }),
+        ),
+      );
+    }),
+  regenerateAllBookmarkEmbeddings: adminBookmarksProcedure
+    .input(
+      z
+        .object({
+          status: z.enum(["failure", "pending", "all"]).default("all"),
+          modifiedWithinSeconds:
+            zAdminJobModifiedWithinSecondsSchema.optional(),
+        })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const status = input?.status ?? "all";
+      const modifiedAtFilter = modifiedWithin(input?.modifiedWithinSeconds);
+
+      if (status === "all" && input?.modifiedWithinSeconds === undefined) {
+        const vectorStore = await getVectorStoreClient();
+        await vectorStore?.clearIndex();
+      }
+
+      // Stream through the matching bookmarks in keyset-paginated batches so we
+      // never load every id into memory at once. For "all"/"failure" we flip the
+      // page to "pending" before enqueueing (avoids overwriting a worker-set
+      // status), which also consumes the "failure" filter as we advance.
+      const PAGE_SIZE = 1000;
+      let cursor: string | undefined = undefined;
+      for (;;) {
+        const page = await ctx.db
+          .select({ id: bookmarks.id })
+          .from(bookmarks)
+          .where(
+            and(
+              status === "all"
+                ? undefined
+                : eq(bookmarks.embeddingStatus, status),
+              modifiedAtFilter,
+              cursor ? gt(bookmarks.id, cursor) : undefined,
+            ),
+          )
+          .orderBy(asc(bookmarks.id))
+          .limit(PAGE_SIZE);
+        if (page.length === 0) {
+          break;
+        }
+
+        const ids = page.map((b) => b.id);
+        if (status !== "pending") {
+          await ctx.db
+            .update(bookmarks)
+            .set({ embeddingStatus: "pending" })
+            .where(inArray(bookmarks.id, ids));
+        }
+
+        await Promise.all(
+          ids.map((id) =>
+            EmbeddingsQueue.enqueue(
+              {
+                bookmarkId: id,
+                type: "embed",
+                force: true,
+                runTaggingOnComplete: false,
+              },
+              {
+                priority: QueuePriority.Low,
+                groupId: "admin",
+              },
+            ),
+          ),
+        );
+
+        cursor = ids[ids.length - 1];
+        if (page.length < PAGE_SIZE) {
+          break;
+        }
+      }
+    }),
+  reprocessAssetsFixMode: adminBookmarksProcedure
+    .input(
+      z
+        .object({
+          modifiedWithinSeconds:
+            zAdminJobModifiedWithinSecondsSchema.optional(),
+        })
+        .optional(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const bookmarkIds = await ctx.db
+        .select({ id: bookmarkAssets.id })
+        .from(bookmarkAssets)
+        .innerJoin(bookmarks, eq(bookmarkAssets.id, bookmarks.id))
+        .where(modifiedWithin(input?.modifiedWithinSeconds));
+
+      await Promise.all(
+        bookmarkIds.map((b) =>
+          AssetPreprocessingQueue.enqueue(
+            {
+              bookmarkId: b.id,
+              fixMode: true,
+            },
+            {
+              priority: QueuePriority.Low,
+            },
+          ),
+        ),
+      );
+    }),
+  reRunInferenceOnAllBookmarks: adminBookmarksProcedure
+    .input(
+      z.object({
+        type: z.enum(["tag", "summarize"]),
+        status: z.enum(["success", "failure", "pending", "all"]),
+        modifiedWithinSeconds: zAdminJobModifiedWithinSecondsSchema.optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const statusFilter =
+        input.status === "all"
+          ? undefined
+          : eq(
+              input.type === "tag"
+                ? bookmarks.taggingStatus
+                : bookmarks.summarizationStatus,
+              input.status,
+            );
+      const bookmarkIds = await ctx.db
+        .select({ id: bookmarks.id })
+        .from(bookmarks)
+        .where(and(statusFilter, modifiedWithin(input.modifiedWithinSeconds)));
+
+      await Promise.all(
+        bookmarkIds.map((b) =>
+          OpenAIQueue.enqueue(
+            { bookmarkId: b.id, type: input.type },
+            {
+              priority: QueuePriority.Low,
+            },
+          ),
+        ),
+      );
+    }),
+  runAdminMaintenanceTask: adminJobsProcedure
+    .input(zSystemAdminMaintenanceTaskSchema)
+    .mutation(async ({ input }) => {
+      await AdminMaintenanceQueue.enqueue(input);
+    }),
+  userStats: adminUsersProcedure
+    .output(
+      z.record(
+        z.string(),
+        z.object({
+          numBookmarks: z.number(),
+          assetSizes: z.number(),
+        }),
+      ),
+    )
+    .query(async ({ ctx }) => {
+      const [userIds, bookmarkStats, assetStats] = await Promise.all([
+        ctx.db.select({ id: users.id }).from(users),
+        ctx.db
+          .select({ id: bookmarks.userId, value: count() })
+          .from(bookmarks)
+          .groupBy(bookmarks.userId),
+        ctx.db
+          .select({ id: assets.userId, value: sum(assets.size) })
+          .from(assets)
+          .groupBy(assets.userId),
+      ]);
+
+      const results: Record<
+        string,
+        { numBookmarks: number; assetSizes: number }
+      > = {};
+      for (const user of userIds) {
+        results[user.id] = {
+          numBookmarks: 0,
+          assetSizes: 0,
+        };
+      }
+      for (const stat of bookmarkStats) {
+        results[stat.id].numBookmarks = stat.value;
+      }
+      for (const stat of assetStats) {
+        results[stat.id].assetSizes = parseInt(stat.value ?? "0");
+      }
+
+      return results;
+    }),
+  getUser: adminUsersProcedure
+    .input(zAdminGetUserSchema)
+    .output(zAdminUserSchema)
+    .query(async ({ input, ctx }) => {
+      const user = await ctx.db.query.users.findFirst({
+        columns: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          bookmarkQuota: true,
+          storageQuota: true,
+        },
+        where:
+          "id" in input ? eq(users.id, input.id) : eq(users.email, input.email),
+      });
+      if (!user) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
+      return user;
+    }),
+  createUser: adminUsersProcedure
+    .input(zAdminCreateUserSchema)
+    .output(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+        role: z.enum(["user", "admin"]).nullable(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      // Users created by an admin don't need to verify their email.
+      return await User.createRaw(ctx.db, {
+        name: input.name,
+        email: input.email,
+        password: input.password,
+        role: input.role,
+        emailVerified: true,
+      });
+    }),
+  updateUser: adminUsersProcedure
+    .input(updateUserSchema)
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user.id == input.userId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot update own user",
+        });
+      }
+
+      const updateData: Partial<typeof users.$inferInsert> = {};
+
+      if (input.role !== undefined) {
+        updateData.role = input.role;
+      }
+
+      if (input.bookmarkQuota !== undefined) {
+        updateData.bookmarkQuota = input.bookmarkQuota;
+      }
+
+      if (input.storageQuota !== undefined) {
+        updateData.storageQuota = input.storageQuota;
+      }
+
+      if (input.browserCrawlingEnabled !== undefined) {
+        updateData.browserCrawlingEnabled = input.browserCrawlingEnabled;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No fields to update",
+        });
+      }
+
+      const result = await ctx.db
+        .update(users)
+        .set(updateData)
+        .where(eq(users.id, input.userId));
+
+      if (!result.changes) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
+    }),
+  resetPassword: adminUsersProcedure
+    .input(resetPasswordSchema)
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.user.id == input.userId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Cannot reset own password",
+        });
+      }
+      const user = await ctx.db.query.users.findFirst({
+        columns: { id: true },
+        where: eq(users.id, input.userId),
+      });
+      if (!user) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
+      await setUserPassword(ctx.db, user.id, input.newPassword);
+      // Someone else might know the old password, so sign the user out
+      // everywhere.
+      await ctx.db.delete(sessions).where(eq(sessions.userId, user.id));
+    }),
+  purgeBookmarksOverQuota: adminUsersProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        dryRun: z.boolean().optional().default(false),
+      }),
+    )
+    .output(
+      z.object({
+        numBookmarks: z.number(),
+        bookmarkQuota: z.number(),
+        numBookmarksToDelete: z.number(),
+        enqueued: z.boolean(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const user = await ctx.db.query.users.findFirst({
+        where: eq(users.id, input.userId),
+        columns: { bookmarkQuota: true },
+      });
+      if (!user) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
+      if (user.bookmarkQuota === null) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "User doesn't have a bookmark quota",
+        });
+      }
+      const [{ numBookmarks }] = await ctx.db
+        .select({ numBookmarks: count() })
+        .from(bookmarks)
+        .where(eq(bookmarks.userId, input.userId));
+      const numBookmarksToDelete = Math.max(
+        0,
+        numBookmarks - user.bookmarkQuota,
+      );
+
+      const enqueued = !input.dryRun && numBookmarksToDelete > 0;
+      if (enqueued) {
+        await AdminMaintenanceQueue.enqueue({
+          type: "purge_bookmarks_over_quota",
+          args: { userId: input.userId },
+        });
+      }
+      return {
+        numBookmarks,
+        bookmarkQuota: user.bookmarkQuota,
+        numBookmarksToDelete,
+        enqueued,
+      };
+    }),
+  getAdminNoticies: adminSystemProcedure
+    .output(
+      z.object({
+        // Unused for now
+      }),
+    )
+    .query(() => {
+      return {
+        // Unused for now
+      };
+    }),
+  checkConnections: adminSystemProcedure
+    .output(
+      z.object({
+        searchEngine: z.object({
+          configured: z.boolean(),
+          connected: z.boolean(),
+          pluginName: z.string().optional(),
+          error: z.string().optional(),
+        }),
+        browser: z.object({
+          configured: z.boolean(),
+          connected: z.boolean(),
+          pluginName: z.string().optional(),
+          error: z.string().optional(),
+        }),
+        queue: z.object({
+          configured: z.boolean(),
+          connected: z.boolean(),
+          pluginName: z.string().optional(),
+          error: z.string().optional(),
+        }),
+        vectorStore: z.object({
+          configured: z.boolean(),
+          connected: z.boolean(),
+          pluginName: z.string().optional(),
+          error: z.string().optional(),
+        }),
+      }),
+    )
+    .query(async () => {
+      const searchEngineStatus: {
+        configured: boolean;
+        connected: boolean;
+        pluginName?: string;
+        error?: string;
+      } = { configured: false, connected: false };
+      const browserStatus: {
+        configured: boolean;
+        connected: boolean;
+        pluginName?: string;
+        error?: string;
+      } = { configured: false, connected: false };
+      const queueStatus: {
+        configured: boolean;
+        connected: boolean;
+        pluginName?: string;
+        error?: string;
+      } = { configured: true, connected: false };
+
+      const vectorStoreStatus: {
+        configured: boolean;
+        connected: boolean;
+        pluginName?: string;
+        error?: string;
+      } = { configured: false, connected: false };
+
+      // Resolving a client can itself throw (the provider connects lazily on
+      // first use), so it has to be inside the try as well -- otherwise one
+      // unreachable backend takes down this whole endpoint instead of just
+      // reporting itself as disconnected.
+      const searchPluginName = PluginManager.getPluginName(PluginType.Search);
+      if (searchPluginName) {
+        searchEngineStatus.pluginName = searchPluginName;
+      }
+      try {
+        const searchClient = await getSearchClient();
+        searchEngineStatus.configured = searchClient !== null;
+        if (searchClient) {
+          await searchClient.search({ query: "", limit: 1 });
+          searchEngineStatus.connected = true;
+        }
+      } catch (error) {
+        // A provider is registered (that's the only way getClient can throw),
+        // so it is configured -- it just can't be reached right now.
+        searchEngineStatus.configured = true;
+        searchEngineStatus.error =
+          error instanceof Error ? error.message : "Unknown error";
+      }
+
+      const vectorStorePluginName = PluginManager.getPluginName(
+        PluginType.VectorStore,
+      );
+      if (vectorStorePluginName) {
+        vectorStoreStatus.pluginName = vectorStorePluginName;
+      }
+      try {
+        const vectorStoreClient = await getVectorStoreClient();
+        vectorStoreStatus.configured = vectorStoreClient !== null;
+        if (vectorStoreClient) {
+          vectorStoreStatus.connected = await vectorStoreClient.getHealth();
+        }
+      } catch (error) {
+        vectorStoreStatus.configured = true;
+        vectorStoreStatus.error =
+          error instanceof Error ? error.message : "Unknown error";
+      }
+
+      browserStatus.configured =
+        !!serverConfig.crawler.browserWebUrl ||
+        !!serverConfig.crawler.browserWebSocketUrl;
+
+      if (browserStatus.configured) {
+        if (serverConfig.crawler.browserWebUrl) {
+          browserStatus.pluginName = "Browserless/Chrome";
+        } else if (serverConfig.crawler.browserWebSocketUrl) {
+          browserStatus.pluginName = "WebSocket Browser";
+        }
+
+        try {
+          if (serverConfig.crawler.browserWebUrl) {
+            const webUrl = new URL(serverConfig.crawler.browserWebUrl);
+            const { address } = await dns.promises.lookup(webUrl.hostname);
+            setUrlHostnameFromResolvedAddress(webUrl, address);
+            webUrl.pathname = "/json/version";
+            const response = await fetch(`${webUrl.toString()}`, {
+              signal: AbortSignal.timeout(5000),
+            });
+            if (response.ok) {
+              browserStatus.connected = true;
+            } else {
+              browserStatus.error = `HTTP ${response.status}: ${response.statusText}`;
+            }
+          } else if (serverConfig.crawler.browserWebSocketUrl) {
+            browserStatus.connected = true;
+            browserStatus.error =
+              "WebSocket URL configured (connection check not supported)";
+          }
+        } catch (error) {
+          browserStatus.error =
+            error instanceof Error ? error.message : "Unknown error";
+        }
+      }
+
+      const queuePluginName = PluginManager.getPluginName(PluginType.Queue);
+      if (queuePluginName) {
+        queueStatus.pluginName = queuePluginName;
+      }
+
+      try {
+        await LinkCrawlerQueue.stats();
+        queueStatus.connected = true;
+      } catch (error) {
+        queueStatus.error =
+          error instanceof Error ? error.message : "Unknown error";
+      }
+
+      return {
+        searchEngine: searchEngineStatus,
+        browser: browserStatus,
+        queue: queueStatus,
+        vectorStore: vectorStoreStatus,
+      };
+    }),
+  getBookmarkDebugInfo: adminBookmarksProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .output(
+      z.object({
+        id: z.string(),
+        type: z.enum([
+          BookmarkTypes.LINK,
+          BookmarkTypes.TEXT,
+          BookmarkTypes.ASSET,
+        ]),
+        source: z
+          .enum([
+            "api",
+            "web",
+            "extension",
+            "cli",
+            "mobile",
+            "singlefile",
+            "rss",
+            "import",
+          ])
+          .nullable(),
+        createdAt: z.date(),
+        modifiedAt: z.date().nullable(),
+        title: z.string().nullable(),
+        summary: z.string().nullable(),
+        taggingStatus: z.enum(["pending", "failure", "success"]).nullable(),
+        summarizationStatus: z
+          .enum(["pending", "failure", "success"])
+          .nullable(),
+        embeddingStatus: z.enum(["pending", "failure", "success"]).nullable(),
+        userId: z.string(),
+        linkInfo: z
+          .object({
+            url: z.string(),
+            crawlStatus: z.enum(["pending", "failure", "success"]),
+            crawlStatusCode: z.number().nullable(),
+            crawledAt: z.date().nullable(),
+            hasHtmlContent: z.boolean(),
+            hasContentAsset: z.boolean(),
+            htmlContentPreview: z.string().nullable(),
+          })
+          .nullable(),
+        textInfo: z
+          .object({
+            hasText: z.boolean(),
+            sourceUrl: z.string().nullable(),
+          })
+          .nullable(),
+        assetInfo: z
+          .object({
+            assetType: z.enum(["image", "pdf"]),
+            hasContent: z.boolean(),
+            fileName: z.string().nullable(),
+          })
+          .nullable(),
+        tags: z.array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            attachedBy: z.enum(["ai", "human"]),
+          }),
+        ),
+        assets: z.array(
+          z.object({
+            id: z.string(),
+            assetType: z.string(),
+            size: z.number(),
+            url: z.string().nullable(),
+          }),
+        ),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      logger.info(
+        `[admin] Admin ${ctx.user.id} accessed debug info for bookmark ${input.bookmarkId}`,
+      );
+
+      return await Bookmark.buildDebugInfo(ctx, input.bookmarkId);
+    }),
+  adminRecrawlBookmark: adminBookmarksProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      // Verify bookmark exists and is a link
+      const bookmark = await ctx.db.query.bookmarks.findFirst({
+        where: eq(bookmarks.id, input.bookmarkId),
+      });
+
+      if (!bookmark) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bookmark not found",
+        });
+      }
+
+      if (bookmark.type !== BookmarkTypes.LINK) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only link bookmarks can be recrawled",
+        });
+      }
+
+      const payload = { bookmarkId: input.bookmarkId };
+      await LowPriorityCrawlerQueue.enqueue(payload, {
+        priority: QueuePriority.Low,
+        groupId: "admin",
+        idempotencyKey: buildCrawlIdempotencyKey(payload),
+      });
+    }),
+  adminReindexBookmark: adminBookmarksProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      // Verify bookmark exists
+      const bookmark = await ctx.db.query.bookmarks.findFirst({
+        where: eq(bookmarks.id, input.bookmarkId),
+      });
+
+      if (!bookmark) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bookmark not found",
+        });
+      }
+
+      await triggerSearchReindex(input.bookmarkId, {
+        priority: QueuePriority.Low,
+        groupId: "admin",
+      });
+    }),
+  adminRegenerateBookmarkEmbedding: adminBookmarksProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      // Verify bookmark exists
+      const bookmark = await ctx.db.query.bookmarks.findFirst({
+        where: eq(bookmarks.id, input.bookmarkId),
+      });
+
+      if (!bookmark) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bookmark not found",
+        });
+      }
+
+      await ctx.db
+        .update(bookmarks)
+        .set({ embeddingStatus: "pending" })
+        .where(eq(bookmarks.id, input.bookmarkId));
+
+      await EmbeddingsQueue.enqueue(
+        {
+          bookmarkId: input.bookmarkId,
+          type: "embed",
+          force: true,
+          runTaggingOnComplete: false,
+        },
+        {
+          priority: QueuePriority.Low,
+          groupId: "admin",
+        },
+      );
+    }),
+  adminRetagBookmark: adminBookmarksProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      // Verify bookmark exists
+      const bookmark = await ctx.db.query.bookmarks.findFirst({
+        where: eq(bookmarks.id, input.bookmarkId),
+      });
+
+      if (!bookmark) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bookmark not found",
+        });
+      }
+
+      await OpenAIQueue.enqueue(
+        {
+          bookmarkId: input.bookmarkId,
+          type: "tag",
+        },
+        {
+          priority: QueuePriority.Low,
+          groupId: "admin",
+        },
+      );
+    }),
+  adminResummarizeBookmark: adminBookmarksProcedure
+    .input(z.object({ bookmarkId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      // Verify bookmark exists and is a link
+      const bookmark = await ctx.db.query.bookmarks.findFirst({
+        where: eq(bookmarks.id, input.bookmarkId),
+      });
+
+      if (!bookmark) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Bookmark not found",
+        });
+      }
+
+      if (bookmark.type !== BookmarkTypes.LINK) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Only link bookmarks can be summarized",
+        });
+      }
+
+      await OpenAIQueue.enqueue(
+        {
+          bookmarkId: input.bookmarkId,
+          type: "summarize",
+        },
+        {
+          priority: QueuePriority.Low,
+          groupId: "admin",
+        },
+      );
+    }),
+  forceStripeSync: adminSystemProcedure
+    .input(z.object({ userId: z.string() }))
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ input, ctx }) => {
+      const subscription = await ctx.db.query.subscriptions.findFirst({
+        where: eq(subscriptions.userId, input.userId),
+      });
+
+      if (!subscription?.stripeCustomerId) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No Stripe customer found for the given user",
+        });
+      }
+
+      await syncStripeDataToDatabase(subscription.stripeCustomerId, ctx.db);
+
+      return { success: true };
+    }),
+});

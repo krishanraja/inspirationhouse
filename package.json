@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@karakeep/root",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev --parallel",
+    "clean": "git clean -xdf node_modules",
+    "clean:workspaces": "turbo clean",
+    "db:generate": "pnpm --filter @karakeep/db run generate",
+    "db:migrate": "pnpm --filter @karakeep/db run migrate",
+    "db:migrate:queue": "pnpm --filter @karakeep/workers run migrate:queue",
+    "db:studio": "pnpm --filter @karakeep/db studio",
+    "seed:apply": "pnpm --filter @karakeep/seed-snapshot run apply",
+    "seed:snapshot": "pnpm --filter @karakeep/seed-snapshot run snapshot",
+    "workers": "pnpm --filter @karakeep/workers run start",
+    "web": "pnpm --filter @karakeep/web run dev",
+    "web:portless": "pnpm --filter @karakeep/web run dev:portless",
+    "dev:worktree": "bash scripts/dev-worktree.sh",
+    "android": "pnpm --filter @karakeep/mobile android",
+    "ios": "pnpm --filter @karakeep/mobile ios",
+    "prepare": "husky",
+    "format": "turbo format --continue",
+    "format:fix": "turbo format:fix --continue",
+    "lint": "turbo lint --continue",
+    "lint:fix": "turbo lint:fix --continue",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "preflight": "turbo run typecheck lint format",
+    "preflight:fix": "turbo run typecheck lint:fix format:fix"
+  },
+  "dependencies": {
+    "husky": "^9.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "sherif": "^1.6.1",
+    "turbo": "^2.10.13"
+  },
+  "packageManager": "pnpm@11.2.1"
+}

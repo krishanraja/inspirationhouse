@@ -1,0 +1,232 @@
+"use client";
+
+import type { z } from "zod";
+import { useState } from "react";
+import { ActionButton } from "@/components/ui/action-button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/sonner";
+import { changePassword } from "@/lib/auth/client";
+import { useTranslation } from "@/lib/i18n/client";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation } from "@tanstack/react-query";
+import { Eye, EyeOff } from "lucide-react";
+import { useForm } from "react-hook-form";
+
+import { zChangePasswordSchema } from "@karakeep/shared/types/users";
+
+import { Button } from "../ui/button";
+import { SettingsSection } from "./SettingsPage";
+
+export function ChangePassword() {
+  const { t } = useTranslation();
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const form = useForm<z.infer<typeof zChangePasswordSchema>>({
+    resolver: zodResolver(zChangePasswordSchema),
+    defaultValues: {
+      currentPassword: "",
+      newPassword: "",
+      newPasswordConfirm: "",
+    },
+  });
+
+  const mutator = useMutation({
+    mutationFn: async (input: {
+      currentPassword: string;
+      newPassword: string;
+    }) => {
+      const result = await changePassword(input);
+      if (!result.ok) {
+        throw new Error(
+          result.code === "INVALID_PASSWORD"
+            ? "Your current password is incorrect"
+            : "Something went wrong",
+        );
+      }
+    },
+    onSuccess: () => {
+      toast({ description: "Password changed successfully" });
+      form.reset();
+    },
+    onError: (e) => {
+      toast({
+        description: e.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  async function onSubmit(value: z.infer<typeof zChangePasswordSchema>) {
+    mutator.mutate({
+      currentPassword: value.currentPassword,
+      newPassword: value.newPassword,
+    });
+  }
+
+  return (
+    <SettingsSection id="security" title="Security">
+      <Form {...form}>
+        <form
+          // POST so a submit before hydration doesn't put the password in the URL.
+          method="post"
+          onSubmit={form.handleSubmit(onSubmit)}
+          className="space-y-4"
+        >
+          <FormField
+            control={form.control}
+            name="currentPassword"
+            render={({ field }) => (
+              <FormItem className="space-y-2">
+                <FormLabel
+                  htmlFor="current-password"
+                  className="text-sm font-medium"
+                >
+                  {t("settings.info.current_password")}
+                </FormLabel>
+                <div className="relative">
+                  <FormControl>
+                    <Input
+                      id="current-password"
+                      type={showCurrentPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      placeholder={t("settings.info.current_password")}
+                      className="h-11 pr-10"
+                      {...field}
+                    />
+                  </FormControl>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent has-[>svg]:px-3 dark:hover:bg-transparent"
+                    aria-label={
+                      showCurrentPassword ? "Hide password" : "Show password"
+                    }
+                    aria-controls="current-password"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  >
+                    {showCurrentPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <FormField
+              control={form.control}
+              name="newPassword"
+              render={({ field }) => (
+                <FormItem className="space-y-2">
+                  <FormLabel
+                    htmlFor="new-password"
+                    className="text-sm font-medium"
+                  >
+                    {t("settings.info.new_password")}
+                  </FormLabel>
+                  <div className="relative">
+                    <FormControl>
+                      <Input
+                        id="new-password"
+                        type={showNewPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        placeholder={t("settings.info.new_password")}
+                        className="h-11 pr-10"
+                        {...field}
+                      />
+                    </FormControl>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent has-[>svg]:px-3 dark:hover:bg-transparent"
+                      aria-label={
+                        showNewPassword ? "Hide password" : "Show password"
+                      }
+                      aria-controls="new-password"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="newPasswordConfirm"
+              render={({ field }) => (
+                <FormItem className="space-y-2">
+                  <FormLabel
+                    htmlFor="confirm-password"
+                    className="text-sm font-medium"
+                  >
+                    {t("settings.info.confirm_new_password")}
+                  </FormLabel>
+                  <div className="relative">
+                    <FormControl>
+                      <Input
+                        id="confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        autoComplete="new-password"
+                        placeholder={t("settings.info.confirm_new_password")}
+                        className="h-11 pr-10"
+                        {...field}
+                      />
+                    </FormControl>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent has-[>svg]:px-3 dark:hover:bg-transparent"
+                      aria-label={
+                        showConfirmPassword ? "Hide password" : "Show password"
+                      }
+                      aria-controls="confirm-password"
+                      onClick={() =>
+                        setShowConfirmPassword(!showConfirmPassword)
+                      }
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <div className="flex justify-end">
+            <ActionButton type="submit" loading={mutator.isPending}>
+              {t("settings.info.change_password")}
+            </ActionButton>
+          </div>
+        </form>
+      </Form>
+    </SettingsSection>
+  );
+}

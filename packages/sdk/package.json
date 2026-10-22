@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@karakeep/sdk",
+  "version": "0.34.0",
+  "description": "Typescript SDK for Karakeep",
+  "license": "GNU Affero General Public License version 3",
+  "keywords": [
+    "hoarder",
+    "karakeep",
+    "sdk"
+  ],
+  "main": "./src/index.ts",
+  "type": "module",
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "exports": "./dist/index.js",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.ts"
+  },
+  "devDependencies": {
+    "@karakeep/tsconfig": "workspace:^0.1.0",
+    "@tsconfig/node22": "^22.0.0",
+    "openapi-typescript": "^7.6.1",
+    "tsx": "^4.23.13",
+    "vite": "^8.3.0",
+    "vite-plugin-dts": "^4.5.4"
+  },
+  "scripts": {
+    "build": "vite build",
+    "run": "tsx src/index.ts",
+    "lint": "oxlint --ignore-path=../../.gitignore .",
+    "lint:fix": "oxlint --ignore-path=../../.gitignore . --fix",
+    "format": "oxfmt --ignore-path=../../.gitignore --ignore-path=./.gitignore --check .",
+    "format:fix": "oxfmt --ignore-path=../../.gitignore --ignore-path=./.gitignore .",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/karakeep-app/karakeep.git",
+    "directory": "packages/sdk"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.13.3"
+  }
+}

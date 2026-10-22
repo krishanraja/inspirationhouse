@@ -1,0 +1,113 @@
+import { eq } from "drizzle-orm";
+import { workerStatsCounter } from "metrics";
+import { buildImpersonatingAuthedContext } from "trpc";
+import { withWorkerEventLog, withWorkerTracing } from "workerTracing";
+
+import type { ZRuleEngineRequest } from "@karakeep/shared-server";
+import { db } from "@karakeep/db";
+import { bookmarks } from "@karakeep/db/schema";
+import {
+  addLogFields,
+  RuleEngineQueue,
+  zRuleEngineRequestSchema,
+} from "@karakeep/shared-server";
+import serverConfig from "@karakeep/shared/config";
+import logger from "@karakeep/shared/logger";
+import { DequeuedJob, getQueueClient } from "@karakeep/shared/queueing";
+import { RuleEngine } from "@karakeep/trpc/lib/ruleEngine";
+
+export class RuleEngineWorker {
+  static async build() {
+    logger.info("Starting rule engine worker ...");
+    const worker = (await getQueueClient())!.createRunner<ZRuleEngineRequest>(
+      RuleEngineQueue,
+      {
+        run: withWorkerTracing(
+          "ruleEngineWorker.run",
+          withWorkerEventLog("ruleEngineWorker.run", runRuleEngine),
+        ),
+        onComplete: (job) => {
+          workerStatsCounter.labels("ruleEngine", "completed").inc();
+          const jobId = job.id;
+          logger.info(`[ruleEngine][${jobId}] Completed successfully`);
+          return Promise.resolve();
+        },
+        onError: (job) => {
+          workerStatsCounter.labels("ruleEngine", "failed").inc();
+          if (job.numRetriesLeft == 0) {
+            workerStatsCounter.labels("ruleEngine", "failed_permanent").inc();
+          }
+          const jobId = job.id;
+          logger.error(
+            `[ruleEngine][${jobId}] rule engine job failed: ${job.error}\n${job.error.stack}`,
+          );
+          return Promise.resolve();
+        },
+      },
+      {
+        concurrency: serverConfig.ruleEngine.numWorkers,
+        pollIntervalMs: 1000,
+        timeoutSecs: 10,
+        validator: zRuleEngineRequestSchema,
+      },
+    );
+
+    return worker;
+  }
+}
+
+async function getBookmarkUserId(bookmarkId: string) {
+  return await db.query.bookmarks.findFirst({
+    where: eq(bookmarks.id, bookmarkId),
+    columns: {
+      userId: true,
+    },
+  });
+}
+
+async function runRuleEngine(job: DequeuedJob<ZRuleEngineRequest>) {
+  const jobId = job.id;
+  const { bookmarkId, events } = job.data;
+  addLogFields<"ruleEngineWorker.run">({
+    "bookmark.id": bookmarkId,
+    "rule_engine.events_count": events.length,
+  });
+
+  const bookmark = await getBookmarkUserId(bookmarkId);
+  if (!bookmark) {
+    logger.info(
+      `[ruleEngine][${jobId}] bookmark with id ${bookmarkId} was not found, skipping`,
+    );
+    return;
+  }
+  const userId = bookmark.userId;
+  const authedCtx = await buildImpersonatingAuthedContext(userId);
+
+  const ruleEngine = await RuleEngine.forBookmark(authedCtx, bookmarkId);
+  if (!ruleEngine) {
+    logger.info(
+      `[ruleEngine][${jobId}] bookmark with id ${bookmarkId} was not found during rule evaluation, skipping`,
+    );
+    return;
+  }
+
+  const results = (
+    await Promise.all(events.map((event) => ruleEngine.onEvent(event)))
+  ).flat();
+
+  addLogFields<"ruleEngineWorker.run">({
+    "rule_engine.matched_count": results.length,
+  });
+
+  if (results.length == 0) {
+    return;
+  }
+
+  const message = results
+    .map((result) => `${result.ruleId}, (${result.type}): ${result.message}`)
+    .join("\n");
+
+  logger.info(
+    `[ruleEngine][${jobId}] Rule engine job for bookmark ${bookmarkId} completed with results: ${message}`,
+  );
+}

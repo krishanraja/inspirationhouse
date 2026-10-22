@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "@karakeep/tsconfig/node.json",
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json",
+    // @ghostery/adblocker-playwright only imports "playwright" for its type
+    // declarations; point them at patchright (same API) so it accepts our pages.
+    "paths": {
+      "playwright": ["../../node_modules/patchright"]
+    }
+  }
+}
