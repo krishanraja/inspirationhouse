@@ -1,1 +1,0 @@
-ALTER TABLE `apiKey` ADD `lastUsedAt` integer;

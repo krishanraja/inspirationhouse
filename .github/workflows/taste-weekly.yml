@@ -1,0 +1,38 @@
+name: taste-weekly
+# Distil claims, propose at most three, score the week. Saturday evening, ahead of Sunday's plan-week.
+on:
+  schedule:
+    - cron: '23 18 * * 6'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read only, write nothing
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: taste
+  cancel-in-progress: false
+jobs:
+  run:
+    # Schedules stay off until setup is done: set the repository variable
+    # TASTE_ENABLED to true after the migration and secrets are in place.
+    if: github.event_name != 'schedule' || vars.TASTE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Logs on this public repository carry counts only (src/log.ts).
+      - run: pnpm -s engine weekly ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY }}

@@ -1,71 +1,14 @@
-# Karakeep Project Overview
+# Working in Inspiration House
 
-This document provides context about the Karakeep project for the different agents.
+Read `README.md` first. These rules hold for every change.
 
-## Project Overview
+1. **Never write to Krish's Drive.** Google scopes stay read-only (`src/config.ts`, checked in `test/hygiene.test.ts`).
+2. **No data in the repository or the logs.** The repository is public. Fixtures are synthetic. Log through `src/log.ts`, which keeps counts and drops text. Readable previews go to `preview/`, which is gitignored.
+3. **Model output is always labelled.** A why the model inferred is `model_guess`; only evidence carrying his words can ground an `origin: krish` why.
+4. **Only Krish-attributed evidence counts.** `krish_words` and `krish_action` count toward a claim; `observation` and `machine_inference` are context. When a source mixes machine rows with his (as `feedback_queue` does), separate them in the collector and say how in a comment.
+5. **Never set a decision.** Claims go to `mindmake_studio_learning_proposals` as `proposed`. Only Krish approves, rejects or rewords, through the board or Control Center.
+6. **Never edit content-engine's taste files.** They are read through the GitHub API and nothing else.
+7. **Schema changes go to content-engine** as a migration, applied with `apply_migration`.
+8. **A run that produced nothing from real input is a failure** (`src/runs.ts`). Do not make it pass by catching the error.
 
-Karakeep is a monorepo project managed with Turborepo. It is a "read-it-later" bookmarking application with a focus on collecting and organizing information. The project is built with a modern tech stack, including:
-
-- **Frontend:** Next.js, React, TypeScript, Tailwind CSS
-- **Backend:** Hono (a lightweight web framework), tRPC
-- **Database:** Drizzle ORM (likely with a relational database like PostgreSQL or SQLite)
-- **Tooling:** Oxfmt, oxlint, Vitest, pnpm
-
-## Project Structure
-
-The project is organized into `apps` and `packages`:
-
-### Applications (`apps/`)
-
-- **`web`:** The main web application, built with Next.js.
-- **`browser-extension`:** A browser extension, likely for saving content to karakeep.
-- **`cli`:** A command-line interface for interacting with the service.
-- **`landing`:** A landing page for the project.
-- **`mobile`:** A mobile application (details unknown).
-- **`mcp`:** The Model Context Protocol (MCP) server to communicate with Karakeep.
-- **`workers`:** Background workers for processing tasks.
-
-### Packages (`packages/`)
-
-- **`api`:** The main API, built with Hono and tRPC.
-- **`db`:** Database schema and migrations, using Drizzle ORM.
-- **`e2e_tests`:** End-to-end tests for the project.
-- **`open-api`:** OpenAPI specifications for the API.
-- **`sdk`:** A software development kit for interacting with the API.
-- **`shared`:** Shared code and types between packages.
-- **`shared-react`:** Shared React components and hooks.
-- **`shared-server`:** Shared logic that's meant to be used on the server-side.
-- **`trpc`:** tRPC router and procedures. Most of the business logic is here.
-
-### Docs
-
-- **docs/docs/03-configuration.md**: Explains configuration options for the project.
-
-## Development Workflow
-
-- **Package Manager:** pnpm
-- **Build System:** Turborepo
-- **Code Formatting:** Oxfmt
-- **Linting:** oxlint
-- **Testing:** Vitest
-
-## Other info
-
-- This project uses shadcn/ui. The shadcn components in the web app are in `packages/web/components/ui`.
-- This project uses Tailwind CSS.
-- For the mobile app, we use [expo](https://expo.dev/).
-
-### Common Commands
-
-- `pnpm typecheck`: Typecheck the codebase.
-- `pnpm lint`: Lint the codebase.
-- `pnpm lint:fix`: Fix linting issues.
-- `pnpm format`: Format the codebase.
-- `pnpm format:fix`: Fix formatting issues.
-- `pnpm test`: Run tests.
-- To scope any of the above to one package, pass a turbo filter: `pnpm typecheck --filter=@karakeep/web` (prefer this over `pnpm --filter`).
-- `pnpm db:generate --name description_of_schema_change`: db migration after making schema changes
-
-Starting services:
-- `pnpm web`: Start the web application (this doesn't return, unless you kill it).
-- `pnpm workers`: Starts the background workers (this doesn't return, unless you kill it).
+Check before pushing: `pnpm typecheck && pnpm test`, then `pnpm engine daily --dry-run` against live data.
