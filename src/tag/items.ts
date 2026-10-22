@@ -33,7 +33,8 @@ export const TAG_PROMPT_REV = 'tag-v1'
 const isFolder = (f: DriveFile) => f.mimeType === 'application/vnd.google-apps.folder'
 
 /** Make sure every file in both folders has a card. New cards start untagged. */
-export async function syncItems(db: Db, google: Google): Promise<{ seen: number; written: number; files: Map<string, DriveFile> }> {
+// A dry run counts the cards it would add and writes nothing.
+export async function syncItems(db: Db, google: Google, write = true): Promise<{ seen: number; written: number; files: Map<string, DriveFile> }> {
   const [cold, video] = await Promise.all([google.listFolder(DRIVE.coldIdeas), google.listFolder(DRIVE.videoInspiration)])
   const rows = [
     ...cold.filter(f => !isFolder(f)).map(f => ({ f, folder: 'cold_ideas', lane: 'strategy' })),
@@ -41,6 +42,13 @@ export async function syncItems(db: Db, google: Google): Promise<{ seen: number;
   ]
   const files = new Map(rows.map(r => [r.f.id, r.f]))
   if (!rows.length) return { seen: 0, written: 0, files }
+  if (!write) {
+    const [known] = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.inspiration_items where drive_file_id = any(select jsonb_array_elements_text($1::jsonb))`,
+      [JSON.stringify(rows.map(r => r.f.id))],
+    )
+    return { seen: rows.length, written: rows.length - Number(known?.n ?? 0), files }
+  }
   const res = await db.query<{ n: number }>(
     `with ins as (
        insert into public.inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)

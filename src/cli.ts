@@ -91,7 +91,7 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
   await collect(ctx, cfg)
   if (!ctx.ledger) return finish(ctx, Number(ctx.counts.seen ?? 0))
   if (ctx.google) {
-    const items = await syncItems(ctx.db, ctx.google).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
+    const items = await syncItems(ctx.db, ctx.google, !ctx.dry).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
     if (items) {
       ctx.counts.items_seen = items.seen
       ctx.counts.items_new = items.written
@@ -177,7 +177,8 @@ async function main(): Promise<void> {
   }
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length }))
+  // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|explain|distil|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
