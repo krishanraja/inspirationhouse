@@ -10,6 +10,8 @@ export interface Google {
   thumbnail(file: DriveFile, width?: number): Promise<{ bytes: Buffer; mime: string } | null>
   // The text of a Doc, Markdown or plain-text file, for tagging. Capped.
   text(file: DriveFile, maxChars?: number): Promise<string | null>
+  // A file's own bytes (an uploaded workbook, say). Refuses past the cap.
+  download(fileId: string, maxBytes?: number): Promise<Buffer>
 }
 
 const TEXT_EXPORT: Record<string, string> = {
@@ -31,24 +33,43 @@ export interface DriveFile {
   videoMediaMetadata?: { durationMillis?: string }
 }
 
+export interface ServiceAccount { email: string; key: string }
+
+// The secret holds either the PEM alone (with the email beside it) or the whole
+// JSON key file. Either way, only the email and the private key are used.
+export function serviceAccount(cfg: Config): ServiceAccount | null {
+  const raw = cfg.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.trim()
+  if (!raw) return null
+  if (raw.startsWith('{')) {
+    let file: { client_email?: unknown; private_key?: unknown }
+    try { file = JSON.parse(raw) } catch { throw new Error('google key: the JSON key file does not parse') }
+    const email = typeof file.client_email === 'string' ? file.client_email : cfg.GOOGLE_SERVICE_ACCOUNT_EMAIL
+    if (typeof file.private_key !== 'string' || !email) throw new Error('google key: the JSON key file has no client_email or private_key')
+    return { email, key: file.private_key }
+  }
+  if (!cfg.GOOGLE_SERVICE_ACCOUNT_EMAIL) return null
+  return { email: cfg.GOOGLE_SERVICE_ACCOUNT_EMAIL, key: raw.replace(/\\n/g, '\n') }
+}
+
 export function googleConfigured(cfg: Config): boolean {
-  return Boolean(cfg.GOOGLE_SERVICE_ACCOUNT_EMAIL && cfg.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY)
+  return serviceAccount(cfg) !== null
 }
 
 const b64url = (s: string | Buffer) => Buffer.from(s).toString('base64url')
 
 async function accessToken(cfg: Config): Promise<string> {
+  const sa = serviceAccount(cfg)
+  if (!sa) throw new Error('google auth failed: no service account configured')
   const now = Math.floor(Date.now() / 1000)
   const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
   const claims = b64url(JSON.stringify({
-    iss: cfg.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    iss: sa.email,
     scope: GOOGLE_SCOPES.join(' '),
     aud: 'https://oauth2.googleapis.com/token',
     iat: now,
     exp: now + 3000,
   }))
-  const key = String(cfg.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY).replace(/\\n/g, '\n')
-  const signature = createSign('RSA-SHA256').update(`${header}.${claims}`).sign(key).toString('base64url')
+  const signature = createSign('RSA-SHA256').update(`${header}.${claims}`).sign(sa.key).toString('base64url')
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -109,6 +130,15 @@ export async function connectGoogle(cfg: Config): Promise<Google> {
       const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } })
       if (!res.ok) return null
       return (await res.text()).replace(/\u0000/g, '').slice(0, maxChars)
+    },
+    async download(fileId, maxBytes = 20_000_000) {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error(`google download failed: HTTP ${res.status}`)
+      const bytes = Buffer.from(await res.arrayBuffer())
+      if (bytes.length > maxBytes) throw new Error('google download refused: file is over the size cap')
+      return bytes
     },
   }
 }

@@ -9,6 +9,10 @@ on:
         description: Read only, write nothing
         type: boolean
         default: true
+      use_model:
+        description: Call the model (costs money; off proves access for free)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -30,7 +34,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Logs on this public repository carry counts only (src/log.ts).
-      - run: pnpm -s engine weekly ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+      - run: pnpm -s engine weekly ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }} ${{ (github.event_name == 'workflow_dispatch' && !inputs.use_model) && '--no-model' || '' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

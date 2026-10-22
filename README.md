@@ -11,7 +11,7 @@ It is headless: no UI of its own and nothing to host. It runs on GitHub Actions,
 
 | Stage | When | What |
 |---|---|---|
-| collect | daily | Reads, never writes, the places Krish's taste already lands: content-engine's taste files (learnings, title verdicts, golden and rejected lines, style references), idea triage, visibility decisions, creator moves, drive-scan's artifacts, the What I like sheet, both Drive folders, and his answers on the Inspiration page. |
+| collect | daily | Reads, never writes, the places Krish's taste already lands: content-engine's taste files (learnings, title verdicts, golden and rejected lines, style references), idea triage, visibility decisions, creator moves, drive-scan's artifacts, the What I like sheet, both Drive folders, the Instagram workbook in Cold Ideas (each post as an observation, each theme as a machine inference; context, never proof), and his answers on the Inspiration page. |
 | tag | daily | Gives each new Drive item a card: a thumbnail, guessed tags and guessed one-tap answers. A guess stays a guess until he answers. |
 | explain | daily | Turns each piece of his evidence into one to three candidate whys, each tagged form (craft) or subject. |
 | distil | weekly | Groups whys into claims. The model drafts; code checks every citation; the database counts the support. |
@@ -45,8 +45,8 @@ A dry run refuses every write. Without `DATABASE_URL` it reads through the Supab
 ## Turning it on
 
 1. Apply the taste ledger migration (content-engine PR).
-2. Add repository secrets: `DATABASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`. Share both Drive folders and the What I like sheet with the service account as Viewer.
-3. Run each workflow once by hand with `dry_run` on, then off.
+2. Add repository secrets: `DATABASE_URL`, `ANTHROPIC_API_KEY`, and `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` holding the service account's whole JSON key file (or the bare PEM, with `GOOGLE_SERVICE_ACCOUNT_EMAIL` beside it). Share both Drive folders and the What I like sheet with the service account as Viewer.
+3. Run each workflow once by hand with `dry_run` on and `use_model` off: it proves every source is reachable and costs nothing. Then run it with both off for the first real run, and `use_model` on when it should tag and explain.
 4. Set the repository variable `TASTE_ENABLED` to `true`. Until then the schedules do nothing.
 
 Runs are recorded in `content_engine_runs` as `taste_daily` and `taste_weekly`, where Control Center's done-check reads them.

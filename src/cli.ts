@@ -8,6 +8,7 @@ import {
   collectIdeaTriage, collectVisibility, collectCreatorMoves, collectDriveArtifacts, collectFeedbackHistory,
 } from './collect/supabaseSources.ts'
 import { collectDrive, sheetEvidence } from './collect/drive.ts'
+import { collectInstagram } from './collect/instagram.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, type Llm } from './llm.ts'
 import { syncItems, tagItems, answeredItemEvidence } from './tag/items.ts'
@@ -61,6 +62,7 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
     const g = ctx.google
     groups.push(['drive', () => collectDrive(g)])
     groups.push(['what_i_like_sheet', async () => sheetEvidence(await g.readSheet(DRIVE.whatILikeSheet, 'A1:J500'), new Date().toISOString())])
+    groups.push(['instagram', () => collectInstagram(g, new Date().toISOString())])
   }
   let seen = 0
   let written = 0
@@ -141,9 +143,11 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const job = args[0]
   const dry = args.includes('--dry-run')
+  // A dry run that costs nothing: collect and count, but call no model.
+  const noModel = args.includes('--no-model')
   const trigger = args.includes('--cron') ? 'cron' : 'manual'
   if (job !== 'daily' && job !== 'weekly') {
-    console.error('usage: engine daily|weekly [--dry-run] [--cron] [--preview]')
+    console.error('usage: engine daily|weekly [--dry-run] [--no-model] [--cron] [--preview]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -162,8 +166,8 @@ async function main(): Promise<void> {
   // A scheduled run without its credentials is a broken run, not a quiet one.
   if (googleConfigured(cfg)) ctx.google = await connectGoogle(cfg)
   else if (!dry) ctx.problems.push('Google service account not configured: Drive and Inspiration cards skipped')
-  if (cfg.ANTHROPIC_API_KEY) ctx.llm = anthropicLlm(cfg)
-  else if (!dry) ctx.problems.push('ANTHROPIC_API_KEY not configured: tagging and explaining skipped')
+  if (cfg.ANTHROPIC_API_KEY && !noModel) ctx.llm = anthropicLlm(cfg)
+  else if (!dry) ctx.problems.push(noModel ? 'run with --no-model: tagging and explaining skipped' : 'ANTHROPIC_API_KEY not configured: tagging and explaining skipped')
 
   let outcome: { status: RunStatus; reason: string | null }
   try {

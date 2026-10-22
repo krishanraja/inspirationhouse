@@ -21,7 +21,8 @@ const Env = z.object({
   CONTENT_ENGINE_READ_TOKEN: z.string().optional(),
 
   // Google service account with read-only scopes. Both folders and the sheet
-  // are shared with it as Viewer.
+  // are shared with it as Viewer. The key may be the bare PEM, or the whole
+  // JSON key file Google downloads, in which case the email comes from it.
   GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional(),
 })
@@ -38,6 +39,9 @@ export const DRIVE = {
   coldIdeas: '1FNztJOU82M8zb6IIbUAbvuI6Kr0pF5Hu',
   videoInspiration: '1eqdc1hoMn6CwqkbKlG5mAmKCYNoR8otU',
   whatILikeSheet: '1_XBxxMUcU4CFHB5iJqWc1WtYKmJCftMOe5UlZYSM-_U',
+  // An uploaded Excel workbook in Cold Ideas: the posts of the Instagram
+  // accounts he follows for strategy, captured one row per post.
+  instagramInspo: '1KawZr2R3Bi1zWJ1F2rPeGdBeVkc1gQTD',
 } as const
 
 // Read-only, and nothing else. CI fails if a write scope appears in the repo.
