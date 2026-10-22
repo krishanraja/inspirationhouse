@@ -27,9 +27,33 @@ export async function connect(cfg: Config): Promise<Db> {
   return managementApiDb(cfg)
 }
 
+// A Postgres URL read without strict URL parsing, so a password with symbols
+// works as typed: the password is everything between the user's colon and the
+// last '@'. A percent-encoded password is decoded; brackets left over from the
+// dashboard's [YOUR-PASSWORD] template are dropped.
+export function parseDatabaseUrl(raw: string): pg.PoolConfig {
+  const m = /^postgres(?:ql)?:\/\/([^:@/]+):(.*)@([^@/:?#\s]+)(?::(\d+))?\/([^?#\s]*)(?:\?(.*))?$/.exec(raw.trim())
+  if (!m) throw new Error('DATABASE_URL is not a postgresql:// URL with a user, password and host')
+  let password = m[2]!
+  if (/^\[.*\]$/.test(password)) password = password.slice(1, -1)
+  if (/%[0-9A-Fa-f]{2}/.test(password)) {
+    try { password = decodeURIComponent(password) } catch { /* a literal % stays as typed */ }
+  }
+  const query = new URLSearchParams(m[6] ?? '')
+  const sslmode = query.get('sslmode')
+  return {
+    user: decodeURIComponent(m[1]!),
+    password,
+    host: m[3]!,
+    port: m[4] ? Number(m[4]) : 5432,
+    database: m[5] || 'postgres',
+    ...(sslmode && sslmode !== 'disable' ? { ssl: { rejectUnauthorized: false } } : {}),
+  }
+}
+
 function pgDb(url: string): Db {
   // Fail in seconds, not minutes, when the host is unreachable.
-  const pool = new pg.Pool({ connectionString: url, max: 2, connectionTimeoutMillis: 15_000 })
+  const pool = new pg.Pool({ ...parseDatabaseUrl(url), max: 2, connectionTimeoutMillis: 15_000 })
   return {
     async query(sql, params = [], opts) {
       const client = await pool.connect()
