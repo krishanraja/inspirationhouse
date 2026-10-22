@@ -199,6 +199,7 @@ await main().catch((err: unknown) => {
   const timedOut = /connection timeout|timed out/i.test(String((err as Error)?.message ?? ''))
   const hint = timedOut || code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ENETUNREACH'
     ? 'database unreachable: use the session pooler URL'
+    : code === '28P01' ? 'database password rejected: check the password in DATABASE_URL (URL-encode symbols)'
     : null
   log({ stage: 'run', status: 'failed', error_class: typeof e?.name === 'string' ? e.name : 'Error', code, hint })
   process.exitCode = 1
