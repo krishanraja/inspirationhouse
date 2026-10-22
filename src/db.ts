@@ -28,7 +28,8 @@ export async function connect(cfg: Config): Promise<Db> {
 }
 
 function pgDb(url: string): Db {
-  const pool = new pg.Pool({ connectionString: url, max: 2 })
+  // Fail in seconds, not minutes, when the host is unreachable.
+  const pool = new pg.Pool({ connectionString: url, max: 2, connectionTimeoutMillis: 15_000 })
   return {
     async query(sql, params = [], opts) {
       const client = await pool.connect()

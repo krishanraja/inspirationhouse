@@ -191,4 +191,15 @@ async function main(): Promise<void> {
   if (outcome.status === 'failed') process.exitCode = 1
 }
 
-await main()
+// An error escaping main would print its whole object into a public Actions
+// log. Print only what kind of failure it was, and fail the job.
+await main().catch((err: unknown) => {
+  const e = err as { code?: unknown; name?: unknown; errors?: Array<{ code?: unknown }> }
+  const code = typeof e?.code === 'string' ? e.code : typeof e?.errors?.[0]?.code === 'string' ? e.errors[0].code : null
+  const timedOut = /connection timeout|timed out/i.test(String((err as Error)?.message ?? ''))
+  const hint = timedOut || code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ENETUNREACH'
+    ? 'database unreachable: use the session pooler URL'
+    : null
+  log({ stage: 'run', status: 'failed', error_class: typeof e?.name === 'string' ? e.name : 'Error', code, hint })
+  process.exitCode = 1
+})

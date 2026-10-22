@@ -5,7 +5,7 @@ const ALLOWED = new Set([
   'stage', 'source', 'job', 'status', 'run_id', 'dry_run',
   'seen', 'written', 'skipped', 'failed', 'items', 'whys', 'claims',
   'proposed', 'eligible', 'synced', 'metrics', 'week', 'ms', 'error_class',
-  'drafted', 'resolved', 'retired',
+  'drafted', 'resolved', 'retired', 'code', 'hint',
 ])
 
 export function safeFields(fields: Record<string, unknown>): Record<string, unknown> {
