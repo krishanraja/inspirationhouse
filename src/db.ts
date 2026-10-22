@@ -27,17 +27,36 @@ export async function connect(cfg: Config): Promise<Db> {
   return managementApiDb(cfg)
 }
 
+// The session pooler for this project, from Supabase's own pooler config
+// (GET /v1/projects/<ref>/config/database/pooler, 2026-10-22).
+export const SUPABASE_POOLER_HOST = 'aws-1-us-west-2.pooler.supabase.com'
+
 // A Postgres URL read without strict URL parsing, so a password with symbols
 // works as typed: the password is everything between the user's colon and the
 // last '@'. A percent-encoded password is decoded; brackets left over from the
 // dashboard's [YOUR-PASSWORD] template are dropped.
-export function parseDatabaseUrl(raw: string): pg.PoolConfig {
+export function parseDatabaseUrl(raw: string, poolerHost = SUPABASE_POOLER_HOST): pg.PoolConfig {
   const m = /^postgres(?:ql)?:\/\/([^:@/]+):(.*)@([^@/:?#\s]+)(?::(\d+))?\/([^?#\s]*)(?:\?(.*))?$/.exec(raw.trim())
   if (!m) throw new Error('DATABASE_URL is not a postgresql:// URL with a user, password and host')
   let password = m[2]!
   if (/^\[.*\]$/.test(password)) password = password.slice(1, -1)
   if (/%[0-9A-Fa-f]{2}/.test(password)) {
     try { password = decodeURIComponent(password) } catch { /* a literal % stays as typed */ }
+  }
+  // Supabase's Direct connection host (db.<ref>.supabase.co) answers on IPv6
+  // only, and GitHub's runners have no IPv6. The same login works through the
+  // project's session pooler (IPv4) as user postgres.<ref>, so use that.
+  const direct = /^db\.([a-z]{20})\.supabase\.co$/.exec(m[3]!)
+  if (direct) {
+    const ref = direct[1]!
+    const user = decodeURIComponent(m[1]!)
+    return {
+      user: user.includes('.') ? user : `${user}.${ref}`,
+      password,
+      host: poolerHost,
+      port: 5432,
+      database: m[5] || 'postgres',
+    }
   }
   const query = new URLSearchParams(m[6] ?? '')
   const sslmode = query.get('sslmode')

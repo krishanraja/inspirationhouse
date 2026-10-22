@@ -25,4 +25,10 @@ describe('reading DATABASE_URL', () => {
     expect(parseDatabaseUrl(`postgres://u:p@${POOLER}:5432/postgres?sslmode=require`).ssl).toEqual({ rejectUnauthorized: false })
     expect(() => parseDatabaseUrl('https://gojpffsrxybbpbdzzrvs.supabase.co')).toThrow(/not a postgresql/)
   })
+
+  it('sends a Direct connection string through the IPv4 session pooler', () => {
+    expect(parseDatabaseUrl('postgresql://postgres:p@ss[w]@db.abcdefghijklmnopqrst.supabase.co:5432/postgres')).toEqual({
+      user: 'postgres.abcdefghijklmnopqrst', password: 'p@ss[w]', host: POOLER, port: 5432, database: 'postgres',
+    })
+  })
 })
