@@ -2,6 +2,7 @@ name: taste-daily
 # Collect new signals, tag new Inspiration cards, explain new evidence, sync decisions.
 on:
   schedule:
+    # 05:17 UTC daily. GitHub registers this only from the default branch (main).
     - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:

@@ -2,6 +2,7 @@ name: taste-weekly
 # Distil claims, propose at most three, score the week. Saturday evening, ahead of Sunday's plan-week.
 on:
   schedule:
+    # Saturday 18:23 UTC. GitHub registers this only from the default branch (main).
     - cron: '23 18 * * 6'
   workflow_dispatch:
     inputs:
