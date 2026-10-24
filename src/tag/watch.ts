@@ -13,6 +13,11 @@ import { promisify } from 'node:util'
 const run = promisify(execFile)
 export const WATCH_FRAMES = 8
 const FRAME_WIDTH = 512
+const PROBE_TIMEOUT_MS = 30_000
+const FRAME_TIMEOUT_MS = 30_000
+const TRANSCRIBE_TIMEOUT_MS = 600_000
+/** The longest one video's watching can take on the runner: the probe, every frame and the transcriber at their limits. */
+export const WATCH_WORST_MS = PROBE_TIMEOUT_MS + WATCH_FRAMES * FRAME_TIMEOUT_MS + TRANSCRIBE_TIMEOUT_MS
 
 /** Whether the words were heard: `failed` carries a class (no_model, decode, transcribe, runner), never a message. */
 export type Heard = 'words' | 'silent' | 'failed' | 'skipped'
@@ -49,7 +54,7 @@ export async function watchVideo(bytes: Buffer, opts: { transcribe?: boolean } =
     await writeFile(file, bytes)
     let durationS: number | null = null
     try {
-      const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: 30_000 })
+      const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { timeout: PROBE_TIMEOUT_MS })
       const d = Number.parseFloat(stdout.trim())
       durationS = Number.isFinite(d) && d > 0 ? Math.round(d * 10) / 10 : null
     } catch { /* no ffprobe: no frames either */ }
@@ -59,7 +64,7 @@ export async function watchVideo(bytes: Buffer, opts: { transcribe?: boolean } =
       for (const [i, t] of frameTimes(durationS).entries()) {
         const out = join(dir, `f${i}.jpg`)
         try {
-          await run('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `scale=${FRAME_WIDTH}:-2`, '-q:v', '5', out], { timeout: 30_000 })
+          await run('ffmpeg', ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `scale=${FRAME_WIDTH}:-2`, '-q:v', '5', out], { timeout: FRAME_TIMEOUT_MS })
           frames.push({ bytes: await readFile(out), mime: 'image/jpeg' })
         } catch { /* one missed frame is fine */ }
       }
@@ -70,7 +75,7 @@ export async function watchVideo(bytes: Buffer, opts: { transcribe?: boolean } =
     // itself, and only the frames need a length.
     if (opts.transcribe !== false) {
       try {
-        const { stdout } = await run('python3', [join(process.cwd(), 'scripts', 'transcribe.py'), file], { timeout: 600_000, maxBuffer: 4_000_000 })
+        const { stdout } = await run('python3', [join(process.cwd(), 'scripts', 'transcribe.py'), file], { timeout: TRANSCRIBE_TIMEOUT_MS, maxBuffer: 4_000_000 })
         heard = readHeard(stdout)
       } catch { heard = { transcript: null, heard: 'failed', unheard: 'runner' } }
     }

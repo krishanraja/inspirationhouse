@@ -212,8 +212,13 @@ export function needsTags(rev: number): string {
 
 const VIDEO_MAX_BYTES = 150_000_000
 const IMAGE_MAX_BYTES = 4_500_000
-/** Tagging stops starting new cards after this long, so explaining and the run's own record always get their turn. */
-const TAG_BUDGET_MS = 25 * 60_000
+/**
+ * Tagging stops starting new cards after this long, so explaining and the run's own record always get their turn. A card
+ * started just inside it can still take one whole watch (WATCH_WORST_MS) and its model call, and explaining comes after,
+ * all inside the daily job's timeout (.github/workflows/taste-daily.yml, timeout-minutes 60). Cards left over wait for
+ * the next run.
+ */
+export const TAG_BUDGET_MS = 12 * 60_000
 
 export interface TagResult {
   tagged: number; failed: number; watched: number; heard: number; repaired: number

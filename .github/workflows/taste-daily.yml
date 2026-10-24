@@ -25,7 +25,9 @@ jobs:
     # TASTE_ENABLED to true after the migration and secrets are in place.
     if: github.event_name != 'schedule' || vars.TASTE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Tagging starts no new card after 12 minutes (TAG_BUDGET_MS); one card started just inside that can watch for up
+    # to 15 more, and explaining and the run's record come after.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
