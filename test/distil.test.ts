@@ -30,6 +30,14 @@ describe('turning a drafted claim into one the database will hold', () => {
     expect(r.krish).toBeNull()
   })
 
+  it('never keeps a quote cut to fit: one over 400 characters is dropped whole, and the claim kept', () => {
+    const long = 'he said it plainly and then said it again '.repeat(12).trim()
+    const r = resolveClaim(draft({ krish_quote: long }), [why(1, { excerpt: long }), why(2), why(3)])!
+    expect(long.length).toBeGreaterThan(400)
+    expect(r.krish).toBeNull()
+    expect(r.evidenceIds).toHaveLength(3)
+  })
+
   it('drops a quote attributed to a line that is not his words', () => {
     const notHis = [why(1, { attribution: 'krish_action' }), why(2), why(3)]
     expect(resolveClaim(draft({ counter: [] }), notHis)!.krish).toBeNull()

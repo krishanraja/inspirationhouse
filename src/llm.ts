@@ -26,7 +26,8 @@ export interface Llm {
 
 export function anthropicLlm(cfg: Config): Llm {
   if (!cfg.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set')
-  const client = new Anthropic({ apiKey: cfg.ANTHROPIC_API_KEY })
+  // logLevel off: the SDK's own warnings can print a raw stream chunk, which may be model text, into the public log.
+  const client = new Anthropic({ apiKey: cfg.ANTHROPIC_API_KEY, logLevel: 'off' })
   const model = cfg.TASTE_MODEL
   return {
     model,

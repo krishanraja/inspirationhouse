@@ -102,6 +102,10 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
         ctx.counts.items_watched = t.watched
         ctx.counts.items_heard = t.heard
         ctx.counts.items_repaired = t.repaired
+        ctx.counts.items_rehead = t.rehead
+        ctx.counts.items_too_big = t.tooBig
+        ctx.counts.items_gave_up = t.gaveUp
+        ctx.counts.items_deferred = t.deferred
         ctx.counts.items_tag_failed = t.failed
         if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
         const unheard = Object.values(t.unheard).reduce((a, b) => a + b, 0)

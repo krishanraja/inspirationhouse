@@ -137,7 +137,10 @@ export function tagContent(f: DriveFile, thumb: Img | null, text: string | null,
 }
 
 /** The card's facets: the model's reading, with what the file name and the clip prove kept as facts. */
-export function mergeFacets(model: Tagging['facets'], hints: Hints, watched: Watched | null): Record<string, unknown> {
+/** Whether a video's words were heard, and how many tries it has had. Kept on the card's facets. */
+export interface Hearing { heard: string | null; heard_tries: number }
+
+export function mergeFacets(model: Tagging['facets'], hints: Hints, watched: Watched | null, hearing?: Hearing): Record<string, unknown> {
   const six = (xs: string[]) => [...new Set(xs.map(x => x.trim()).filter(Boolean))].slice(0, 6)
   return {
     ...model,
@@ -148,28 +151,62 @@ export function mergeFacets(model: Tagging['facets'], hints: Hints, watched: Wat
     media: hints.media,
     duration_s: watched?.durationS ?? null,
     watched: Boolean(watched && (watched.frames.length > 1 || watched.transcript)),
-    heard: watched?.heard ?? null,
+    heard: hearing?.heard ?? watched?.heard ?? null,
+    heard_tries: hearing?.heard_tries ?? 0,
   }
 }
 
+/** How many runs try to hear a video before it is left as it is (`facets.heard` stays `failed` on the card). */
+export const HEAR_TRIES = 3
+/** A hearing that is final: the words, no speech in it, or a file over the size this runner will fetch. */
+const HEARD_FINAL = ['words', 'silent', 'too_big'] as const
+
 /**
- * Which cards a run tags: no tags yet, tags from an older revision, or a video watched whose words were never heard
- * (`facets.heard` not `words` or `silent`, which takes in the clips watched before it was recorded). That last one is
- * what lets a broken transcriber heal on the next run once it is fixed, with no card reset by hand.
+ * Which cards a run tags, with the tag revision as parameter `$<rev>`: no tags yet, tags from an older revision, or a
+ * video whose words were never heard and that has tries left. That last one lets a broken transcriber heal on the next
+ * run once it is fixed, with no card reset by hand, and stops after HEAR_TRIES so a clip that can never be heard is not
+ * fetched every day for ever.
  */
-export const NEEDS_TAGS = `(tagged_at is null or tag_rev is distinct from $2
-  or (watched_at is not null and transcript is null and coalesce(facets->>'heard', '') not in ('words', 'silent')))`
+export function needsTags(rev: number): string {
+  return `(tagged_at is null or tag_rev is distinct from $${rev}
+  or (mime like 'video/%' and transcript is null
+      and coalesce(facets->>'heard', '') not in (${HEARD_FINAL.map(h => `'${h}'`).join(', ')})
+      and coalesce(case when jsonb_typeof(facets->'heard_tries') = 'number' then (facets->>'heard_tries')::numeric end, 0) < ${HEAR_TRIES}))`
+}
 
 const VIDEO_MAX_BYTES = 150_000_000
 const IMAGE_MAX_BYTES = 4_500_000
+/** Tagging stops starting new cards after this long, so explaining and the run's own record always get their turn. */
+const TAG_BUDGET_MS = 25 * 60_000
 
-export interface TagResult { tagged: number; failed: number; watched: number; heard: number; repaired: number; failures: Record<string, number>; unheard: Record<string, number> }
+export interface TagResult {
+  tagged: number; failed: number; watched: number; heard: number; repaired: number
+  /** Videos only heard again: their tags stand, only the hearing was written. */
+  rehead: number
+  /** Videos over the fetch cap: final, counted, not a failure. */
+  tooBig: number
+  /** Videos whose last try failed this run. */
+  gaveUp: number
+  /** Cards left for the next run because the time budget ran out. */
+  deferred: number
+  failures: Record<string, number>
+  unheard: Record<string, number>
+}
 
-/** Tag the cards that have no tags yet, or tags from an older revision, at most `limit` per run, newest first. */
-export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<string, DriveFile>, limit = 60, write = true): Promise<TagResult> {
-  const pending = await db.query<{ id: string; drive_file_id: string; note_for_claude: string | null }>(
-    `select id::text, drive_file_id, note_for_claude from public.inspiration_items
-     where ${NEEDS_TAGS} and dismissed_at is null
+export interface TagDeps { watch?: typeof watchVideo; now?: () => number; budgetMs?: number }
+
+type Pending = { id: string; drive_file_id: string; note_for_claude: string | null; healing: boolean; facets: Record<string, unknown> | null }
+
+/** Tag the cards that need it (`needsTags`), at most `limit` per run, newest first. */
+export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<string, DriveFile>, limit = 60, write = true, deps: TagDeps = {}): Promise<TagResult> {
+  const watch = deps.watch ?? watchVideo
+  const now = deps.now ?? Date.now
+  const started = now()
+  const pending = await db.query<Pending>(
+    `select id::text, drive_file_id, note_for_claude, facets,
+            (tagged_at is not null and tag_rev is not distinct from $2) as healing
+     from public.inspiration_items
+     where ${needsTags(2)} and dismissed_at is null
      order by (tagged_at is null) desc, drive_created_at desc limit $1`,
     [limit, TAG_PROMPT_REV],
   )
@@ -182,30 +219,65 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
   )).map(r => r.why_like)
   const system = tagSystemPrompt(profile, recent)
 
-  const result: TagResult = { tagged: 0, failed: 0, watched: 0, heard: 0, repaired: 0, failures: {}, unheard: {} }
-  for (const item of pending) {
+  const result: TagResult = { tagged: 0, failed: 0, watched: 0, heard: 0, repaired: 0, rehead: 0, tooBig: 0, gaveUp: 0, deferred: 0, failures: {}, unheard: {} }
+  const miss = (cls: string) => { result.unheard[cls] = (result.unheard[cls] ?? 0) + 1 }
+  for (const [n, item] of pending.entries()) {
+    if (now() - started > (deps.budgetMs ?? TAG_BUDGET_MS)) { result.deferred = pending.length - n; break }
     const f = files.get(item.drive_file_id)
     if (!f) continue
     const hints = filenameHints(f.name, f.mimeType)
     const media = mediaOf(f.mimeType)
-    const [thumb, text] = await Promise.all([
-      google.thumbnail(f).catch(() => null),
-      google.text(f).catch(() => null),
-    ])
+    const priorTries = typeof item.facets?.heard_tries === 'number' ? item.facets.heard_tries : 0
+
     // A video is watched; an image is read at full size when it is small enough to send.
     let watched: Watched | null = null
+    let hearing: Hearing | undefined
     let full: Img | null = null
     if (media === 'video') {
-      const bytes = await google.download(f.id, VIDEO_MAX_BYTES).catch(() => null)
-      watched = bytes ? await watchVideo(bytes).catch(() => null) : null
-      if (!watched) result.unheard[bytes ? 'runner' : 'download'] = (result.unheard[bytes ? 'runner' : 'download'] ?? 0) + 1
-      if (watched?.frames.length) result.watched++
-      if (watched?.heard === 'words') result.heard++
-      if (watched?.unheard) result.unheard[watched.unheard] = (result.unheard[watched.unheard] ?? 0) + 1
+      if (Number(f.size) > VIDEO_MAX_BYTES) {
+        hearing = { heard: 'too_big', heard_tries: priorTries }
+        result.tooBig++
+      } else {
+        const bytes = await google.download(f.id, VIDEO_MAX_BYTES).catch(() => null)
+        watched = bytes ? await watch(bytes).catch(() => null) : null
+        const failedClass = !bytes ? 'download' : !watched ? 'runner' : watched.unheard
+        if (failedClass) {
+          miss(failedClass)
+          hearing = { heard: 'failed', heard_tries: priorTries + 1 }
+          if (priorTries + 1 >= HEAR_TRIES) result.gaveUp++
+        } else {
+          hearing = { heard: watched!.heard, heard_tries: priorTries }
+        }
+        if (watched?.frames.length) result.watched++
+        if (watched?.heard === 'words') result.heard++
+      }
     } else if (media === 'image' && /^image\/(jpeg|png|webp)$/.test(f.mimeType)) {
       const bytes = await google.download(f.id, IMAGE_MAX_BYTES).catch(() => null)
       if (bytes) full = { bytes, mime: f.mimeType }
     }
+    const seen = Boolean(watched?.frames.length || watched?.transcript)
+
+    // A card already tagged on this revision is here only to be heard again. Its tags stand unless there are words to
+    // tag from: a failed try, silence or a file too big writes only the hearing, with no model call.
+    if (item.healing && hearing?.heard !== 'words') {
+      if (write) {
+        await db.query(
+          `update public.inspiration_items
+           set facets = facets || $2::jsonb, updated_at = now(),
+               watched_at = case when $3 then now() else watched_at end
+           where id = $1 and tagged_at is not null and tag_rev is not distinct from $4 and ${needsTags(4)}`,
+          [item.id, JSON.stringify(hearing ?? { heard: null, heard_tries: priorTries }), seen, TAG_PROMPT_REV],
+          { write: true },
+        )
+      }
+      result.rehead++
+      continue
+    }
+
+    const [thumb, text] = await Promise.all([
+      google.thumbnail(f).catch(() => null),
+      google.text(f).catch(() => null),
+    ])
     const out = await llm.structured({
       schema: TagSchema, system,
       content: tagContent(f, full ?? thumb, text, hints, watched, item.note_for_claude),
@@ -227,11 +299,11 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
              facets = $8::jsonb, tag_rev = $9,
              transcript = coalesce($10, transcript),
              watched_at = case when $11 then now() else watched_at end
-         where id = $1 and ${NEEDS_TAGS.replaceAll('$2', '$9')}`,
+         where id = $1 and ${needsTags(9)}`,
         [item.id, JSON.stringify(out.data.tags), JSON.stringify(out.data.predicted), out.data.route,
           thumb ? thumb.bytes.toString('base64') : null, thumb?.mime ?? null, out.model,
-          JSON.stringify(mergeFacets(out.data.facets, hints, watched)), TAG_PROMPT_REV,
-          watched?.transcript ?? null, Boolean(watched?.frames.length)],
+          JSON.stringify(mergeFacets(out.data.facets, hints, watched, hearing)), TAG_PROMPT_REV,
+          watched?.transcript ?? null, seen],
         { write: true },
       )
     }

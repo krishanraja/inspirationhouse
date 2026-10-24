@@ -12,8 +12,8 @@ const tag = (): any => ({
   facets: { platform: 'unknown', format: 'document', source: null, creator: null, people: [], organisations: [], topics: [] },
 })
 
-describe('the limits never reach the model', () => {
-  it('is why the answer is repaired here: the schema the API gets carries none of them', () => {
+describe('the limits are not enforced by the API', () => {
+  it('is why the answer is repaired here: the schema it gets carries none of them as limits', () => {
     const sent = JSON.stringify(zodOutputFormat(TagSchema).schema)
     for (const k of ['maxItems', 'maxLength', 'minItems', 'minLength']) expect(sent).not.toContain(`"${k}"`)
   })
@@ -67,15 +67,33 @@ describe('repairToSchema', () => {
     expect(out.data.items).toHaveLength(1)
     expect(out.data.items[0]!.whys.map(w => w.statement)).toEqual(['He likes a number that lands early.', 'It shows the money.', 'It names the cost.'])
   })
-  it('drops a claim with no support and keeps a quote a true prefix of his words', () => {
+  it('drops a claim with no support, and never cuts a quote of his', () => {
+    const quote = 'word '.repeat(100).trim()
     const claim = (statement: string, support: number[]): any => ({
       statement, lane: 'voice', layer: null, kind: 'subject', why: 'Because he said so twice.', means: 'Write it that way next time.',
-      support, counter: [], krish_quote_ref: 0, krish_quote: 'word '.repeat(100).trim(), flip_rule: 'If he says otherwise twice.',
+      support, counter: [], krish_quote_ref: 0, krish_quote: quote, flip_rule: 'If he says otherwise twice.',
     })
     const out = repairToSchema(ClaimSchema, { claims: [claim('A claim with nothing under it.', []), claim('A claim he backed twice.', [0, 1])] })!
     expect(out.data.claims).toHaveLength(1)
-    const q = out.data.claims[0]!.krish_quote!
-    expect(q.length).toBeLessThanOrEqual(400)
-    expect('word '.repeat(100)).toContain(q)
+    expect(out.data.claims[0]!.krish_quote).toBe(quote) // whole; resolveClaim drops it for being over 400
+  })
+  it('never splits a character in two when it cuts', () => {
+    const cut = cutAt('a' + '\u{1F600}'.repeat(70), 140)
+    expect(cut.length).toBeLessThanOrEqual(140)
+    expect(/[\uD800-\uDBFF]$/.test(cut)).toBe(false)
+    expect(() => JSON.parse(JSON.stringify(cut))).not.toThrow()
+    expect(cut.endsWith('\u{1F600}')).toBe(true)
+  })
+  it('drops an item that only came back to fill a place, whatever is wrong with it', () => {
+    // Ten tags where eight are allowed: the first two are too short and dropped, the ninth and tenth come back, and
+    // the tenth names a kind outside the enum. It goes; the card keeps its seven good tags.
+    const raw = tag()
+    raw.tags = Array.from({ length: 10 }, (_, i) => ({ label: i < 2 ? 'x' : `subject ${i}`, kind: i === 9 ? 'craft' : 'subject', layer: null }))
+    const out = repairToSchema(TagSchema, raw)!
+    expect(out.data.tags.map((t: { label: string }) => t.label)).toEqual(['subject 2', 'subject 3', 'subject 4', 'subject 5', 'subject 6', 'subject 7', 'subject 8'])
+    // The same wrong kind among the eight it kept is still a failure.
+    const kept = tag()
+    kept.tags = [{ label: 'subject 0', kind: 'craft', layer: null }]
+    expect(repairToSchema(TagSchema, kept)).toBeNull()
   })
 })

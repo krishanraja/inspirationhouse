@@ -66,7 +66,9 @@ export async function watchVideo(bytes: Buffer, opts: { transcribe?: boolean } =
     }
 
     let heard: ReturnType<typeof readHeard> = { transcript: null, heard: 'skipped', unheard: null }
-    if (opts.transcribe !== false && durationS !== null) {
+    // Heard even when the file states no length (a browser recording often does not): the transcriber probes the sound
+    // itself, and only the frames need a length.
+    if (opts.transcribe !== false) {
       try {
         const { stdout } = await run('python3', [join(process.cwd(), 'scripts', 'transcribe.py'), file], { timeout: 600_000, maxBuffer: 4_000_000 })
         heard = readHeard(stdout)
