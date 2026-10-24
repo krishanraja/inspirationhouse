@@ -427,7 +427,11 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     let readFacets: Record<string, unknown> = {}
     if (read) {
       const heard = read.heard && READ_HEARD.has(read.heard) ? read.heard : media === 'video' && read.read_md.trim() ? 'words' : null
-      if (heard || media === 'video') hearing = { heard, heard_tries: priorTries }
+      // A reading that did not hear a video is a try, as a failed hearing here is: the same reading comes back on every
+      // run, so without one the card would be picked up again for ever. After HEAR_TRIES it is left as it is.
+      const charged = media === 'video' && !(HEARD_FINAL as readonly string[]).includes(heard ?? '')
+      if (heard || media === 'video') hearing = { heard, heard_tries: charged ? priorTries + 1 : priorTries }
+      if (charged && priorTries + 1 >= HEAR_TRIES) result.gaveUp++
       words = read.words_text?.trim() ? Array.from(read.words_text.trim()).slice(0, TRANSCRIPT_MAX_CHARS).join('') : null
       readFacets = { read_from: 'content_reads', read_rev: read.engine_rev }
     } else if (media === 'video') {

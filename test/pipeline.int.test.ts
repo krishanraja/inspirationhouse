@@ -9,7 +9,7 @@ import { distil } from '../src/distil/claims.ts'
 import { propose, syncDecisions, ELIGIBLE_SQL, type Eligible } from '../src/publish/propose.ts'
 import { score } from '../src/score/scoreboard.ts'
 import { linkRequests } from '../src/tag/links.ts'
-import { answeredItemEvidence, tagItems } from '../src/tag/items.ts'
+import { answeredItemEvidence, tagItems, HEAR_TRIES } from '../src/tag/items.ts'
 import type { DriveFile, Google } from '../src/google.ts'
 
 // End to end against a real Postgres with the real migrations, and a stub in
@@ -454,5 +454,22 @@ run('the review of the link box, on a real database', () => {
     await request('twice-2', ['7'], 'pasted second')
     expect(await linkRequests(db, files)).toMatchObject({ linked: 2, notes: 1 })
     expect(await card(c['7']!)).toMatchObject({ why_here: 'pasted first', facets: { link: { request_id: one } } })
+  })
+
+  it('lets a video whose reading could not hear it go after its tries, instead of coming back on every run', async () => {
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)
+       values ('vid-unheard-0', 'video_inspiration', 'production', 'vid-unheard-0.mp4', 'video/mp4', now())`)
+    await client.query(
+      `insert into content_reads (sha256, shape, engine_rev, read, read_md)
+       values ($1, 'video', 'cw-1', '{"heard": "failed", "heard_class": "whisper_error", "words_text": "", "post": null}', '## Shots\n1. a synthetic shot')`,
+      [sha('9')])
+    const files = new Map([['vid-unheard-0', video('vid-unheard-0', { sha256Checksum: sha('9') })]])
+    const notWatched = { watch: async (): Promise<never> => { throw new Error('a read file is never watched') } }
+    const runs = []
+    for (let n = 0; n < 5; n++) runs.push(await tagItems(db, noDrive, tagger().llm, files, 60, true, notWatched))
+    expect(runs.map(r => [r.tagged, r.rehead, r.gaveUp])).toEqual([[1, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 0], [0, 0, 0]])
+    const [row] = (await client.query(`select facets->>'heard' as heard, (facets->>'heard_tries')::int as tries from inspiration_items`)).rows
+    expect(row).toEqual({ heard: 'failed', tries: HEAR_TRIES })
   })
 })
