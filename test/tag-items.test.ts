@@ -1,21 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { tagItems, HEAR_TRIES, needsTags } from '../src/tag/items.ts'
+import { tagItems, HEAR_TRIES, needsTags, nameWords } from '../src/tag/items.ts'
 import type { Db } from '../src/db.ts'
 import type { Google, DriveFile } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
 import type { Watched } from '../src/tag/watch.ts'
 
 // Synthetic cards and files only; nothing here is anything Krish saved.
-type Row = { id: string; drive_file_id: string; note_for_claude: string | null; healing: boolean; facets: Record<string, unknown> | null }
+type Row = { id: string; drive_file_id: string; note_for_claude: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null }
 const file = (id: string, over: Partial<DriveFile> = {}): DriveFile =>
   ({ id, name: `clip-${id}.mp4`, mimeType: 'video/mp4', modifiedTime: '2026-10-24T00:00:00Z', createdTime: '2026-10-24T00:00:00Z', size: '1000', ...over })
 
-function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer> } = {}) {
+function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown> } = {}) {
   const writes: Array<{ sql: string; params: unknown[] }> = []
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = []) {
       if (/^\s*update/i.test(sql)) { writes.push({ sql, params }); return [] as T[] }
-      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) return rows as T[]
+      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) return rows.map(r => ({ kind: null, kind_source: null, ...r })) as T[]
+      if (/select id::text, drive_file_id, kind, kind_source from public\.inspiration_items/.test(sql)) return (opts.known ?? []) as T[]
+      if (/from public\.content_ideas/.test(sql)) return (opts.slate ?? []) as T[]
       return [] as T[]
     },
   } as Db
@@ -26,15 +28,17 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
     download: async (id: string) => { downloads.push(id); return opts.download ? opts.download(id) : Buffer.from('bytes') },
   } as unknown as Google
   let calls = 0
+  const prompts: string[] = []
   const llm: Llm = {
     model: 'm',
-    async structured() {
+    async structured(args) {
       calls++
-      return { data: { tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only',
-        facets: { platform: 'instagram', format: 'short_video', source: null, creator: null, people: [], organisations: [], topics: [] } } as never, failure: null, model: 'm' }
+      prompts.push(JSON.stringify(args.content))
+      return { data: { tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only', kind: null, opinion: null, reason: null, piece_ref: null,
+        facets: { platform: 'instagram', format: 'short_video', source: null, creator: null, people: [], organisations: [], topics: [] }, ...opts.answer } as never, failure: null, model: 'm' }
     },
   }
-  return { db, google, llm, writes, downloads, calls: () => calls }
+  return { db, google, llm, writes, downloads, prompts, calls: () => calls }
 }
 const watched = (over: Partial<Watched>): Watched => ({ frames: [{ bytes: Buffer.from('f'), mime: 'image/jpeg' }, { bytes: Buffer.from('f'), mime: 'image/jpeg' }], transcript: null, durationS: 30, heard: 'failed', unheard: 'decode', ...over })
 
@@ -115,5 +119,94 @@ describe('needsTags', () => {
     expect(needsTags(9)).toContain('tag_rev is distinct from $9')
     expect(needsTags(9)).not.toContain('$2')
     expect(needsTags(2)).toContain(`< ${HEAR_TRIES}`)
+  })
+})
+
+import { DRIVE } from '../src/config.ts'
+import { ruleKind } from '../src/tag/kinds.ts'
+
+describe('ruleKind', () => {
+  // Synthetic names in the shapes his folders hold.
+  const f = (name: string, mimeType: string, id = 'x') => ({ id, name, mimeType })
+  it('settles what the file proves', () => {
+    expect(ruleKind(f('anything.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DRIVE.instagramInspo))).toBe('feed')
+    expect(ruleKind(f('Channel inspo.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))).toBe('feed')
+    expect(ruleKind(f('SaveClip.App_abc.mp4', 'video/mp4'))).toBe('video')
+    expect(ruleKind(f('Screenshot_20261017_055750_Instagram.jpg', 'image/jpeg'))).toBe('image')
+    expect(ruleKind(f('some-topic-peer-corpus.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))).toBe('corpus')
+    expect(ruleKind(f('a-deep-corpus.csv', 'text/csv'))).toBe('corpus')
+    expect(ruleKind(f('Content seed: a thing I noticed', 'application/vnd.google-apps.document'))).toBe('idea')
+  })
+  it('leaves to the reader what only reading can tell', () => {
+    expect(ruleKind(f('A guide to something.md', 'text/markdown'))).toBeNull()
+    expect(ruleKind(f('figures.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))).toBeNull()
+  })
+})
+
+describe('tagItems and kinds', () => {
+  const doc = (id: string, name: string, mimeType = 'application/vnd.google-apps.document') => file(id, { name, mimeType, size: undefined })
+
+  it('writes the kind every file settles, on every run, and never over his own', async () => {
+    const h = harness([], { known: [
+      { id: '1', drive_file_id: 'v', kind: null, kind_source: null },
+      { id: '2', drive_file_id: 'c', kind: 'document', kind_source: 'krish' },
+      { id: '3', drive_file_id: 'i', kind: 'image', kind_source: 'rule' },
+    ] })
+    const files = new Map([['v', file('v')], ['c', doc('c', 'x-corpus.csv', 'text/csv')], ['i', file('i', { name: 'a.jpg', mimeType: 'image/jpeg' })]])
+    const r = await tagItems(h.db, h.google, h.llm, files)
+    expect(r.kinded).toBe(1)
+    expect(h.writes).toHaveLength(1)
+    expect(h.writes[0]!.params).toEqual(['1', 'video'])
+    expect(h.writes[0]!.sql).toMatch(/kind_source is distinct from 'krish'/)
+  })
+
+  it('never asks the model about the feed', async () => {
+    const h = harness([{ id: '1', drive_file_id: DRIVE.instagramInspo, note_for_claude: null, healing: false, facets: {} }])
+    const files = new Map([[DRIVE.instagramInspo, doc(DRIVE.instagramInspo, 'Instagram inspo.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')]])
+    const r = await tagItems(h.db, h.google, h.llm, files)
+    expect(h.calls()).toBe(0)
+    expect(r.feeds).toBe(1)
+    expect(h.writes[0]!.sql).toMatch(/predicted_route = null/)
+  })
+
+  it('shows a corpus the slate and keeps the piece it names as a guess, never as the link', async () => {
+    const slate = [{ id: 'p0', idea: 'One piece' }, { id: 'p1', idea: 'The piece it serves' }]
+    const h = harness([{ id: '1', drive_file_id: 'c', note_for_claude: null, healing: false, facets: {} }], { slate, answer: { piece_ref: 1 } })
+    await tagItems(h.db, h.google, h.llm, new Map([['c', doc('c', 'topic-corpus.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')]]))
+    expect(h.prompts[0]).toContain('1. The piece it serves')
+    const w = h.writes.at(-1)!
+    expect(JSON.parse(w.params[7] as string).piece_guess).toEqual({ id: 'p1', idea: 'The piece it serves' })
+    expect(w.params.slice(11)).toEqual(['corpus', 'rule'])
+    expect(w.sql).not.toMatch(/piece_id/)
+  })
+
+  it('takes a document\'s kind from the reading, and drops a piece number that is not on the slate', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { slate: [{ id: 'p0', idea: 'One' }], answer: { kind: 'idea', piece_ref: 7 } })
+    await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d', 'A note.md', 'text/markdown')]]))
+    const w = h.writes.at(-1)!
+    expect(w.params.slice(11)).toEqual(['idea', 'model'])
+    expect(JSON.parse(w.params[7] as string).piece_guess).toBeNull()
+  })
+
+  it('keeps an opinion only when it says something, and a video\'s reason only on a video', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'v', note_for_claude: null, healing: false, facets: {} }],
+      { answer: { reason: 'narrative', opinion: { topic: 'AI agents at work', stance: 'They will take the dull half of every job first.' } } })
+    await tagItems(h.db, h.google, h.llm, new Map([['v', file('v')]]), 60, true, { watch: async () => watched({ heard: 'silent', unheard: null }) })
+    const facets = JSON.parse(h.writes.at(-1)!.params[7] as string)
+    expect(facets.reason_guess).toBe('narrative')
+    expect(facets.opinion).toEqual({ topic: 'AI agents at work', stance: 'They will take the dull half of every job first.' })
+    const h2 = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { answer: { kind: 'document', reason: 'script', opinion: { topic: '', stance: '' } } })
+    await tagItems(h2.db, h2.google, h2.llm, new Map([['d', doc('d', 'A note.md', 'text/markdown')]]))
+    const f2 = JSON.parse(h2.writes.at(-1)!.params[7] as string)
+    expect(f2.reason_guess).toBeNull()
+    expect(f2.opinion).toBeNull()
+  })
+})
+
+describe('nameWords', () => {
+  it('keeps the telling words of a file name and never matches when there are none', () => {
+    expect(nameWords('topic-peer-corpus.xlsx')).toBe('\\m(topic)')
+    expect(nameWords('Higgsfield under the hood.docx')).toBe('\\m(higgsfield|under|hood)')
+    expect(nameWords('corpus.csv')).toBe('$^')
   })
 })

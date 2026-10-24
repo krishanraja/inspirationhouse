@@ -8,7 +8,7 @@ import { ClaimSchema } from '../src/distil/claims.ts'
 const tag = (): any => ({
   tags: [{ label: 'the hook', kind: 'form', layer: 'opening' }],
   predicted: { why_here: ['a sharp opening'], why_like: ['it gets to the point'], would_do: ['try the same hook'] },
-  route: 'make_piece',
+  route: 'make_piece', kind: null, opinion: null, reason: null, piece_ref: null,
   facets: { platform: 'unknown', format: 'document', source: null, creator: null, people: [], organisations: [], topics: [] },
 })
 
