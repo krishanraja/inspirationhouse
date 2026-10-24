@@ -67,3 +67,25 @@ describe('withdrawUncollected', () => {
     expect(calls[0]!.sql).not.toMatch(/update/i)
   })
 })
+
+describe('versionOf', () => {
+  const page = (meta: Record<string, unknown>): Evidence => ({ ...answer('card-1', 'the cut on the beat'), meta })
+
+  it('versions a page answer by his answer alone, never by its kind or how he said to read it', () => {
+    const base = versionOf(page({ why_here: 'for the opener', picked_likes: [] }))
+    expect(versionOf(page({ why_here: 'for the opener', picked_likes: [], kind: 'video' }))).toBe(base)
+    expect(versionOf(page({ why_here: 'for the opener', picked_likes: [], kind: 'image', read_as: 'watch', note_for_claude: 'the end matters' }))).toBe(base)
+  })
+
+  it('makes a new version when his answer changes', () => {
+    const base = versionOf(page({ why_here: 'for the opener', picked_likes: [] }))
+    expect(versionOf(page({ why_here: 'for the close', picked_likes: [] }))).not.toBe(base)
+    expect(versionOf(page({ why_here: 'for the opener', picked_likes: ['tight pacing'] }))).not.toBe(base)
+    expect(versionOf({ ...page({ why_here: 'for the opener', picked_likes: [] }), excerpt: 'the plain captions' })).not.toBe(base)
+  })
+
+  it('keeps every meta key in the version of any other source', () => {
+    const other = (meta: Record<string, unknown>): Evidence => ({ ...page(meta), source: 'title_verdicts' })
+    expect(versionOf(other({ kind: 'video' }))).not.toBe(versionOf(other({})))
+  })
+})

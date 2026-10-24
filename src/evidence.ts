@@ -55,11 +55,22 @@ export function isoOr(value: unknown, fallback: string): string {
   return fallback
 }
 
+/**
+ * Parts of an Inspiration page answer's meta that are not his answer: the card's kind (a reading of the file) and how he
+ * said to read it (read_as, note_for_claude), which are instructions to the tagger. They stay in meta for the readers,
+ * but out of the version, so only a change to his answer makes a new version. A new version withdraws the old one, and
+ * a kind settled again or a note added later is no reason to.
+ */
+export const PAGE_META_UNVERSIONED: readonly string[] = ['kind', 'read_as', 'note_for_claude']
+
 // The version is a hash of the entry's own content: an edited entry is a new
 // row, an unchanged one is never inserted twice.
 export function versionOf(e: Evidence): string {
+  const m = e.source === 'inspiration_page'
+    ? Object.fromEntries(Object.entries(e.meta).filter(([k]) => !PAGE_META_UNVERSIONED.includes(k)))
+    : e.meta
   return contentHash({
-    a: e.attribution, p: e.polarity, l: e.lane, y: e.layer, t: e.title, x: e.excerpt, m: e.meta,
+    a: e.attribution, p: e.polarity, l: e.lane, y: e.layer, t: e.title, x: e.excerpt, m,
   })
 }
 
