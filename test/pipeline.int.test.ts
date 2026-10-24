@@ -499,4 +499,20 @@ run('the review of the link box, on a real database', () => {
     expect((await card(c['1']!)).facets.link).toMatchObject({ author: 'a synthetic author', posted_at: '2026-10-20' })
     expect((await client.query(`select updated_at::text from inspiration_items where id = $1`, [c['1']])).rows[0].updated_at).toBe(before)
   })
+
+  it('gives the cards job\'s places to linked cards whose reading is there, not to newer ones still waiting', async () => {
+    // Ten newer linked cards whose readings have not arrived, and one older linked card whose reading has.
+    const hex = (n: number) => n.toString(16).padStart(64, '0')
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, facets)
+       select 'file-slot-' || n, 'cold_ideas', 'strategy', 'slot-' || n || '.jpg', 'image/jpeg',
+              now() - make_interval(hours => 20 - n), '{"link": {"request_id": "synthetic"}}'
+       from generate_series(0, 10) as n`)
+    await client.query(`insert into content_reads (sha256, shape, engine_rev, read, read_md) values ($1, 'image', 'cw-1', '{}', '# A synthetic image')`, [hex(0)])
+    const files = new Map(Array.from({ length: 11 }, (_, n) => [`file-slot-${n}`,
+      { id: `file-slot-${n}`, name: `slot-${n}.jpg`, mimeType: 'image/jpeg', modifiedTime: '2026-10-24T09:00:00Z', createdTime: '2026-10-24T09:00:00Z', sha256Checksum: hex(n) } as DriveFile]))
+    const r = await tagItems(db, noDrive, tagger().llm, files, 10, true, { linked: true, watch: async () => { throw new Error('not reached') } })
+    expect(r).toMatchObject({ tagged: 1, fromReading: 1, waitingForReading: 10 })
+    expect((await client.query(`select name from inspiration_items where tagged_at is not null`)).rows).toEqual([{ name: 'slot-0.jpg' }])
+  })
 })

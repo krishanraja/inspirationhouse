@@ -57,7 +57,7 @@ A dry run refuses every write. Without `DATABASE_URL` it reads through the Supab
 
 ### The cards job
 
-`pnpm -s engine cards [--dry-run] [--no-model]` (workflow `taste-cards.yml`, run by hand or by Control Center's knock, which starts it when a pasted link has been filed or read and has no card yet) is the quick path for a pasted link. It makes the missing cards, links the requests, and tags at most 10 linked cards, from their reading only, in a job of at most 15 minutes with no ffmpeg and no Python. A linked card whose reading has not arrived yet is left for the daily job and counted as `waiting_for_reading`. The daily job does the same linking, so a link never depends on the knock.
+`pnpm -s engine cards [--dry-run] [--no-model]` (workflow `taste-cards.yml`, run by hand or by Control Center's knock, which starts it when a pasted link has been filed or read and has no card yet) is the quick path for a pasted link. It makes the missing cards, links the requests, and tags at most 10 linked cards, from their reading only, in a job of at most 15 minutes with no ffmpeg and no Python. Its 10 places go only to linked cards whose reading has arrived, so newer cards still waiting never crowd out an older one that is ready. A linked card whose reading has not arrived yet is left for the daily job and counted as `waiting_for_reading`. The daily job does the same linking, so a link never depends on the knock.
 
 Runs are recorded in `content_engine_runs` as `taste_daily`, `taste_weekly`, `taste_harness` and `taste_cards`, where Control Center's done-check reads them.
 

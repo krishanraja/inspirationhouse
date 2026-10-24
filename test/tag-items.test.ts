@@ -21,7 +21,15 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
       if (/^\s*update/i.test(sql)) { writes.push({ sql, params }); return [] as T[] }
       if (/to_regclass\('public\.content_reads'\)/.test(sql)) return [{ ok: Boolean(opts.reads) }] as T[]
       if (/from public\.content_reads/.test(sql)) return (opts.reads ?? []).filter(r => (JSON.parse(params[0] as string) as string[]).includes(r.sha256)) as T[]
-      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) { pendingSelects.push({ sql, params }); return rows.map(r => ({ kind: null, kind_source: null, read_as: null, transcript: null, ...r })) as T[] }
+      if (/select count\(\*\)::int as n from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) {
+        const ids = JSON.parse(params[1] as string) as string[]
+        return [{ n: rows.filter(r => ids.includes(r.drive_file_id) && r.facets && 'link' in r.facets).length }] as T[]
+      }
+      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) {
+        pendingSelects.push({ sql, params })
+        const ids = JSON.parse(params[2] as string) as string[]
+        return rows.filter(r => ids.includes(r.drive_file_id)).map(r => ({ kind: null, kind_source: null, read_as: null, transcript: null, ...r })) as T[]
+      }
       if (/select id::text, drive_file_id, kind, kind_source from public\.inspiration_items/.test(sql)) return (opts.known ?? []) as T[]
       if (/from public\.content_ideas/.test(sql)) return (opts.slate ?? []) as T[]
       return [] as T[]
@@ -485,6 +493,8 @@ describe('tagItems and content-watcher\'s readings', () => {
     expect(h.downloads).toEqual([])
     expect(h.pendingSelects[0]!.sql).toMatch(/and facets \? 'link'/)
     expect(h.pendingSelects[0]!.params[0]).toBe(10)
+    // Its places go only to cards whose reading has arrived: the one still waiting is never asked for.
+    expect(JSON.parse(h.pendingSelects[0]!.params[2] as string)).toEqual(['a'])
   })
 })
 

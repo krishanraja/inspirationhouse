@@ -340,6 +340,32 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
   result.parts = Number(parts?.n ?? 0)
 
   // Only cards whose file is in Drive this run: a card whose file is gone would take a slot every run and be skipped.
+  let inDrive = [...files.keys()]
+  if (deps.linked) {
+    // The cards job tags only from a reading, so only a linked card whose reading has arrived takes one of its places;
+    // newer cards still waiting for theirs are counted and left for the daily job, never crowding out an older one.
+    const shasInDrive = [...new Set([...files.values()].map(driveSha).filter((x): x is string => !!x))]
+    const [reg] = await db.query<{ ok: boolean }>(`select to_regclass('public.content_reads') is not null as ok`)
+    const haveReading = new Set(reg?.ok && shasInDrive.length
+      ? (await db.query<{ sha256: string }>(
+        `select sha256 from public.content_reads where sha256 = any(select jsonb_array_elements_text($1::jsonb))`,
+        [JSON.stringify(shasInDrive)],
+      )).map(r => r.sha256)
+      : [])
+    const readable = (id: string) => { const sha = driveSha(files.get(id)!); return sha !== null && haveReading.has(sha) }
+    const waiting = inDrive.filter(id => !readable(id))
+    if (waiting.length) {
+      const [w] = await db.query<{ n: number }>(
+        `select count(*)::int as n from public.inspiration_items
+         where ${needsTags(1)} and dismissed_at is null
+           and drive_file_id = any(select jsonb_array_elements_text($2::jsonb))
+           and not facets ? 'part_of' and facets ? 'link'`,
+        [TAG_PROMPT_REV, JSON.stringify(waiting)],
+      )
+      result.waitingForReading += Number(w?.n ?? 0)
+    }
+    inDrive = inDrive.filter(readable)
+  }
   // Healing means tagged on this revision and here only to be heard again; a card he instructed since is tagged again.
   const pending = await db.query<Pending>(
     `select id::text, drive_file_id, note_for_claude, read_as, facets, kind, kind_source, transcript,
@@ -349,7 +375,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
        and drive_file_id = any(select jsonb_array_elements_text($3::jsonb))
        and not facets ? 'part_of'${deps.linked ? `\n       and facets ? 'link'` : ''}
      order by (tagged_at is null) desc, drive_created_at desc limit $1`,
-    [limit, TAG_PROMPT_REV, JSON.stringify([...files.keys()])],
+    [limit, TAG_PROMPT_REV, JSON.stringify(inDrive)],
   )
   // content-watcher's readings of these files (content_reads, by sha256), once its migration is applied.
   const readings = new Map<string, ReadRow>()
