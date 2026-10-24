@@ -312,4 +312,51 @@ run('the review of the link box, on a real database', () => {
     await withdrawUncollected(db, 'inspiration_page', v2.slice(0, 3), true)
     expect((await db.query<Eligible>(ELIGIBLE_SQL)).find(e => e.id === id)).toMatchObject({ support_n: 3, days: 3 })
   })
+
+  // A stand-in for the model: it answers, or throws the status it is given, and keeps every prompt it was sent.
+  const tagger = (fail?: number) => {
+    const prompts: string[] = []
+    const llm: Llm = { model: 'stub', structured: async (a) => {
+      prompts.push(JSON.stringify(a.content))
+      if (fail) throw Object.assign(new Error('synthetic'), { status: fail })
+      return { failure: null, model: 'stub', data: {
+        tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only', kind: null, opinion: null, reason: null, piece_ref: null,
+        facets: { platform: 'instagram', format: 'short_video', source: null, creator: null, people: [], organisations: [], topics: [] },
+      } as never }
+    } }
+    return { llm, prompts }
+  }
+  const video = (id: string, over: Partial<DriveFile> = {}): DriveFile =>
+    ({ id, name: `${id}.mp4`, mimeType: 'video/mp4', modifiedTime: '2026-10-24T09:00:00Z', createdTime: '2026-10-24T09:00:00Z', size: '1000', ...over })
+  const noDrive = { thumbnail: async () => null, text: async () => null, download: async () => Buffer.from('synthetic bytes') } as unknown as Google
+
+  it('tags a healing video from the words it finally heard, on the run after a model error, and never hears them twice', async () => {
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, tagged_at, tag_rev, facets)
+       values ('vid-heal-0000', 'video_inspiration', 'production', 'vid-heal-0000.mp4', 'video/mp4', now(), now(), 'tag-v3', '{"heard": "failed", "heard_tries": 1}'),
+              ('vid-new-00000', 'video_inspiration', 'production', 'vid-new-00000.mp4', 'video/mp4', now(), null, null, '{}')`)
+    const files = new Map([['vid-heal-0000', video('vid-heal-0000')], ['vid-new-00000', video('vid-new-00000')]])
+    const asked: Array<boolean | undefined> = []
+    const watch = async (_: Buffer, o: { transcribe?: boolean } = {}) => {
+      asked.push(o.transcribe)
+      return { frames: [], transcript: o.transcribe === false ? null : 'synthetic words that were finally heard', durationS: 12,
+        heard: (o.transcribe === false ? 'skipped' : 'words') as 'words', unheard: null }
+    }
+    const first = await tagItems(db, noDrive, tagger(529).llm, files, 60, true, { watch })
+    expect(first).toMatchObject({ tagged: 0, failed: 2, heard: 2 })
+    const next = tagger()
+    const second = await tagItems(db, noDrive, next.llm, files, 60, true, { watch })
+    expect(second).toMatchObject({ tagged: 2, failed: 0 })
+    expect(next.prompts).toHaveLength(2)
+    expect(next.prompts.every(p => p.includes('synthetic words that were finally heard'))).toBe(true)
+    // The words heard on the first run are not heard again on the second.
+    expect(asked).toEqual([undefined, undefined, false, false])
+    const rows = (await client.query(`select tag_rev, transcript, facets->>'heard' as heard from inspiration_items order by name`)).rows
+    expect(rows).toEqual([
+      { tag_rev: 'tag-v3', transcript: 'synthetic words that were finally heard', heard: 'words' },
+      { tag_rev: 'tag-v3', transcript: 'synthetic words that were finally heard', heard: 'words' },
+    ])
+    // Tagged from its words, it is done: a third run does not pick either card up.
+    expect(await tagItems(db, noDrive, tagger().llm, files, 60, true, { watch })).toMatchObject({ tagged: 0, rehead: 0 })
+  })
 })

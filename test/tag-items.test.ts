@@ -101,6 +101,9 @@ describe('tagItems hearing a video again', () => {
     expect(w.sql).toMatch(/set facets = facets \|\| \$2::jsonb, transcript = coalesce\(\$3, transcript\)/)
     expect(JSON.parse(w.params[1] as string)).toEqual({ heard: 'words', heard_tries: 1 })
     expect(w.params[2]).toBe('what was said')
+    // Its tags came from frames alone, so it loses its revision and the next run tags it from these words.
+    expect(w.sql).toMatch(/tag_rev = case when \$6 then null else tag_rev end/)
+    expect(w.params[5]).toBe(true)
   })
 
   it('keeps the words it heard when the model answer cannot be read', async () => {
@@ -110,6 +113,29 @@ describe('tagItems hearing a video again', () => {
     expect(r).toMatchObject({ tagged: 0, failed: 1, failures: { unparsed: 1 } })
     expect(h.writes).toHaveLength(1)
     expect(h.writes[0]!.params[2]).toBe('what was said')
+  })
+
+  it('leaves the revision of a card never tagged, which the next run picks up anyway', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: false, facets: {} }],
+      { throwOn: () => Object.assign(new Error('overloaded'), { status: 529 }) })
+    await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true,
+      { watch: async () => watched({ transcript: 'what was said', heard: 'words', unheard: null }) })
+    expect(h.writes).toHaveLength(1)
+    expect(h.writes[0]!.params[2]).toBe('what was said')
+    expect(h.writes[0]!.params[5]).toBe(false)
+  })
+
+  it('takes only the frames of a video whose words are on the card, and tags it from those words', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: false, facets: { heard: 'words', heard_tries: 0 }, transcript: 'what was said before' }])
+    const asked: unknown[] = []
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true,
+      { watch: async (_b, o) => { asked.push(o); return watched({ heard: 'skipped', unheard: null }) } })
+    expect(asked).toEqual([{ transcribe: false }])
+    expect(r).toMatchObject({ tagged: 1, watched: 1, heard: 0, unheard: {} })
+    expect(h.prompts[0]).toContain('what was said before')
+    const w = h.writes.at(-1)!
+    expect(w.params[9]).toBe('what was said before')
+    expect(JSON.parse(w.params[7] as string)).toMatchObject({ heard: 'words', heard_tries: 0 })
   })
 
   it('writes nothing more when the model fails and no words were heard', async () => {

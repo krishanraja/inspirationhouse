@@ -436,14 +436,16 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
         result.tooBig++
       } else {
         const bytes = await google.download(f.id, VIDEO_MAX_BYTES).catch(() => null)
-        fresh = bytes ? await watch(bytes).catch(() => null) : null
+        // Words an earlier run heard are not heard again: only the frames are taken.
+        fresh = bytes ? await watch(bytes, item.transcript ? { transcribe: false } : {}).catch(() => null) : null
         watched = fresh
         if (fresh?.frames.length) result.watched++
         if (fresh?.heard === 'words') result.heard++
         const failedClass = !bytes ? 'download' : !fresh ? 'runner' : fresh.unheard
-        if (failedClass && item.transcript) {
-          // Its words were heard on an earlier run (a card tagged again for a new revision, or one he instructed
-          // since). A fetch or a hearing that fails now keeps them, in the prompt and on the card, and costs no try.
+        if ((failedClass || fresh?.heard === 'skipped') && item.transcript) {
+          // Its words were heard on an earlier run (a card tagged again for a new revision, one he instructed since, or
+          // one whose model call failed after it was heard). They are kept, in the prompt and on the card, at no try,
+          // whether this run only took the frames or its fetch failed.
           const priorDuration = typeof item.facets?.duration_s === 'number' ? item.facets.duration_s : null
           watched = { frames: fresh?.frames ?? [], transcript: item.transcript, durationS: fresh?.durationS ?? priorDuration, heard: 'words', unheard: null }
           hearing = { heard: 'words', heard_tries: priorTries }
@@ -489,15 +491,18 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     const list = needsSlate ? await slate(f.name) : []
     const fail = (cls: string) => { result.failed++; result.failures[cls] = (result.failures[cls] ?? 0) + 1 }
     // Words heard this run are kept even when the model call after them fails: only the hearing and the words are
-    // written, as for a card here only to be heard again, so the words are never lost and never heard again for nothing.
+    // written, so the words are never lost and never heard again for nothing (the next run takes them from the card).
+    // A card tagged before (healing) had its tags from frames alone, so it loses its revision and the next run tags it
+    // from the words; otherwise, with words on the card, no run would pick it up again.
     const keepWords = async () => {
       if (!write || fresh?.heard !== 'words' || !fresh.transcript) return
       await db.query(
         `update public.inspiration_items
          set facets = facets || $2::jsonb, transcript = coalesce($3, transcript), updated_at = now(),
-             watched_at = case when $4 then now() else watched_at end
+             watched_at = case when $4 then now() else watched_at end,
+             tag_rev = case when $6 then null else tag_rev end
          where id = $1 and ${needsTags(5)}`,
-        [item.id, JSON.stringify(hearing), fresh.transcript, seen, TAG_PROMPT_REV],
+        [item.id, JSON.stringify(hearing), fresh.transcript, seen, TAG_PROMPT_REV, item.healing],
         { write: true },
       )
     }
