@@ -89,7 +89,7 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
     `select w.id::text, w.evidence_id::text, w.statement, w.kind, w.layer, w.lane, e.polarity, e.source,
             e.attribution, e.excerpt, e.occurred_at::text
      from public.taste_whys w join public.taste_evidence e on e.id = w.evidence_id
-     where e.occurred_at > now() - interval '365 days'
+     where e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null
      order by e.occurred_at desc limit 600`,
   )
   const result: DistilResult = { whys: whys.length, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0 }
@@ -117,14 +117,17 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
   if (!write) return result
 
   for (const r of resolved) {
-    // A claim already decided against, or retired, is never put back.
+    // A claim already decided against, or retired, is never put back. An update writes the quote this draft resolved
+    // (or none), never the one the claim held before: an old quote whose row this draft no longer cites would trip the
+    // database's check that a quote is a verbatim excerpt of a cited row of his words.
     const rows = await db.query<{ n: number }>(
       `with prior as (
          select id, status from public.taste_claims where fingerprint = $1 order by version desc limit 1
        ), upd as (
          update public.taste_claims c
          set evidence_ids = array(select jsonb_array_elements_text($2::jsonb))::uuid[],
-             counterexample_ids = array(select jsonb_array_elements_text($3::jsonb))::uuid[]
+             counterexample_ids = array(select jsonb_array_elements_text($3::jsonb))::uuid[],
+             krish = $8, krish_source_id = $9::uuid
          from prior where c.id = prior.id and prior.status in ('candidate', 'proposed')
          returning 1
        ), ins as (
