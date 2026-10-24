@@ -15,7 +15,8 @@ Either one quietly turned every video into "no words".
 
 Every sound track is heard, in order, and their words joined: ffmpeg on its own takes only the one it picks, so the
 words on a second track (a voice-over beside the music, a second language) were never heard. A track that cannot be
-decoded is skipped while another has words; only when none has words is the failure said.
+decoded, or that the model fails on, is skipped while another has words; only when none has words is the failure said,
+the model's before the decoder's.
 """
 import json
 import os
@@ -66,6 +67,7 @@ def main(path):
     model = None
     texts = []
     undecoded = 0
+    unheard = 0
     for index in streams:
         try:
             audio = decode(np, path, index)
@@ -80,13 +82,15 @@ def main(path):
             segments, _ = model.transcribe(audio, vad_filter=True)
             text = ' '.join(s.text.strip() for s in segments).strip()
         except Exception:  # noqa: BLE001
-            say(None, 'failed', 'transcribe')
-            return
+            unheard += 1
+            continue
         if text:
             texts.append(text)
     words = ' '.join(texts).strip()[:20000]
     if words:
         say(words, 'words')
+    elif unheard:
+        say(None, 'failed', 'transcribe')
     elif undecoded:
         say(None, 'failed', 'decode')
     else:

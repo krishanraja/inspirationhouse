@@ -41,7 +41,12 @@ describe.skipIf(!hasPython)('transcribe.py', () => {
       '    def __init__(self, text): self.text = text',
       'class WhisperModel:',
       '    def __init__(self, *a, **k): pass',
-      '    def transcribe(self, audio, vad_filter=True): return [Segment(audio.data.decode().strip())], None',
+      '    def transcribe(self, audio, vad_filter=True):',
+      '        import os',
+      '        text = audio.data.decode().strip()',
+      '        for track in os.environ.get("FAKE_UNHEARD", "").split():',
+      '            if text == "words from track %s" % track: raise RuntimeError("synthetic")',
+      '        return [Segment(text)], None',
       '',
     ].join('\n'))
   })
@@ -58,6 +63,14 @@ describe.skipIf(!hasPython)('transcribe.py', () => {
   it('keeps the words of the tracks it could hear when one cannot be decoded or is too short', () => {
     expect(hear({ FAKE_FAIL: '1' }).transcript).toBe('words from track 2')
     expect(hear({ FAKE_SHORT: '2' }).transcript).toBe('words from track 1')
+  })
+
+  it('keeps the words of the tracks it heard when the model fails on another', () => {
+    expect(hear({ FAKE_UNHEARD: '1' })).toEqual({ transcript: 'words from track 2', heard: 'words', unheard: null })
+    expect(hear({ FAKE_UNHEARD: '2' })).toEqual({ transcript: 'words from track 1', heard: 'words', unheard: null })
+    expect(hear({ FAKE_UNHEARD: '1 2' })).toEqual({ transcript: null, heard: 'failed', unheard: 'transcribe' })
+    // When one track cannot be decoded and the model fails on the other, the model's failure is the one said.
+    expect(hear({ FAKE_FAIL: '1', FAKE_UNHEARD: '2' })).toEqual({ transcript: null, heard: 'failed', unheard: 'transcribe' })
   })
 
   it('says why when no track has words', () => {
