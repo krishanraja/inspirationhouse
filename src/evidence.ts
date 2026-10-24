@@ -33,14 +33,17 @@ const LAYERS = new Set([
   'length', 'editing', 'camerawork', 'graphics', 'production', 'stage_format',
 ])
 
+// Counted and cut by character (code point), as Postgres's char_length counts, never by UTF-16 unit: a cut through an
+// emoji leaves half of it, which JSON carries as a lone \ud83d that Postgres refuses, failing the whole batch.
 export function clip(text: unknown, max: number): string | null {
   if (typeof text !== 'string') return null
   const t = text.replace(/\s+/g, ' ').trim()
   if (!t) return null
-  if (t.length <= max) return t
-  const cut = t.slice(0, max)
+  const chars = Array.from(t)
+  if (chars.length <= max) return t
+  const cut = chars.slice(0, max)
   const space = cut.lastIndexOf(' ')
-  return space > max * 0.6 ? cut.slice(0, space) : cut
+  return (space > max * 0.6 ? cut.slice(0, space) : cut).join('')
 }
 
 export function asLayer(value: unknown): string | null {

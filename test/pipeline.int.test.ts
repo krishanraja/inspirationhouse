@@ -515,4 +515,10 @@ run('the review of the link box, on a real database', () => {
     expect(r).toMatchObject({ tagged: 1, fromReading: 1, waitingForReading: 10 })
     expect((await client.query(`select name from inspiration_items where tagged_at is not null`)).rows).toEqual([{ name: 'slot-0.jpg' }])
   })
+
+  it('writes a long answer ending in emoji, and the good row beside it', async () => {
+    const long = answer('card-emoji', '2026-10-05T12:00:00Z', [])
+    long.excerpt = 'a'.repeat(1999) + '\u{1F600}\u{1F600}'
+    expect((await writeEvidence(db, [long, answer('card-plain', '2026-10-05T12:00:00Z', [])], runId)).written).toBe(2)
+  })
 })
