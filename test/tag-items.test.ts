@@ -64,6 +64,14 @@ describe('tagItems hearing a video again', () => {
     expect(JSON.parse(h.writes[0]!.params[1] as string).heard_tries).toBe(HEAR_TRIES)
   })
 
+  it('charges no try when the runner has no speech model, since that says nothing about the clip', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: true, facets: { heard: 'failed', heard_tries: HEAR_TRIES - 1 } }])
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true, { watch: async () => watched({ unheard: 'no_model' }) })
+    expect(h.calls()).toBe(0)
+    expect(r).toMatchObject({ rehead: 1, gaveUp: 0, unheard: { no_model: 1 } })
+    expect(JSON.parse(h.writes[0]!.params[1] as string)).toEqual({ heard: 'failed', heard_tries: HEAR_TRIES - 1 })
+  })
+
   it('tags again from the words once they are heard', async () => {
     const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: true, facets: { heard: 'failed', heard_tries: 1 } }])
     const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true,

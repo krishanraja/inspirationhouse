@@ -352,8 +352,10 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
         const failedClass = !bytes ? 'download' : !watched ? 'runner' : watched.unheard
         if (failedClass) {
           miss(failedClass)
-          hearing = { heard: 'failed', heard_tries: priorTries + 1 }
-          if (priorTries + 1 >= HEAR_TRIES) result.gaveUp++
+          // A runner with no speech model says nothing about the clip, so it costs the clip none of its tries.
+          const charged = failedClass !== 'no_model'
+          hearing = { heard: 'failed', heard_tries: charged ? priorTries + 1 : priorTries }
+          if (charged && priorTries + 1 >= HEAR_TRIES) result.gaveUp++
         } else {
           hearing = { heard: watched!.heard, heard_tries: priorTries }
         }
