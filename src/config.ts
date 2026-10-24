@@ -51,9 +51,10 @@ export const DRIVE = {
   videoInspiration: '1QxrzxISYFXq0er0DG0XSapm7qhvuRmh-',
   // Now in Content Inspo; it is read as a sheet, never made a card, whichever folder holds it.
   whatILikeSheet: '1_XBxxMUcU4CFHB5iJqWc1WtYKmJCftMOe5UlZYSM-_U',
-  // An uploaded Excel workbook in Cold Ideas: the posts of the Instagram
-  // accounts he follows for strategy, captured one row per post.
-  instagramInspo: '1KawZr2R3Bi1zWJ1F2rPeGdBeVkc1gQTD',
+  // An uploaded Excel workbook in Content Inspo: the posts of the Instagram
+  // accounts he follows for strategy, captured one row per post. Re-uploaded
+  // on 2026-10-24 as a new file (the old id 1KawZr2R3Bi1zWJ1F2rPeGdBeVkc1gQTD is gone).
+  instagramInspo: '1N3qftTy5aHiFjMkK_2c_O4rOvTAirw3N',
 } as const
 
 // Read-only, and nothing else. CI fails if a write scope appears in the repo.
