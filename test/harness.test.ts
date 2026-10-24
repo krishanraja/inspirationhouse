@@ -71,10 +71,12 @@ describe('syncHarness', () => {
     expect(bodies[0]).toContain(hashLine(setHash(rules)))
     expect(bodies[0]).toBe(pullBody(setHash(rules)))
   })
-  it('leaves an open pull request alone when its branch already holds the rendered files', async () => {
-    const { gh, calls } = fakeGitHub({}, 12, { branch: rendered(rules) })
+  it('leaves the files of an open pull request alone when its branch already holds them, and names the set in its body', async () => {
+    const { gh, calls, bodies } = fakeGitHub({}, 12, { branch: rendered(rules) })
     expect(await syncHarness(db(rules), gh, true)).toEqual({ rules: 3, changed: 2, written: 0, pull: 12, declined: null })
-    expect(calls).toEqual([])
+    // No reset and no file written, so his review stands; a body from older code gains the hash line.
+    expect(calls).toEqual(['update 12'])
+    expect(bodies).toEqual([pullBody(setHash(rules))])
   })
   it('rebuilds an open pull request whose set changed, and names the new set in its body', async () => {
     const older = rules.slice(0, 1)

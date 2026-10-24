@@ -107,9 +107,14 @@ export async function syncHarness(db: Db, gh: GitHubApi, write: boolean, base = 
 
   let pull = await gh.openPull(SYNC_BRANCH)
   if (pull !== null) {
-    // The open pull request already holds exactly this set: leave it alone, so his review is not reset every morning.
+    // The open pull request already holds exactly this set: its files are left alone, so his review is not reset every
+    // morning. Only its body is written, so a pull request opened before the body named its set gains the hash line,
+    // and closing it declines this set.
     const onBranch = await Promise.all(wanted.map(f => gh.readFile(f.path, SYNC_BRANCH)))
-    if (wanted.every((f, i) => onBranch[i]?.text === f.text)) return { ...result, pull }
+    if (wanted.every((f, i) => onBranch[i]?.text === f.text)) {
+      await gh.updatePull(pull, pullBody(hash))
+      return { ...result, pull }
+    }
   } else {
     // He closed a pull request with this same set without merging it: he declined it, so it is not opened again.
     const declined = (await gh.closedPulls(SYNC_BRANCH)).find(p => !p.merged && p.body.includes(hashLine(hash)))
