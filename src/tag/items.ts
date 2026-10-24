@@ -34,9 +34,10 @@ export const TagSchema = z.object({
     format: z.enum(FORMATS),
     source: z.string().max(140).nullable(),
     creator: z.string().max(80).nullable(),
-    people: z.array(z.string().min(2).max(80)).max(6),
-    organisations: z.array(z.string().min(2).max(80)).max(6),
-    topics: z.array(z.string().min(2).max(60)).max(6),
+    // No count limit here: a model that lists seven names should not lose the card. mergeFacets keeps the first six.
+    people: z.array(z.string().min(1).max(120)),
+    organisations: z.array(z.string().min(1).max(120)),
+    topics: z.array(z.string().min(1).max(80)),
   }),
 })
 export type Tagging = z.infer<typeof TagSchema>
@@ -137,8 +138,10 @@ export function tagContent(f: DriveFile, thumb: Img | null, text: string | null,
 
 /** The card's facets: the model's reading, with what the file name and the clip prove kept as facts. */
 export function mergeFacets(model: Tagging['facets'], hints: Hints, watched: Watched | null): Record<string, unknown> {
+  const six = (xs: string[]) => [...new Set(xs.map(x => x.trim()).filter(Boolean))].slice(0, 6)
   return {
     ...model,
+    people: six(model.people), organisations: six(model.organisations), topics: six(model.topics),
     platform: model.platform === 'unknown' && hints.platform ? hints.platform : model.platform,
     format: hints.format === 'screenshot' && model.format !== 'carousel' && model.format !== 'chart' ? 'screenshot' : model.format,
     source: model.source ?? hints.source,
