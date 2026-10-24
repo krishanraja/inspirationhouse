@@ -1,4 +1,5 @@
 import type { Db } from '../db.ts'
+import { contentHash } from '../hash.ts'
 
 // Krish's approved taste rules reach the ai-harness voice and design skills by
 // pull request, never by a live read (Ruling, Krish, 2026-10-24: "Rules arrive
@@ -17,11 +18,16 @@ export const HARNESS_FILES: ReadonlyArray<{ path: string; skill: string; lanes: 
 
 export const SYNC_BRANCH = 'taste/approved-rules'
 
-export interface ApprovedRule { id: string; lane: string; layer: string | null; statement: string; means: string | null; decided_at: string }
+export interface ApprovedRule {
+  id: string; lane: string; layer: string | null; statement: string; means: string | null; decided_at: string
+  /** He reworded it ('corrected'): the statement is his own words, and the engine's means no longer goes with it. */
+  reworded: boolean
+}
 
-// Form rules only: the view already excludes subject claims (the anti-echo rule).
+// Form rules only: the view already excludes subject claims (the anti-echo rule). A reword's statement is his
+// decision_note (taste_profile_current), and its decision is 'corrected'.
 export const APPROVED_SQL = `
-  select id::text, lane, layer, statement, means, decided_at::text
+  select id::text, lane, layer, statement, means, decided_at::text, (decision = 'corrected') as reworded
   from public.taste_profile_form
   order by decided_at asc, id asc`
 
@@ -43,7 +49,8 @@ export function renderApproved(rules: ApprovedRule[], skill: string, lanes: read
   if (!mine.length) return [...head, 'No rules approved yet.', ''].join('\n')
   const body = mine.map(r => {
     const layer = r.layer ? ` (${r.layer})` : ''
-    const means = r.means?.trim() ? ` So: ${r.means.trim()}` : ''
+    // A rule he reworded is his words alone: the engine's own "So:" line was written for the wording he replaced.
+    const means = !r.reworded && r.means?.trim() ? ` So: ${r.means.trim()}` : ''
     return `- [${r.lane}${layer}, approved ${r.decided_at.slice(0, 10)}] ${r.statement.trim()}${means}`
   })
   return [...head, ...body, ''].join('\n')
@@ -57,33 +64,81 @@ export interface GitHubApi {
   writeFile(path: string, branch: string, text: string, sha: string | null, message: string): Promise<void>
   /** The number of the open pull request from the branch, or null. */
   openPull(branch: string): Promise<number | null>
+  /** The pull requests from the branch that are closed, merged or not, newest first. */
+  closedPulls(branch: string): Promise<Array<{ number: number; merged: boolean; body: string }>>
   createPull(branch: string, base: string, title: string, body: string): Promise<number>
+  updatePull(pull: number, body: string): Promise<void>
 }
 
-export interface HarnessSyncResult { rules: number; changed: number; pull: number | null }
+export interface HarnessSyncResult {
+  rules: number
+  /** Files that differ from the default branch. */
+  changed: number
+  /** Files written to the sync branch this run: none when the open pull request already holds them. */
+  written: number
+  pull: number | null
+  /** A pull request he closed without merging that holds this same set, so none is opened again for it. */
+  declined: number | null
+}
+
+/** The line in a pull request's body that names the exact set of files it proposes. */
+export const hashLine = (hash: string): string => `Taste rules hash: ${hash}`
+
+/**
+ * ai-harness's closeout check (scripts/closeout/check.mjs) asks every pull request that changes a file to update its
+ * NOW.md, or to say why not with this line. The rules files change only by his approval, and NOW.md does not list them.
+ */
+export const CLOSEOUT_LINE = 'Closeout: not needed, the approved taste rules are rendered from what Krish approved; NOW.md does not list them.'
+
+export function pullBody(hash: string): string {
+  return [
+    'The taste rules Krish approved on the publish board, rendered for the `krish-voice` and `krish-design` skills by the taste ledger (`krishanraja/inspirationhouse`, `engine harness`).',
+    '',
+    "Nothing reaches a skill until this is merged. This repository is public: each rule's wording, including any rewording in his own words, becomes public on merge.",
+    '',
+    'Closing this without merging declines this set: the same set is never proposed again, and a pull request opens only once the approved rules change.',
+    '',
+    CLOSEOUT_LINE,
+    '',
+    hashLine(hash),
+  ].join('\n')
+}
 
 export async function syncHarness(db: Db, gh: GitHubApi, write: boolean, base = 'main'): Promise<HarnessSyncResult> {
   const rules = await db.query<ApprovedRule>(APPROVED_SQL)
   const wanted = HARNESS_FILES.map(f => ({ ...f, text: renderApproved(rules, f.skill, f.lanes) }))
+  const hash = contentHash(wanted.map(f => ({ path: f.path, text: f.text })))
   const onBase = await Promise.all(wanted.map(f => gh.readFile(f.path, base)))
   const changed = wanted.filter((f, i) => onBase[i]?.text !== f.text)
-  if (!changed.length || !write) return { rules: rules.length, changed: changed.length, pull: null }
+  const result: HarnessSyncResult = { rules: rules.length, changed: changed.length, written: 0, pull: null, declined: null }
+  if (!changed.length || !write) return result
 
   let pull = await gh.openPull(SYNC_BRANCH)
-  // An open pull request is rebuilt from the default branch each time, so it always shows the whole current set.
+  if (pull !== null) {
+    // The open pull request already holds exactly this set: its files are left alone, so his review is not reset every
+    // morning. Only its body is written, so a pull request opened before the body named its set gains the hash line,
+    // and closing it declines this set.
+    const onBranch = await Promise.all(wanted.map(f => gh.readFile(f.path, SYNC_BRANCH)))
+    if (wanted.every((f, i) => onBranch[i]?.text === f.text)) {
+      await gh.updatePull(pull, pullBody(hash))
+      return { ...result, pull }
+    }
+  } else {
+    // He closed a pull request with this same set without merging it: he declined it, so it is not opened again.
+    const declined = (await gh.closedPulls(SYNC_BRANCH)).find(p => !p.merged && p.body.includes(hashLine(hash)))
+    if (declined) return { ...result, declined: declined.number }
+  }
+
+  // A pull request is rebuilt from the default branch each time the set changes, so it always shows the whole set.
   await gh.resetBranch(SYNC_BRANCH, base)
   for (const f of changed) {
     const cur = await gh.readFile(f.path, SYNC_BRANCH)
     await gh.writeFile(f.path, SYNC_BRANCH, f.text, cur?.sha ?? null, `Approved taste rules for ${f.skill}`)
   }
-  if (pull === null) {
-    pull = await gh.createPull(SYNC_BRANCH, base, 'Approved taste rules for the voice and design skills', [
-      'The taste rules Krish approved on the publish board, rendered for the `krish-voice` and `krish-design` skills by the taste ledger (`krishanraja/inspirationhouse`, `engine harness`).',
-      '',
-      "Nothing reaches a skill until this is merged. This repository is public: each rule's wording, including any rewording in his own words, becomes public on merge.",
-    ].join('\n'))
-  }
-  return { rules: rules.length, changed: changed.length, pull }
+  if (pull === null) pull = await gh.createPull(SYNC_BRANCH, base, 'Approved taste rules for the voice and design skills', pullBody(hash))
+  // The body names the set the pull request now holds, so closing it declines this set and no older one.
+  else await gh.updatePull(pull, pullBody(hash))
+  return { ...result, written: changed.length, pull }
 }
 
 /** The GitHub REST client, on a token with contents and pull request write on the harness repository only. */
@@ -119,9 +174,17 @@ export function githubApi(repo: string, token: string, fetcher: typeof fetch = f
       const list = (r as unknown as Array<{ number: number }>) ?? []
       return Array.isArray(list) ? list[0]?.number ?? null : null
     },
+    async closedPulls(branch) {
+      const r = await call('GET', `/pulls?state=closed&per_page=100&sort=created&direction=desc&head=${encodeURIComponent(`${owner}:${branch}`)}`)
+      const list = r as unknown as Array<{ number: number; merged_at: string | null; body: string | null }> | null
+      return Array.isArray(list) ? list.map(p => ({ number: Number(p.number), merged: Boolean(p.merged_at), body: String(p.body ?? '') })) : []
+    },
     async createPull(branch, baseRef, title, body) {
       const r = await call('POST', '/pulls', { head: branch, base: baseRef, title, body })
       return Number(r?.number)
+    },
+    async updatePull(pull, body) {
+      await call('PATCH', `/pulls/${pull}`, { body })
     },
   }
 }

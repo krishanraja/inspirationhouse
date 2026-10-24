@@ -22,6 +22,11 @@ describe('public logs', () => {
   it('keeps per-source counters, but only as numbers', () => {
     expect(safeFields({ seen_git_taste: 5, new_drive: 'leak' })).toEqual({ seen_git_taste: 5 })
   })
+
+  it('keeps the linking counts, and never a link or his note', () => {
+    expect(safeFields({ requests_linked: 2, slides_folded: 4, notes_kept: 1, waiting_for_reading: 1, url: 'https://example.org/p/1', note: 'his words' }))
+      .toEqual({ requests_linked: 2, slides_folded: 4, notes_kept: 1, waiting_for_reading: 1 })
+  })
 })
 
 describe('Drive stays read-only', () => {

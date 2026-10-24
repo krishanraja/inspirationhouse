@@ -1,0 +1,42 @@
+name: taste-cards
+# The quick job for links Krish pasted on the Inspiration board: make the cards their media became, link each request
+# to its card, and tag the linked cards from content-watcher's reading (content_reads). Control Center's cards knock
+# dispatches it when a request has been filed or read; the daily job does the same linking, so nothing waits on it.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read only, write nothing
+        type: boolean
+        default: true
+      use_model:
+        description: Call the model (costs money; off proves access for free)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: taste-cards
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # The job stops starting cards after 8 minutes (CARDS_BUDGET_MS in src/cli.ts) and tags at most 10.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # No ffmpeg and no Python: cards are tagged from content-watcher's reading only, never watched here. A linked
+      # card whose reading has not arrived yet waits for the daily job.
+      # Logs on this public repository carry counts only (src/log.ts).
+      - run: pnpm -s engine cards ${{ inputs.dry_run && '--dry-run' || '' }} ${{ !inputs.use_model && '--no-model' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY }}

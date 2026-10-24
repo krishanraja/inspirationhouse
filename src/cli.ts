@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { loadConfig, DRIVE } from './config.ts'
 import { connect, readOnly, type Db } from './db.ts'
-import { writeEvidence, normalise, versionOf, type Evidence } from './evidence.ts'
+import { writeEvidence, normalise, versionOf, withdrawUncollected, type Evidence } from './evidence.ts'
 import { collectGitTaste, githubFetcher } from './collect/gitTaste.ts'
 import {
   collectIdeaTriage, collectVisibility, collectCreatorMoves, collectDriveArtifacts, collectFeedbackHistory,
@@ -11,7 +11,9 @@ import { collectDrive, sheetEvidence } from './collect/drive.ts'
 import { collectInstagram } from './collect/instagram.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, type Llm } from './llm.ts'
-import { syncItems, tagItems, answeredItemEvidence } from './tag/items.ts'
+import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
+import { linkRequests } from './tag/links.ts'
+import type { DriveFile } from './google.ts'
 import { explainPending } from './explain/whys.ts'
 import { distil } from './distil/claims.ts'
 import { propose, syncDecisions } from './publish/propose.ts'
@@ -68,8 +70,9 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   let seen = 0
   let written = 0
   for (const [name, fn] of groups) {
+    let rows: Evidence[]
     try {
-      const rows = await fn()
+      rows = await fn()
       const res = ctx.dry ? { seen: rows.length, written: await countNew(ctx.db, rows, ctx.ledger) } : await writeEvidence(ctx.db, rows, ctx.runId)
       ctx.counts[`seen_${name}`] = res.seen
       ctx.counts[`new_${name}`] = res.written
@@ -80,10 +83,71 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
     } catch (err) {
       ctx.problems.push(`collect ${name}: ${(err as Error).message.slice(0, 120)}`)
       log({ stage: 'collect', source: name, status: 'failed', error_class: (err as Error).name })
+      continue
+    }
+    // The page is read whole on every run, so an answer it no longer holds (Undo, or an edit) stops counting as his.
+    // Only after its rows were collected and written: a failed read withdraws nothing.
+    if (name === 'inspiration_page') {
+      try {
+        const w = await withdrawUncollected(ctx.db, 'inspiration_page', rows, !ctx.dry)
+        ctx.counts.evidence_withdrawn = w.withdrawn
+        ctx.counts.evidence_restored = w.restored
+        ctx.counts.claims_recounted = w.recounted
+        log({ stage: 'withdraw', source: name, evidence_withdrawn: w.withdrawn, evidence_restored: w.restored, claims: w.recounted, dry_run: ctx.dry })
+      } catch (err) {
+        ctx.problems.push(`withdraw ${name}: ${(err as Error).name}`)
+        log({ stage: 'withdraw', source: name, status: 'failed', error_class: (err as Error).name })
+      }
     }
   }
   ctx.counts.seen = seen
   ctx.counts.written = written
+}
+
+/** Link the links he pasted to the cards their media became (src/tag/links.ts). A failure is recorded, never thrown. */
+async function link(ctx: Ctx, files: Map<string, DriveFile>): Promise<number> {
+  const l = await linkRequests(ctx.db, files, !ctx.dry).catch(err => {
+    ctx.problems.push(`link: ${(err as Error).name}`)
+    log({ stage: 'link', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!l) return 0
+  ctx.counts.requests_linked = l.linked
+  ctx.counts.slides_folded = l.slides
+  ctx.counts.notes_kept = l.notes
+  log({ stage: 'link', requests_linked: l.linked, slides_folded: l.slides, notes_kept: l.notes, dry_run: ctx.dry })
+  return l.linked
+}
+
+/** Tag the cards that need it. A throw from tagging as a whole (the database, Drive) is recorded, never thrown. */
+async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linked: boolean): Promise<TagResult | null> {
+  if (!ctx.google || !ctx.llm) return null
+  // The class only: an error's message can quote a row.
+  const t = await tagItems(ctx.db, ctx.google, ctx.llm, files, limit, !ctx.dry, linked ? { linked, budgetMs: CARDS_BUDGET_MS } : {}).catch(err => {
+    ctx.problems.push(`tagging stopped: ${(err as Error).name}`)
+    log({ stage: 'tag', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!t) return null
+  ctx.counts.items_tagged = t.tagged
+  ctx.counts.items_watched = t.watched
+  ctx.counts.items_heard = t.heard
+  ctx.counts.items_repaired = t.repaired
+  ctx.counts.items_rehead = t.rehead
+  ctx.counts.items_too_big = t.tooBig
+  ctx.counts.items_gave_up = t.gaveUp
+  ctx.counts.items_deferred = t.deferred
+  ctx.counts.items_kinded = t.kinded
+  ctx.counts.items_feeds = t.feeds
+  ctx.counts.items_parts = t.parts
+  ctx.counts.items_from_reading = t.fromReading
+  ctx.counts.items_tag_failed = t.failed
+  if (linked) ctx.counts.waiting_for_reading = t.waitingForReading
+  if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
+  const unheard = Object.values(t.unheard).reduce((a, b) => a + b, 0)
+  ctx.counts.items_unheard = unheard
+  if (unheard) ctx.problems.push(`no words heard from ${unheard} video(s): ${Object.keys(t.unheard).join(', ')}`)
+  return t
 }
 
 async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
@@ -96,19 +160,17 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
     if (items) {
       ctx.counts.items_seen = items.seen
       ctx.counts.items_new = items.written
-      if (ctx.llm) {
-        const t = await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 60, !ctx.dry)
-        ctx.counts.items_tagged = t.tagged
-        ctx.counts.items_watched = t.watched
-        ctx.counts.items_tag_failed = t.failed
-        if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
-      }
+      // The same linking the cards job does, so no pasted link depends on Control Center's knock.
+      await link(ctx, items.files)
+      // His evidence is read either way, so the run still explains when tagging stops.
+      await tag(ctx, items.files, 60, false)
     }
   }
   if (ctx.llm) {
     const ex = await explainPending(ctx.db, ctx.llm, ctx.runId, { write: !ctx.dry })
     ctx.counts.explain_items = ex.items
     ctx.counts.whys = ex.whys
+    ctx.counts.explain_repaired = ex.repaired
     if (ex.failed) ctx.problems.push(`explain failed on ${ex.failed} item(s)`)
     const judged = judgeRun(ex.items, ex.whys)
     if (judged.status === 'failed') ctx.problems.push(judged.reason!)
@@ -124,7 +186,7 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   ctx.counts.retired = s.retired
   if (ctx.llm) {
     const d = await distil(ctx.db, ctx.llm, ctx.runId, !ctx.dry)
-    Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written })
+    Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written, distil_repaired: d.repaired })
     if (d.failed) ctx.problems.push('distil: the model answer was refused, cut off or unparsed')
   }
   const p = await propose(ctx.db, now, !ctx.dry)
@@ -135,12 +197,32 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   return finish(ctx, 1)
 }
 
+/** The most cards one cards run tags, and when it stops starting them: the job is cancelled at 15 minutes. */
+const CARDS_LIMIT = 10
+const CARDS_BUDGET_MS = 8 * 60_000
+
+// The quick job for links he pasted on the Inspiration board: make the cards their media became, link each request to
+// its card, and tag the linked cards from content-watcher's reading. No collecting, explaining or watching: a linked
+// card with no reading yet is left for the daily job.
+async function cards(ctx: Ctx): Promise<{ status: RunStatus; reason: string | null }> {
+  if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
+  if (!ctx.google) return finish(ctx, 0)
+  const items = await syncItems(ctx.db, ctx.google, !ctx.dry).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
+  if (!items) return finish(ctx, 0)
+  ctx.counts.items_seen = items.seen
+  ctx.counts.items_new = items.written
+  const linked = await link(ctx, items.files)
+  const t = await tag(ctx, items.files, CARDS_LIMIT, true)
+  return finish(ctx, linked + (t ? t.tagged + t.failed + t.rehead + t.waitingForReading : 0))
+}
+
 // Propose the approved form rules to the ai-harness voice and design skills, by pull request.
 async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
   if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
   if (!cfg.HARNESS_SYNC_TOKEN) { ctx.problems.push('harness: HARNESS_SYNC_TOKEN not configured'); return finish(ctx, 0) }
   const r = await syncHarness(ctx.db, githubApi(cfg.HARNESS_REPO, cfg.HARNESS_SYNC_TOKEN), !ctx.dry)
-  Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, ...(r.pull ? { pull: r.pull } : {}) })
+  Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, files_written: r.written,
+    ...(r.pull ? { pull: r.pull } : {}), ...(r.declined ? { declined_pull: r.declined } : {}) })
   return finish(ctx, 1)
 }
 
@@ -157,8 +239,8 @@ async function main(): Promise<void> {
   // A dry run that costs nothing: collect and count, but call no model.
   const noModel = args.includes('--no-model')
   const trigger = args.includes('--cron') ? 'cron' : 'manual'
-  if (job !== 'daily' && job !== 'weekly' && job !== 'harness') {
-    console.error('usage: engine daily|weekly|harness [--dry-run] [--no-model] [--cron] [--preview]')
+  if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards') {
+    console.error('usage: engine daily|weekly|harness|cards [--dry-run] [--no-model] [--cron] [--preview]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -185,14 +267,14 @@ async function main(): Promise<void> {
 
   let outcome: { status: RunStatus; reason: string | null }
   try {
-    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : await harness(ctx, cfg)
+    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx) : await harness(ctx, cfg)
   } catch (err) {
     outcome = { status: 'failed', reason: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 600) }
   }
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })

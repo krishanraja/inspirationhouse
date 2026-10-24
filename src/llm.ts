@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import type { z } from 'zod'
 import type { Config } from './config.ts'
+import { repairToSchema } from './repair.ts'
 
 export interface Structured<T> {
   data: T | null
@@ -9,6 +10,8 @@ export interface Structured<T> {
   // reading an empty answer as "nothing to say".
   failure: 'refusal' | 'max_tokens' | 'unparsed' | null
   model: string
+  // How many limits the answer overran and were repaired (src/repair.ts); counted by the run, never hidden.
+  repairs?: number
 }
 
 export interface Llm {
@@ -23,33 +26,41 @@ export interface Llm {
 
 export function anthropicLlm(cfg: Config): Llm {
   if (!cfg.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set')
-  const client = new Anthropic({ apiKey: cfg.ANTHROPIC_API_KEY })
+  // logLevel off: the SDK's own warnings can print a raw stream chunk, which may be model text, into the public log.
+  const client = new Anthropic({ apiKey: cfg.ANTHROPIC_API_KEY, logLevel: 'off' })
   const model = cfg.TASTE_MODEL
   return {
     model,
     async structured({ schema, system, content, maxTokens = 16000 }) {
-      // Streamed: the SDK refuses a non-streaming call whose max_tokens could run past ten minutes (the weekly distil
-      // asks for 32000), and finalMessage() still parses the structured output.
-      let res
-      try {
-        res = await client.messages.stream({
-          model,
-          max_tokens: maxTokens,
-          system,
-          messages: [{ role: 'user', content }],
-          output_config: { format: zodOutputFormat(schema) },
-        }).finalMessage()
-      } catch (err) {
-        // An answer that breaks the schema fails that one item, never the whole run: the SDK throws while parsing
-        // (2026-10-24, a seventh organisation where six were allowed stopped the daily run). Anything else still throws.
-        if (/Failed to parse structured output/.test((err as Error)?.message ?? '')) return { data: null, failure: 'unparsed', model }
-        throw err
+      // Streamed as raw events, read here: the SDK refuses a non-streaming call whose max_tokens could run past ten
+      // minutes (the weekly distil asks for 32000), and its own reader enforces limits the API never sent
+      // (src/repair.ts), so one tag too many used to throw away the card (2026-10-24), and it parses before the stop
+      // reason can be read.
+      const { schema: jsonSchema } = zodOutputFormat(schema)
+      const events = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: 'user', content }],
+        output_config: { format: { type: 'json_schema', schema: jsonSchema } },
+        stream: true,
+      })
+      let text = ''
+      let stop: string | null = null
+      let served = model
+      for await (const ev of events) {
+        if (ev.type === 'message_start') served = ev.message.model
+        else if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') text += ev.delta.text
+        else if (ev.type === 'message_delta') stop = ev.delta.stop_reason ?? stop
       }
       // The stop reason first, always: a refused or cut-off answer is not data.
-      if (res.stop_reason === 'refusal') return { data: null, failure: 'refusal', model: res.model }
-      if (res.stop_reason === 'max_tokens') return { data: null, failure: 'max_tokens', model: res.model }
-      if (res.parsed_output == null) return { data: null, failure: 'unparsed', model: res.model }
-      return { data: res.parsed_output, failure: null, model: res.model }
+      if (stop === 'refusal') return { data: null, failure: 'refusal', model: served }
+      if (stop === 'max_tokens') return { data: null, failure: 'max_tokens', model: served }
+      let raw: unknown
+      try { raw = JSON.parse(text) } catch { return { data: null, failure: 'unparsed', model: served } }
+      const fixed = repairToSchema(schema, raw)
+      if (!fixed) return { data: null, failure: 'unparsed', model: served }
+      return { data: fixed.data, failure: null, model: served, repairs: fixed.repairs }
     },
   }
 }

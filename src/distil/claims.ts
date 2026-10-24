@@ -21,7 +21,9 @@ export const ClaimSchema = z.object({
     support: z.array(z.number().int().min(0)).min(1).max(60),
     counter: z.array(z.number().int().min(0)).max(30),
     krish_quote_ref: z.number().int().min(0).nullable(),
-    krish_quote: z.string().max(400).nullable(),
+    // No length limit here: a quote is never cut to fit (src/repair.ts would cut a string). One over 400 is dropped in
+    // resolveClaim, and the claim keeps no quote, as with any quote that is not his words verbatim.
+    krish_quote: z.string().nullable(),
     flip_rule: z.string().min(12).max(400),
   })).max(12),
 })
@@ -72,7 +74,7 @@ export function resolveClaim(c: DraftClaim, whys: WhyRow[]): Resolved | null {
   let krish: string | null = null
   let krishSourceId: string | null = null
   const quoted = c.krish_quote_ref === null ? undefined : whys[c.krish_quote_ref]
-  if (c.krish_quote && quoted && quoted.attribution === 'krish_words' && quoted.excerpt?.includes(c.krish_quote)
+  if (c.krish_quote && c.krish_quote.length <= 400 && quoted && quoted.attribution === 'krish_words' && quoted.excerpt?.includes(c.krish_quote)
       && evidenceIds.includes(quoted.evidence_id)) {
     krish = c.krish_quote
     krishSourceId = quoted.evidence_id
@@ -80,17 +82,17 @@ export function resolveClaim(c: DraftClaim, whys: WhyRow[]): Resolved | null {
   return { fingerprint: claimFingerprint(c), claim: { ...c, layer: c.kind === 'form' ? c.layer : null }, evidenceIds, counterIds, krish, krishSourceId }
 }
 
-export interface DistilResult { whys: number; drafted: number; resolved: number; written: number; failed: boolean }
+export interface DistilResult { whys: number; drafted: number; resolved: number; written: number; failed: boolean; repaired: number }
 
 export async function distil(db: Db, llm: Llm, runId: string, write = true): Promise<DistilResult> {
   const whys = await db.query<WhyRow>(
     `select w.id::text, w.evidence_id::text, w.statement, w.kind, w.layer, w.lane, e.polarity, e.source,
             e.attribution, e.excerpt, e.occurred_at::text
      from public.taste_whys w join public.taste_evidence e on e.id = w.evidence_id
-     where e.occurred_at > now() - interval '365 days'
+     where e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null
      order by e.occurred_at desc limit 600`,
   )
-  const result: DistilResult = { whys: whys.length, drafted: 0, resolved: 0, written: 0, failed: false }
+  const result: DistilResult = { whys: whys.length, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0 }
   if (whys.length < 3) return result
   const existing = await db.query<{ statement: string }>(
     `select statement from public.taste_claims where status in ('candidate', 'proposed') order by updated_at desc limit 40`,
@@ -108,20 +110,24 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
     maxTokens: 32000,
   })
   if (!out.data) { result.failed = true; return result }
+  result.repaired = out.repairs ?? 0
   result.drafted = out.data.claims.length
   const resolved = out.data.claims.map(c => resolveClaim(c, whys)).filter((r): r is Resolved => r !== null)
   result.resolved = resolved.length
   if (!write) return result
 
   for (const r of resolved) {
-    // A claim already decided against, or retired, is never put back.
+    // A claim already decided against, or retired, is never put back. An update writes the quote this draft resolved
+    // (or none), never the one the claim held before: an old quote whose row this draft no longer cites would trip the
+    // database's check that a quote is a verbatim excerpt of a cited row of his words.
     const rows = await db.query<{ n: number }>(
       `with prior as (
          select id, status from public.taste_claims where fingerprint = $1 order by version desc limit 1
        ), upd as (
          update public.taste_claims c
          set evidence_ids = array(select jsonb_array_elements_text($2::jsonb))::uuid[],
-             counterexample_ids = array(select jsonb_array_elements_text($3::jsonb))::uuid[]
+             counterexample_ids = array(select jsonb_array_elements_text($3::jsonb))::uuid[],
+             krish = $8, krish_source_id = $9::uuid
          from prior where c.id = prior.id and prior.status in ('candidate', 'proposed')
          returning 1
        ), ins as (

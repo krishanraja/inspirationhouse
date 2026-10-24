@@ -31,6 +31,8 @@ export interface DriveFile {
   size?: string
   thumbnailLink?: string
   videoMediaMetadata?: { durationMillis?: string }
+  /** Drive's sha256 of the file's bytes (lowercase hex). A link's request names its media by the same hash. */
+  sha256Checksum?: string
 }
 
 export interface ServiceAccount { email: string; key: string }
@@ -96,7 +98,7 @@ export async function connectGoogle(cfg: Config): Promise<Google> {
       let pageToken: string | undefined
       do {
         const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`)
-        const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,thumbnailLink,videoMediaMetadata)')
+        const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,modifiedTime,createdTime,size,thumbnailLink,videoMediaMetadata,sha256Checksum)')
         const page = await get<{ files?: DriveFile[]; nextPageToken?: string }>(
           `https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true${pageToken ? `&pageToken=${pageToken}` : ''}`,
         )

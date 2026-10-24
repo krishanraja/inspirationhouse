@@ -30,6 +30,14 @@ describe('turning a drafted claim into one the database will hold', () => {
     expect(r.krish).toBeNull()
   })
 
+  it('never keeps a quote cut to fit: one over 400 characters is dropped whole, and the claim kept', () => {
+    const long = 'he said it plainly and then said it again '.repeat(12).trim()
+    const r = resolveClaim(draft({ krish_quote: long }), [why(1, { excerpt: long }), why(2), why(3)])!
+    expect(long.length).toBeGreaterThan(400)
+    expect(r.krish).toBeNull()
+    expect(r.evidenceIds).toHaveLength(3)
+  })
+
   it('drops a quote attributed to a line that is not his words', () => {
     const notHis = [why(1, { attribution: 'krish_action' }), why(2), why(3)]
     expect(resolveClaim(draft({ counter: [] }), notHis)!.krish).toBeNull()
@@ -42,5 +50,46 @@ describe('turning a drafted claim into one the database will hold', () => {
   it('fingerprints the same claim the same way through punctuation and case', () => {
     expect(claimFingerprint(draft({ statement: 'Titles should say what happens, in plain words!' })))
       .toBe(claimFingerprint(draft({ statement: 'titles should say what happens in plain words' })))
+  })
+})
+
+import { distil } from '../src/distil/claims.ts'
+import type { Db } from '../src/db.ts'
+import type { Llm } from '../src/llm.ts'
+
+describe('distil against the database', () => {
+  function fake() {
+    const calls: Array<{ sql: string; params: unknown[] }> = []
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = []) {
+        calls.push({ sql, params })
+        if (/from public\.taste_whys/.test(sql)) return whys as T[]
+        if (/with prior as/.test(sql)) return [{ n: 1 }] as T[]
+        return [] as T[]
+      },
+      close: async () => {},
+    }
+    return { db, calls }
+  }
+  const llm = (claim: DraftClaim): Llm => ({ model: 'stub', structured: async () => ({ data: { claims: [claim] } as never, failure: null, model: 'stub' }) })
+
+  it('reads only evidence still standing', async () => {
+    const { db, calls } = fake()
+    await distil(db, llm(draft()), 'run', false)
+    expect(calls[0]!.sql).toMatch(/e\.withdrawn_at is null/)
+  })
+
+  it('writes the quote this draft resolved on an update, so a claim re-cited without its old quote never keeps it', async () => {
+    const { db, calls } = fake()
+    await distil(db, llm(draft({ krish_quote: null, krish_quote_ref: null })), 'run', true)
+    const write = calls.find(c => /with prior as/.test(c.sql))!
+    expect(write.sql).toMatch(/set evidence_ids = [\s\S]*krish = \$8, krish_source_id = \$9::uuid\s+from prior/)
+    expect(write.params[7]).toBeNull()
+    expect(write.params[8]).toBeNull()
+    const quoted = fake()
+    await distil(quoted.db, llm(draft()), 'run', true)
+    const w2 = quoted.calls.find(c => /with prior as/.test(c.sql))!
+    expect(w2.params[7]).toBe('plain words')
+    expect(w2.params[8]).toBe('00000000-0000-0000-0000-000000000001')
   })
 })

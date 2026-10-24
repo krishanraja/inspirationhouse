@@ -32,5 +32,16 @@ describe('mergeFacets', () => {
     expect(m.format).toBe('screenshot')
     expect(m.source).toBe('a screenshot on his phone, in Instagram')
     expect(m.watched).toBe(false)
+    expect(m.heard).toBeNull()
+  })
+  it('records whether a watched video was heard', () => {
+    const watched = { frames: [], durationS: 42, transcript: null, heard: 'failed' as const, unheard: 'decode' }
+    const m = mergeFacets(
+      { platform: 'instagram', format: 'short_video', source: null, creator: null, people: [], organisations: [], topics: [] },
+      { platform: 'instagram', format: null, media: 'video', source: null },
+      watched,
+    )
+    expect(m.heard).toBe('failed')
+    expect(m.duration_s).toBe(42)
   })
 })
