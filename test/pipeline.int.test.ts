@@ -3,18 +3,30 @@ import { readFileSync } from 'node:fs'
 import pg from 'pg'
 import type { Db } from '../src/db.ts'
 import type { Llm } from '../src/llm.ts'
-import { writeEvidence, type Evidence } from '../src/evidence.ts'
+import { writeEvidence, withdrawUncollected, type Evidence } from '../src/evidence.ts'
 import { explainPending } from '../src/explain/whys.ts'
 import { distil } from '../src/distil/claims.ts'
-import { propose, syncDecisions } from '../src/publish/propose.ts'
+import { propose, syncDecisions, ELIGIBLE_SQL, type Eligible } from '../src/publish/propose.ts'
 import { score } from '../src/score/scoreboard.ts'
 
-// End to end against a real Postgres with the real migration, and a stub in
-// place of the model. Runs only when both are provided:
-//   TEST_DATABASE_URL=postgres://...  TASTE_MIGRATION=/path/to/20261104090000_taste_ledger.sql
+// End to end against a real Postgres with the real migrations, and a stub in
+// place of the model. Runs only when both are provided. TASTE_MIGRATION is a
+// comma-separated list of files, applied in the order given. It needs every
+// content-engine migration this engine reads (supabase/migrations/):
+//   20261104090000_taste_ledger.sql
+//   20261105090000_inspiration_how_to_read.sql
+//   20261106090000_inspiration_facets_and_many.sql
+//   20261107090000_inspiration_kinds.sql
+//   20261108090000_inspiration_answers_hold.sql
+//   20261109090000_content_watch.sql          (the link queue and content_reads)
+//   20261110090000_taste_support_by_card.sql
+// For example, from a content-engine checkout:
+//   M=supabase/migrations
+//   TEST_DATABASE_URL=postgres://... \
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql | paste -sd, -)
 const url = process.env.TEST_DATABASE_URL
-const migration = process.env.TASTE_MIGRATION
-const run = url && migration ? describe : describe.skip
+const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
+const run = url && migrations.length ? describe : describe.skip
 
 run('the whole loop, on a real database', () => {
   let client: pg.Client
@@ -43,7 +55,7 @@ run('the whole loop, on a real database', () => {
       create table public.content_engine_runs (id uuid primary key default gen_random_uuid(), job text, trigger text, status text, reason text, counts jsonb, started_at timestamptz, finished_at timestamptz);
       create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz);
       create table public.content_edit_events (actor text, action text, occurred_at timestamptz);`)
-    await client.query(readFileSync(migration!, 'utf8'))
+    for (const file of migrations) await client.query(readFileSync(file, 'utf8'))
     db = {
       query: async <T,>(sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows as T[],
       close: async () => {},
@@ -133,5 +145,66 @@ run('the whole loop, on a real database', () => {
     const titles = (await client.query(`select week::text, numerator::float, denominator::float, phase from taste_scoreboard where metric = 'title_first_pick_rate' and reading = 'measured'`)).rows
     // Synthetic verdicts on 6-9 October: three picked and one rejected, in the week starting Monday 5 October.
     expect(titles).toEqual([{ week: '2026-10-05', numerator: 3, denominator: 4, phase: 'baseline' }])
+  })
+  // The review of 180fbee, each reproduced here first on Postgres 16.
+
+  const evidenceId = async (source: string, ref: string) =>
+    (await client.query(`select id::text from taste_evidence where source = $1 and source_ref = $2 and withdrawn_at is null`, [source, ref])).rows[0].id as string
+  const insertClaim = async (fingerprint: string, ids: string[], krish: string | null, krishSource: string | null) =>
+    (await client.query(
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, krish, krish_source_id, why, means, evidence_ids, flip_rule)
+       values ($1, 'voice', 'packaging', 'form', 'A synthetic claim for this test.', $2, $3::uuid, 'Because the test says so.',
+               'Do what the test says.', $4::uuid[], 'If the test says otherwise.') returning id::text`,
+      [fingerprint, krish, krishSource, ids],
+    )).rows[0].id as string
+
+  it('updates a claim re-cited without its quote\'s row, and drops the quote rather than failing', async () => {
+    const llm: Llm = {
+      model: 'stub',
+      structured: async () => ({
+        failure: null, model: 'stub',
+        data: { claims: [
+          { statement: 'Titles say what happens, in plain words.', lane: 'voice', layer: 'packaging', kind: 'form',
+            why: 'He picks titles that name the event.', means: 'Write the event, not the theme.',
+            support: [2, 4, 6], counter: [], krish_quote_ref: null, krish_quote: null, flip_rule: 'He picks two abstract titles in a month.' },
+        ] } as never,
+      }),
+    }
+    expect((await distil(db, llm, runId)).written).toBe(1)
+    const [c] = (await client.query(`select krish, krish_source_id, support_n from taste_claims where kind = 'form' and statement like 'Titles%'`)).rows
+    expect(c).toEqual({ krish: null, krish_source_id: null, support_n: 3 })
+  })
+
+  it('counts no day from withdrawn evidence and carries no quote whose row was withdrawn', async () => {
+    const rows: Evidence[] = [['w1', 1], ['w2', 3], ['w3', 3]].map(([ref, d]) => ({
+      source: 'what_i_like_sheet', sourceRef: String(ref), occurredAt: `2026-09-0${d}T12:00:00.000Z`, attribution: 'krish_words',
+      polarity: 'likes', lane: 'voice', layer: 'packaging', title: null, excerpt: `synthetic: a plain opening ${ref}`, meta: {},
+    }))
+    await writeEvidence(db, rows, runId)
+    const [w1, w2, w3] = await Promise.all(['w1', 'w2', 'w3'].map(r => evidenceId('what_i_like_sheet', r)))
+    const id = await insertClaim('a2a2a2a2a2a2a2a2', [w1!, w2!, w3!], 'a plain opening', w1!)
+    // His first-day row is withdrawn after the claim was counted: the claim itself is not touched.
+    await client.query(`update taste_evidence set withdrawn_at = now() where id = $1`, [w1])
+    const got = (await db.query<Eligible>(ELIGIBLE_SQL)).find(e => e.id === id)!
+    expect(got.days).toBe(1)
+    expect(got.krish).toBeNull()
+  })
+
+  it('recounts a claim a failed run left counting withdrawn support, on the next run', async () => {
+    const page: Evidence[] = ['card-x', 'card-y', 'card-z'].map((ref, i) => ({
+      source: 'inspiration_page', sourceRef: ref, occurredAt: day(10 + i), attribution: 'krish_words', polarity: 'likes',
+      lane: 'production', layer: null, title: 'clip.mp4', excerpt: `synthetic: the cut on the beat ${i}`, meta: { picked_likes: [] },
+    }))
+    await writeEvidence(db, page, runId)
+    const ids = await Promise.all(page.map(e => evidenceId('inspiration_page', e.sourceRef)))
+    const id = await insertClaim('a4a4a4a4a4a4a4a4', ids, null, null)
+    expect((await client.query(`select support_n from taste_claims where id = $1`, [id])).rows[0].support_n).toBe(3)
+    // A run withdrew card-x (he took the answer back) and stopped before its recount.
+    await client.query(`update taste_evidence set withdrawn_at = now() where source_ref = 'card-x'`)
+    // The next run collects the page as it stands: nothing changes this run, and the claim is recounted anyway.
+    const r = await withdrawUncollected(db, 'inspiration_page', page.slice(1), true)
+    expect(r.withdrawn).toBe(0)
+    expect(r.recounted).toBe(1)
+    expect((await client.query(`select support_n from taste_claims where id = $1`, [id])).rows[0].support_n).toBe(2)
   })
 })
