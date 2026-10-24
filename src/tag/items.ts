@@ -170,9 +170,10 @@ export async function answeredItemEvidence(db: Db) {
   const rows = await db.query<{
     id: string; lane: 'strategy' | 'production'; name: string; why_here: string | null; why_like: string | null
     why_like_source: 'typed' | 'picked' | null; would_do: string | null; route: string | null
-    confirmed_tags: unknown[]; answered_at: string
+    confirmed_tags: unknown[]; answered_at: string; read_as: string | null; note_for_claude: string | null
   }>(
-    `select id::text, lane, name, why_here, why_like, why_like_source, would_do, route, confirmed_tags, answered_at::text
+    `select id::text, lane, name, why_here, why_like, why_like_source, would_do, route, confirmed_tags, answered_at::text,
+            read_as, note_for_claude
      from public.inspiration_items where answered_at is not null`,
   )
   return rows.map(r => ({
@@ -185,6 +186,11 @@ export async function answeredItemEvidence(db: Db) {
     layer: null,
     title: r.name,
     excerpt: r.why_like ?? r.why_here ?? r.would_do,
-    meta: { why_here: r.why_here, would_do: r.would_do, route: r.route, confirmed_tags: r.confirmed_tags, why_like_source: r.why_like_source },
+    // How he said to read the file (Control Center, action 'instruct'): an instruction, kept as context, never a why.
+    // Added only when set: meta is part of the evidence version, so an empty key would re-version every answer.
+    meta: {
+      why_here: r.why_here, would_do: r.would_do, route: r.route, confirmed_tags: r.confirmed_tags, why_like_source: r.why_like_source,
+      ...(r.read_as ? { read_as: r.read_as } : {}), ...(r.note_for_claude ? { note_for_claude: r.note_for_claude } : {}),
+    },
   }))
 }
