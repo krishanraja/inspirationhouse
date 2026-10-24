@@ -1,0 +1,37 @@
+name: taste-harness
+# Propose Krish's approved taste rules to the ai-harness voice and design skills, by pull request.
+on:
+  schedule:
+    # 05:47 UTC daily, after taste-daily has synced his decisions. GitHub registers this only from main.
+    - cron: '47 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read only, open no pull request
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: taste
+  cancel-in-progress: false
+jobs:
+  run:
+    # Off until setup is done, like the other taste schedules (TASTE_ENABLED).
+    if: github.event_name != 'schedule' || vars.TASTE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Logs on this public repository carry counts only (src/log.ts).
+      - run: pnpm -s engine harness ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Contents and pull request write on krishanraja/ai-harness only.
+          HARNESS_SYNC_TOKEN: ${{ secrets.HARNESS_SYNC_TOKEN }}

@@ -20,6 +20,12 @@ const Env = z.object({
   CONTENT_ENGINE_REF: z.string().default('main'),
   CONTENT_ENGINE_READ_TOKEN: z.string().optional(),
 
+  // The harness the approved taste rules are proposed to, by pull request
+  // (src/publish/harness.ts). The token needs contents and pull request write
+  // on that one repository and nothing else.
+  HARNESS_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('krishanraja/ai-harness'),
+  HARNESS_SYNC_TOKEN: z.string().optional(),
+
   // Google service account with read-only scopes. Both folders and the sheet
   // are shared with it as Viewer. The key may be the bare PEM, or the whole
   // JSON key file Google downloads, in which case the email comes from it.
