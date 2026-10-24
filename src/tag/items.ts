@@ -390,6 +390,19 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     const needsSlate = settled === null || settled === 'corpus' || settled === 'idea'
     const list = needsSlate ? await slate(f.name) : []
     const fail = (cls: string) => { result.failed++; result.failures[cls] = (result.failures[cls] ?? 0) + 1 }
+    // Words heard this run are kept even when the model call after them fails: only the hearing and the words are
+    // written, as for a card here only to be heard again, so the words are never lost and never heard again for nothing.
+    const keepWords = async () => {
+      if (!write || hearing?.heard !== 'words' || !watched?.transcript) return
+      await db.query(
+        `update public.inspiration_items
+         set facets = facets || $2::jsonb, transcript = coalesce($3, transcript), updated_at = now(),
+             watched_at = case when $4 then now() else watched_at end
+         where id = $1 and ${needsTags(5)}`,
+        [item.id, JSON.stringify(hearing), watched.transcript, seen, TAG_PROMPT_REV],
+        { write: true },
+      )
+    }
     // One card's model error (a 400 for one bad image, a 529) fails that card only, counted by its status, and the
     // run goes on to the next card and to explaining.
     let out: Structured<Tagging>
@@ -401,9 +414,10 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
       })
     } catch (err) {
       fail(apiFailureClass(err))
+      await keepWords()
       continue
     }
-    if (!out.data) { fail(out.failure ?? 'unparsed'); continue }
+    if (!out.data) { fail(out.failure ?? 'unparsed'); await keepWords(); continue }
     result.repaired += out.repairs ?? 0
     const kind: Kind = settled ?? out.data.kind ?? 'document'
     const kindSource = item.kind_source === 'krish' ? 'krish' : settled ? 'rule' : 'model'

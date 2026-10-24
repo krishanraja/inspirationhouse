@@ -10,7 +10,7 @@ type Row = { id: string; drive_file_id: string; note_for_claude: string | null; 
 const file = (id: string, over: Partial<DriveFile> = {}): DriveFile =>
   ({ id, name: `clip-${id}.mp4`, mimeType: 'video/mp4', modifiedTime: '2026-10-24T00:00:00Z', createdTime: '2026-10-24T00:00:00Z', size: '1000', ...over })
 
-function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown>; throwOn?: (call: number) => unknown } = {}) {
+function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown>; throwOn?: (call: number) => unknown; failure?: string } = {}) {
   const writes: Array<{ sql: string; params: unknown[] }> = []
   const pendingSelects: Array<{ sql: string; params: unknown[] }> = []
   const db: Db = {
@@ -37,6 +37,7 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
       prompts.push(JSON.stringify(args.content))
       const thrown = opts.throwOn?.(calls)
       if (thrown) throw thrown
+      if (opts.failure) return { data: null, failure: opts.failure, model: 'm' } as never
       return { data: { tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only', kind: null, opinion: null, reason: null, piece_ref: null,
         facets: { platform: 'instagram', format: 'short_video', source: null, creator: null, people: [], organisations: [], topics: [] }, ...opts.answer } as never, failure: null, model: 'm' }
     },
@@ -72,6 +73,35 @@ describe('tagItems hearing a video again', () => {
     expect(h.writes[0]!.sql).toMatch(/auto_tags/)
     expect(h.writes[0]!.params[9]).toBe('what was said')
     expect(JSON.parse(h.writes[0]!.params[7] as string)).toMatchObject({ heard: 'words', heard_tries: 1 })
+  })
+
+  it('keeps the words it heard when the model call after them throws', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: true, facets: { heard: 'failed', heard_tries: 1 } }],
+      { throwOn: () => Object.assign(new Error('overloaded'), { status: 529 }) })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true,
+      { watch: async () => watched({ transcript: 'what was said', heard: 'words', unheard: null }) })
+    expect(r).toMatchObject({ tagged: 0, failed: 1, failures: { api_529: 1 }, heard: 1 })
+    expect(h.writes).toHaveLength(1)
+    const w = h.writes[0]!
+    expect(w.sql).not.toMatch(/auto_tags/)
+    expect(w.sql).toMatch(/set facets = facets \|\| \$2::jsonb, transcript = coalesce\(\$3, transcript\)/)
+    expect(JSON.parse(w.params[1] as string)).toEqual({ heard: 'words', heard_tries: 1 })
+    expect(w.params[2]).toBe('what was said')
+  })
+
+  it('keeps the words it heard when the model answer cannot be read', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: true, facets: {} }], { failure: 'unparsed' })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true,
+      { watch: async () => watched({ transcript: 'what was said', heard: 'words', unheard: null }) })
+    expect(r).toMatchObject({ tagged: 0, failed: 1, failures: { unparsed: 1 } })
+    expect(h.writes).toHaveLength(1)
+    expect(h.writes[0]!.params[2]).toBe('what was said')
+  })
+
+  it('writes nothing more when the model fails and no words were heard', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { failure: 'refusal' })
+    await tagItems(h.db, h.google, h.llm, new Map([['d', file('d', { mimeType: 'application/vnd.google-apps.document', name: 'd' })]]))
+    expect(h.writes).toEqual([])
   })
 
   it('records silence as final, with no model call', async () => {
