@@ -5,7 +5,7 @@ The taste ledger. It turns what Krish saves and judges into a record of **why** 
 It is headless: no UI of its own and nothing to host. It runs on GitHub Actions, keeps its state in the Mindmaker OS Supabase project, and is read by two consumers:
 
 - **content-engine** reads approved claims while drafting and revising (never while judging or ranking).
-- **Control Center** shows the Inspiration page (one card per thing saved in Drive) and reads visibility claims in shadow mode.
+- **Control Center** shows the Inspiration page (one card per thing saved in Drive), and its Visibility scorer reads the cards he routed to "A room or stage to go for" as the kind of room he wants. An answer with that route counts as visibility-lane evidence here, whichever folder the card came from.
 
 ## How it works
 

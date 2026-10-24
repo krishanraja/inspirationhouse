@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { collectGitTaste, TASTE_FILES } from '../src/collect/gitTaste.ts'
 import { sheetEvidence } from '../src/collect/drive.ts'
 import { versionOf, normalise, clip } from '../src/evidence.ts'
+import { answerLane } from '../src/tag/items.ts'
 
 // Synthetic files only. No real taste data is ever committed here.
 const files: Record<string, unknown> = {
@@ -71,5 +72,17 @@ describe('evidence versions', () => {
     const long = 'word '.repeat(200)
     expect(normalise({ source: 'learnings_json', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'voice', layer: 'nonsense', title: null, excerpt: long, meta: {} }).excerpt!.length).toBeLessThanOrEqual(400)
     expect(clip('a b c', 3)).toBe('a b')
+  })
+})
+
+describe('answerLane', () => {
+  it('counts a card routed to a room or stage toward the visibility lane, from either folder', () => {
+    expect(answerLane('strategy', 'visibility')).toBe('visibility')
+    expect(answerLane('production', 'visibility')).toBe('visibility')
+  })
+  it('keeps the folder lane for every other route', () => {
+    expect(answerLane('production', 'study_style')).toBe('production')
+    expect(answerLane('strategy', 'make_piece')).toBe('strategy')
+    expect(answerLane('strategy', null)).toBe('strategy')
   })
 })
