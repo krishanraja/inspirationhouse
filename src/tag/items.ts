@@ -284,8 +284,8 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
   const system = tagSystemPrompt(profile, recent)
   // The slate a corpus or an idea may serve: the pieces not dropped whose title shares a word with the file's name
   // first (a corpus can be weeks older than the newest pieces), then the newest.
-  const slate = (name: string) => db.query<{ id: string; idea: string }>(
-    `select id::text, left(idea, 140) as idea from public.content_ideas
+  const slate = (name: string) => db.query<{ id: string; idea: string; hit: boolean }>(
+    `select id::text, left(idea, 140) as idea, (idea ~* $1) as hit from public.content_ideas
      where state <> 'dropped' and idea is not null
      order by (idea ~* $1) desc, created_at desc limit 60`,
     [nameWords(name)],
@@ -390,6 +390,8 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
       opinion: op && op.topic.trim().length >= 2 && op.stance.trim().length >= 3 ? { topic: op.topic.trim(), stance: op.stance.trim() } : null,
       reason_guess: kind === 'video' ? out.data.reason : null,
       piece_guess: piece ? { id: piece.id, idea: piece.idea } : null,
+      // Other pieces whose title shares a word with the file's name, for the page's "which piece?" (Control Center).
+      piece_options: kind === 'corpus' ? list.filter(x => x.hit && x.id !== piece?.id).slice(0, 3).map(x => ({ id: x.id, idea: x.idea })) : [],
     }
     if (write) {
       await db.query(

@@ -170,12 +170,13 @@ describe('tagItems and kinds', () => {
   })
 
   it('shows a corpus the slate and keeps the piece it names as a guess, never as the link', async () => {
-    const slate = [{ id: 'p0', idea: 'One piece' }, { id: 'p1', idea: 'The piece it serves' }]
+    const slate = [{ id: 'p0', idea: 'One piece', hit: true }, { id: 'p1', idea: 'The piece it serves', hit: true }, { id: 'p2', idea: 'Unrelated', hit: false }]
     const h = harness([{ id: '1', drive_file_id: 'c', note_for_claude: null, healing: false, facets: {} }], { slate, answer: { piece_ref: 1 } })
     await tagItems(h.db, h.google, h.llm, new Map([['c', doc('c', 'topic-corpus.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')]]))
     expect(h.prompts[0]).toContain('1. The piece it serves')
     const w = h.writes.at(-1)!
     expect(JSON.parse(w.params[7] as string).piece_guess).toEqual({ id: 'p1', idea: 'The piece it serves' })
+    expect(JSON.parse(w.params[7] as string).piece_options).toEqual([{ id: 'p0', idea: 'One piece' }])
     expect(w.params.slice(11)).toEqual(['corpus', 'rule'])
     expect(w.sql).not.toMatch(/piece_id/)
   })
