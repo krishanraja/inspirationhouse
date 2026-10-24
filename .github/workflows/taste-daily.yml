@@ -25,7 +25,7 @@ jobs:
     # TASTE_ENABLED to true after the migration and secrets are in place.
     if: github.event_name != 'schedule' || vars.TASTE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,6 +34,18 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Watching saved videos (src/tag/watch.ts): ffmpeg for frames, faster-whisper for the words. The model is cached.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/transcribe-requirements.txt
+      - run: pip install -q -r scripts/transcribe-requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-base-v1
       # Logs on this public repository carry counts only (src/log.ts).
       - run: pnpm -s engine daily ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }} ${{ (github.event_name == 'workflow_dispatch' && !inputs.use_model) && '--no-model' || '' }}
         env:
