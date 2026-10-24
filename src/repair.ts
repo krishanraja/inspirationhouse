@@ -11,14 +11,15 @@ import type { z } from 'zod'
 type Path = PropertyKey[]
 const MAX_PASSES = 200
 
-/** Cut to at most `n` characters, at the last word boundary when there is one in the second half. Never splits a
- *  character in two (half an emoji is text Postgres refuses, and would fail the whole write). */
+/** Cut to at most `n` characters, at the last word boundary when there is one in the second half. A character is a
+ *  code point, as the schema and Postgres count it, so the cut never falls inside a surrogate pair (half an emoji is
+ *  text Postgres refuses, and would fail the whole write) and an emoji takes one place of `n`, never two. */
 export function cutAt(s: string, n: number): string {
-  if (s.length <= n) return s
-  let head = s.slice(0, n)
-  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1)
+  const chars = Array.from(s)
+  if (chars.length <= n) return s
+  const head = chars.slice(0, n)
   const space = head.lastIndexOf(' ')
-  return (space > n / 2 ? head.slice(0, space) : head).trimEnd()
+  return (space > n / 2 ? head.slice(0, space) : head).join('').trimEnd()
 }
 
 function at(root: unknown, path: Path): unknown {

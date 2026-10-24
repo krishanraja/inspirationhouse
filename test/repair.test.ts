@@ -78,11 +78,21 @@ describe('repairToSchema', () => {
     expect(out.data.claims[0]!.krish_quote).toBe(quote) // whole; resolveClaim drops it for being over 400
   })
   it('never splits a character in two when it cuts', () => {
-    const cut = cutAt('a' + '\u{1F600}'.repeat(70), 140)
-    expect(cut.length).toBeLessThanOrEqual(140)
-    expect(/[\uD800-\uDBFF]$/.test(cut)).toBe(false)
-    expect(() => JSON.parse(JSON.stringify(cut))).not.toThrow()
+    const cut = cutAt('a' + '\u{1F600}'.repeat(170), 140)
+    expect(Array.from(cut)).toHaveLength(140)
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false)
     expect(cut.endsWith('\u{1F600}')).toBe(true)
+  })
+  it('counts a character as one code point, as the schema and Postgres do', () => {
+    // Seventy emoji are 140 UTF-16 units but 70 characters: well inside 140, so nothing is cut.
+    const seventy = 'a' + '\u{1F600}'.repeat(70)
+    expect(cutAt(seventy, 140)).toBe(seventy)
+    expect(cutAt('\u{1F600}'.repeat(10), 10)).toBe('\u{1F600}'.repeat(10))
+    expect(cutAt('\u{1F600}'.repeat(11), 10)).toBe('\u{1F600}'.repeat(10))
+    // An answer over its limit in emoji keeps as many as the limit allows, never half.
+    const raw = tag()
+    raw.predicted.why_like = ['\u{1F600}'.repeat(150)]
+    expect(Array.from(repairToSchema(TagSchema, raw)!.data.predicted.why_like[0]!)).toHaveLength(140)
   })
   it('drops an item that only came back to fill a place, whatever is wrong with it', () => {
     // Ten tags where eight are allowed: the first two are too short and dropped, the ninth and tenth come back, and
