@@ -21,8 +21,8 @@ export async function collectDrive(google: Google): Promise<Evidence[]> {
   ])
   const isFolder = (f: DriveFile) => f.mimeType === 'application/vnd.google-apps.folder'
   return [
-    ...cold.filter(f => !isFolder(f)).map(f => fileEvidence(f, 'drive_cold', 'strategy')),
-    // The sheet lives in the video folder but is not itself a reference.
+    ...cold.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => fileEvidence(f, 'drive_cold', 'strategy')),
+    // The What I like sheet is not itself a reference, in either folder (it moved to Content Inspo on 2026-10-24).
     ...video.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => fileEvidence(f, 'drive_video', 'production')),
   ]
 }
