@@ -248,6 +248,8 @@ export function nameWords(name: string): string {
 type Pending = {
   id: string; drive_file_id: string; note_for_claude: string | null; read_as: string | null; healing: boolean
   facets: Record<string, unknown> | null; kind: Kind | null; kind_source: 'rule' | 'model' | 'krish' | null
+  /** The words an earlier run heard, kept when this run's fetch or hearing fails. */
+  transcript: string | null
 }
 
 /** A model call that threw (an API refusal of one bad image, an overloaded API), by its HTTP status only. */
@@ -285,7 +287,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
   // Only cards whose file is in Drive this run: a card whose file is gone would take a slot every run and be skipped.
   // Healing means tagged on this revision and here only to be heard again; a card he instructed since is tagged again.
   const pending = await db.query<Pending>(
-    `select id::text, drive_file_id, note_for_claude, read_as, facets, kind, kind_source,
+    `select id::text, drive_file_id, note_for_claude, read_as, facets, kind, kind_source, transcript,
             (tagged_at is not null and tag_rev is not distinct from $2 and not ${INSTRUCTED_SINCE}) as healing
      from public.inspiration_items
      where ${needsTags(2)} and dismissed_at is null
@@ -338,7 +340,9 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
       continue
     }
 
-    // A video is watched; an image is read at full size when it is small enough to send.
+    // A video is watched; an image is read at full size when it is small enough to send. `fresh` is what this run
+    // watched; `watched` is what the tagger is given, which keeps the words an earlier run heard.
+    let fresh: Watched | null = null
     let watched: Watched | null = null
     let hearing: Hearing | undefined
     let full: Img | null = null
@@ -348,25 +352,32 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
         result.tooBig++
       } else {
         const bytes = await google.download(f.id, VIDEO_MAX_BYTES).catch(() => null)
-        watched = bytes ? await watch(bytes).catch(() => null) : null
-        const failedClass = !bytes ? 'download' : !watched ? 'runner' : watched.unheard
-        if (failedClass) {
+        fresh = bytes ? await watch(bytes).catch(() => null) : null
+        watched = fresh
+        if (fresh?.frames.length) result.watched++
+        if (fresh?.heard === 'words') result.heard++
+        const failedClass = !bytes ? 'download' : !fresh ? 'runner' : fresh.unheard
+        if (failedClass && item.transcript) {
+          // Its words were heard on an earlier run (a card tagged again for a new revision, or one he instructed
+          // since). A fetch or a hearing that fails now keeps them, in the prompt and on the card, and costs no try.
+          const priorDuration = typeof item.facets?.duration_s === 'number' ? item.facets.duration_s : null
+          watched = { frames: fresh?.frames ?? [], transcript: item.transcript, durationS: fresh?.durationS ?? priorDuration, heard: 'words', unheard: null }
+          hearing = { heard: 'words', heard_tries: priorTries }
+        } else if (failedClass) {
           miss(failedClass)
           // A runner with no speech model says nothing about the clip, so it costs the clip none of its tries.
           const charged = failedClass !== 'no_model'
           hearing = { heard: 'failed', heard_tries: charged ? priorTries + 1 : priorTries }
           if (charged && priorTries + 1 >= HEAR_TRIES) result.gaveUp++
         } else {
-          hearing = { heard: watched!.heard, heard_tries: priorTries }
+          hearing = { heard: fresh!.heard, heard_tries: priorTries }
         }
-        if (watched?.frames.length) result.watched++
-        if (watched?.heard === 'words') result.heard++
       }
     } else if (media === 'image' && /^image\/(jpeg|png|webp)$/.test(f.mimeType)) {
       const bytes = await google.download(f.id, IMAGE_MAX_BYTES).catch(() => null)
       if (bytes) full = { bytes, mime: f.mimeType }
     }
-    const seen = Boolean(watched?.frames.length || watched?.transcript)
+    const seen = Boolean(fresh?.frames.length || fresh?.transcript)
 
     // A card already tagged on this revision is here only to be heard again. Its tags stand unless there are words to
     // tag from: a failed try, silence or a file too big writes only the hearing, with no model call.
@@ -395,13 +406,13 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     // Words heard this run are kept even when the model call after them fails: only the hearing and the words are
     // written, as for a card here only to be heard again, so the words are never lost and never heard again for nothing.
     const keepWords = async () => {
-      if (!write || hearing?.heard !== 'words' || !watched?.transcript) return
+      if (!write || fresh?.heard !== 'words' || !fresh.transcript) return
       await db.query(
         `update public.inspiration_items
          set facets = facets || $2::jsonb, transcript = coalesce($3, transcript), updated_at = now(),
              watched_at = case when $4 then now() else watched_at end
          where id = $1 and ${needsTags(5)}`,
-        [item.id, JSON.stringify(hearing), watched.transcript, seen, TAG_PROMPT_REV],
+        [item.id, JSON.stringify(hearing), fresh.transcript, seen, TAG_PROMPT_REV],
         { write: true },
       )
     }

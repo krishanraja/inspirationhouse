@@ -6,7 +6,7 @@ import type { Llm } from '../src/llm.ts'
 import type { Watched } from '../src/tag/watch.ts'
 
 // Synthetic cards and files only; nothing here is anything Krish saved.
-type Row = { id: string; drive_file_id: string; note_for_claude: string | null; read_as?: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null }
+type Row = { id: string; drive_file_id: string; note_for_claude: string | null; read_as?: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null; transcript?: string | null }
 const file = (id: string, over: Partial<DriveFile> = {}): DriveFile =>
   ({ id, name: `clip-${id}.mp4`, mimeType: 'video/mp4', modifiedTime: '2026-10-24T00:00:00Z', createdTime: '2026-10-24T00:00:00Z', size: '1000', ...over })
 
@@ -16,7 +16,7 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = []) {
       if (/^\s*update/i.test(sql)) { writes.push({ sql, params }); return [] as T[] }
-      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) { pendingSelects.push({ sql, params }); return rows.map(r => ({ kind: null, kind_source: null, read_as: null, ...r })) as T[] }
+      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) { pendingSelects.push({ sql, params }); return rows.map(r => ({ kind: null, kind_source: null, read_as: null, transcript: null, ...r })) as T[] }
       if (/select id::text, drive_file_id, kind, kind_source from public\.inspiration_items/.test(sql)) return (opts.known ?? []) as T[]
       if (/from public\.content_ideas/.test(sql)) return (opts.slate ?? []) as T[]
       return [] as T[]
@@ -136,6 +136,28 @@ describe('tagItems on a new video', () => {
     expect(h.calls()).toBe(1)
     expect(r).toMatchObject({ tagged: 1, unheard: { download: 1 } })
     expect(JSON.parse(h.writes[0]!.params[7] as string)).toMatchObject({ heard: 'failed', heard_tries: 1 })
+  })
+
+  it('keeps the words an earlier run heard when a card tagged again cannot fetch its video now', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: false, facets: { heard: 'words', heard_tries: 0, duration_s: 42 }, transcript: 'what was said before' }],
+      { download: async () => { throw new Error('HTTP 500') } })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true, { watch: async () => { throw new Error('not reached') } })
+    expect(r).toMatchObject({ tagged: 1, unheard: {}, gaveUp: 0, heard: 0 })
+    expect(h.prompts[0]).toContain('what was said before')
+    const w = h.writes.at(-1)!
+    expect(w.params[9]).toBe('what was said before')
+    expect(JSON.parse(w.params[7] as string)).toMatchObject({ heard: 'words', heard_tries: 0, duration_s: 42 })
+    // It was not watched this run.
+    expect(w.params[10]).toBe(false)
+  })
+
+  it('keeps the earlier words and this run\'s frames when only the hearing fails now', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: false, facets: { heard: 'words', heard_tries: 0 }, transcript: 'what was said before' }])
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['a', file('a')]]), 60, true, { watch: async () => watched({ unheard: 'transcribe' }) })
+    expect(r).toMatchObject({ tagged: 1, watched: 1, unheard: {} })
+    expect(h.prompts[0]).toContain('you see 2 frames')
+    expect(h.prompts[0]).toContain('what was said before')
+    expect(JSON.parse(h.writes.at(-1)!.params[7] as string)).toMatchObject({ heard: 'words' })
   })
 
   it('leaves the rest for the next run once the time budget is spent', async () => {
