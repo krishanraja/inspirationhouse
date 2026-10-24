@@ -97,8 +97,9 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
       ctx.counts.items_seen = items.seen
       ctx.counts.items_new = items.written
       if (ctx.llm) {
-        const t = await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 25, !ctx.dry)
+        const t = await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 60, !ctx.dry)
         ctx.counts.items_tagged = t.tagged
+        ctx.counts.items_watched = t.watched
         ctx.counts.items_tag_failed = t.failed
         if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
       }
