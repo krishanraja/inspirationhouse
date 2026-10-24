@@ -138,20 +138,24 @@ export interface WithdrawResult { withdrawn: number; restored: number; recounted
  * An answer he took back, or replaced, stops counting as his support. After a source is collected, every standing row
  * of it whose version was not collected this run is withdrawn (a reopened card, or an answer with a newer version), and
  * a withdrawn row whose version was collected again stands again (an answer he gave back as it was). Then every claim
- * citing one of those rows is touched, so the database's trigger recounts its support. Only for a source that is read
- * whole on every run: a row missing from one run is gone, never just unread. A dry run counts and writes nothing.
+ * citing any row of the source is touched, on every run, so the database's trigger recounts its support. The recount
+ * never depends on what this run changed: a run that withdrew rows and then failed before its recount is healed by the
+ * next one. Only for a source that is read whole on every run: a row missing from one run is gone, never just unread.
+ * A dry run counts and writes nothing.
  */
 export async function withdrawUncollected(db: Db, source: 'inspiration_page', rows: Evidence[], write: boolean): Promise<WithdrawResult> {
   const keep = JSON.stringify(rows.map(normalise).filter(e => e.source === source).map(e => ({ r: e.sourceRef, v: versionOf(e) })))
   const kept = `exists (select 1 from jsonb_to_recordset($2::jsonb) as k(r text, v text) where k.r = e.source_ref and k.v = e.source_version)`
+  const citing = `(evidence_ids || counterexample_ids) && array(select id from public.taste_evidence where source = $1)`
   if (!write) {
-    const [res] = await db.query<{ withdrawn: number; restored: number }>(
+    const [res] = await db.query<{ withdrawn: number; restored: number; recounted: number }>(
       `select count(*) filter (where e.withdrawn_at is null and not ${kept})::int as withdrawn,
-              count(*) filter (where e.withdrawn_at is not null and ${kept})::int as restored
+              count(*) filter (where e.withdrawn_at is not null and ${kept})::int as restored,
+              (select count(*)::int from public.taste_claims where ${citing}) as recounted
        from public.taste_evidence e where e.source = $1`,
       [source, keep],
     )
-    return { withdrawn: Number(res?.withdrawn ?? 0), restored: Number(res?.restored ?? 0), recounted: 0 }
+    return { withdrawn: Number(res?.withdrawn ?? 0), restored: Number(res?.restored ?? 0), recounted: Number(res?.recounted ?? 0) }
   }
   const gone = await db.query<{ id: string }>(
     `update public.taste_evidence e set withdrawn_at = now()
@@ -167,19 +171,14 @@ export async function withdrawUncollected(db: Db, source: 'inspiration_page', ro
     [source, keep],
     { write: true },
   )
-  const ids = [...gone, ...back].map(r => r.id)
-  let recounted = 0
-  if (ids.length) {
-    const [res] = await db.query<{ n: number }>(
-      `with c as (
-         update public.taste_claims set updated_at = now()
-         where (evidence_ids || counterexample_ids) && array(select jsonb_array_elements_text($1::jsonb))::uuid[]
-         returning 1)
-       select count(*)::int as n from c`,
-      [JSON.stringify(ids)],
-      { write: true },
-    )
-    recounted = Number(res?.n ?? 0)
-  }
-  return { withdrawn: gone.length, restored: back.length, recounted }
+  const [res] = await db.query<{ n: number }>(
+    `with c as (
+       update public.taste_claims set updated_at = now()
+       where ${citing}
+       returning 1)
+     select count(*)::int as n from c`,
+    [source],
+    { write: true },
+  )
+  return { withdrawn: gone.length, restored: back.length, recounted: Number(res?.n ?? 0) }
 }

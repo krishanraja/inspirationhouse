@@ -8,7 +8,7 @@ const answer = (ref: string, excerpt: string): Evidence => ({
   polarity: 'likes', lane: 'production', layer: null, title: 'clip.mp4', excerpt, meta: { picked_likes: [] },
 })
 
-function fakeDb(opts: { gone?: string[]; back?: string[]; counts?: { withdrawn: number; restored: number } } = {}) {
+function fakeDb(opts: { gone?: string[]; back?: string[]; counts?: { withdrawn: number; restored: number; recounted: number } } = {}) {
   const calls: Array<{ sql: string; params: unknown[]; write: boolean }> = []
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = [], o?: { write?: boolean }) {
@@ -16,7 +16,7 @@ function fakeDb(opts: { gone?: string[]; back?: string[]; counts?: { withdrawn: 
       if (/set withdrawn_at = now\(\)/.test(sql)) return (opts.gone ?? []).map(id => ({ id })) as T[]
       if (/set withdrawn_at = null/.test(sql)) return (opts.back ?? []).map(id => ({ id })) as T[]
       if (/update public\.taste_claims/.test(sql)) return [{ n: 2 }] as T[]
-      if (/count\(\*\) filter/.test(sql)) return [opts.counts ?? { withdrawn: 0, restored: 0 }] as T[]
+      if (/count\(\*\) filter/.test(sql)) return [opts.counts ?? { withdrawn: 0, restored: 0, recounted: 0 }] as T[]
       return [] as T[]
     },
     close: async () => {},
@@ -36,21 +36,22 @@ describe('withdrawUncollected', () => {
     expect(calls[0]!.sql).toMatch(/e\.source = \$1 and e\.withdrawn_at is null and not exists/)
   })
 
-  it('withdraws what was not collected, stands again what was, and recounts every claim citing either', async () => {
+  it('withdraws what was not collected, stands again what was, and recounts every claim citing the page', async () => {
     const { db, calls } = fakeDb({ gone: ['e1', 'e2'], back: ['e3'] })
     const r = await withdrawUncollected(db, 'inspiration_page', rows, true)
     expect(r).toEqual({ withdrawn: 2, restored: 1, recounted: 2 })
     const claims = calls.find(c => /update public\.taste_claims/.test(c.sql))!
-    expect(claims.sql).toMatch(/\(evidence_ids \|\| counterexample_ids\) &&/)
     expect(claims.sql).toMatch(/set updated_at = now\(\)/)
-    expect(JSON.parse(claims.params[0] as string)).toEqual(['e1', 'e2', 'e3'])
+    expect(claims.sql).toMatch(/\(evidence_ids \|\| counterexample_ids\) && array\(select id from public\.taste_evidence where source = \$1\)/)
+    expect(claims.params).toEqual(['inspiration_page'])
     expect(calls.every(c => c.write)).toBe(true)
   })
 
-  it('touches no claim when nothing changed', async () => {
+  it('recounts every claim citing the page even when this run changed nothing, so a recount a failed run missed is made', async () => {
     const { db, calls } = fakeDb()
-    expect(await withdrawUncollected(db, 'inspiration_page', rows, true)).toEqual({ withdrawn: 0, restored: 0, recounted: 0 })
-    expect(calls.some(c => /taste_claims/.test(c.sql))).toBe(false)
+    expect(await withdrawUncollected(db, 'inspiration_page', rows, true)).toEqual({ withdrawn: 0, restored: 0, recounted: 2 })
+    const claims = calls.find(c => /update public\.taste_claims/.test(c.sql))!
+    expect(claims.params).toEqual(['inspiration_page'])
   })
 
   it('withdraws every standing answer when the page holds none (every card undone)', async () => {
@@ -60,8 +61,8 @@ describe('withdrawUncollected', () => {
   })
 
   it('counts and writes nothing on a dry run', async () => {
-    const { db, calls } = fakeDb({ counts: { withdrawn: 3, restored: 1 } })
-    expect(await withdrawUncollected(db, 'inspiration_page', rows, false)).toEqual({ withdrawn: 3, restored: 1, recounted: 0 })
+    const { db, calls } = fakeDb({ counts: { withdrawn: 3, restored: 1, recounted: 4 } })
+    expect(await withdrawUncollected(db, 'inspiration_page', rows, false)).toEqual({ withdrawn: 3, restored: 1, recounted: 4 })
     expect(calls).toHaveLength(1)
     expect(calls[0]!.write).toBe(false)
     expect(calls[0]!.sql).not.toMatch(/update/i)
