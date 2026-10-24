@@ -472,4 +472,31 @@ run('the review of the link box, on a real database', () => {
     const [row] = (await client.query(`select facets->>'heard' as heard, (facets->>'heard_tries')::int as tries from inspiration_items`)).rows
     expect(row).toEqual({ heard: 'failed', tries: HEAR_TRIES })
   })
+
+  it('fills the author and date once the reading of a post linked while it was only filed arrives', async () => {
+    const c = await cardsFor(['1', '2'])
+    const req = await request('filed-1', ['1', '2'], null, 'filed')
+    const files = filesOf(['1', '2'])
+    await linkRequests(db, files)
+    expect((await card(c['1']!)).facets.link).toMatchObject({ author: null, posted_at: null })
+    // content-watcher writes its reading and marks the request read.
+    const readId = (await client.query(
+      `insert into content_reads (sha256, source_url, platform, shape, engine_rev, read, read_md)
+       values ($1, 'https://www.instagram.com/p/filed-1/', 'instagram', 'carousel', 'cw-1',
+               '{"post": {"author": "a synthetic author", "posted_at": "2026-10-20"}}', '# A synthetic carousel') returning id::text`,
+      [sha('1')])).rows[0].id as string
+    await client.query(`update content_watch_requests set status = 'read', read_id = $2 where id = $1`, [req, readId])
+    // A dry run writes nothing.
+    await linkRequests(db, files, false)
+    expect((await card(c['1']!)).facets.link).toMatchObject({ author: null, posted_at: null })
+    await linkRequests(db, files)
+    expect((await card(c['1']!)).facets.link).toMatchObject({ request_id: req, author: 'a synthetic author', posted_at: '2026-10-20' })
+    expect((await card(c['2']!)).facets).toMatchObject({ part_of: c['1'], link: { author: 'a synthetic author', posted_at: '2026-10-20', slide: 1 } })
+    // What a card already says is never overwritten, and a second run changes nothing.
+    await client.query(`update content_reads set read = '{"post": {"author": "someone else", "posted_at": "2026-10-21"}}' where id = $1`, [readId])
+    const [{ updated_at: before }] = (await client.query(`select updated_at::text from inspiration_items where id = $1`, [c['1']])).rows
+    await linkRequests(db, files)
+    expect((await card(c['1']!)).facets.link).toMatchObject({ author: 'a synthetic author', posted_at: '2026-10-20' })
+    expect((await client.query(`select updated_at::text from inspiration_items where id = $1`, [c['1']])).rows[0].updated_at).toBe(before)
+  })
 })

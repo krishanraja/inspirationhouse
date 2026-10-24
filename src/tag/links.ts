@@ -133,11 +133,33 @@ async function followNotes(db: Db, write: boolean): Promise<number> {
   return Number(res?.n ?? 0)
 }
 
+// A request can be linked while it is only filed, before content-watcher has written its reading. Once the request
+// points at its reading (read_id), the post's author and date fill whatever its card and slides still lack. What a card
+// already says is never overwritten, so a second run changes nothing.
+const FILL_SQL = `
+  update public.inspiration_items s
+  set facets = jsonb_set(s.facets, '{link}', (s.facets->'link') || jsonb_strip_nulls(jsonb_build_object(
+        'author', case when jsonb_typeof(s.facets->'link'->'author') = 'string' then null else r.author end,
+        'posted_at', case when jsonb_typeof(s.facets->'link'->'posted_at') = 'string' then null else r.posted_at end))),
+      updated_at = now()
+  from (
+    select q.id::text as request_id, q.item_id,
+           case when jsonb_typeof(c.read->'post'->'author') = 'string' then c.read->'post'->'author' end as author,
+           case when jsonb_typeof(c.read->'post'->'posted_at') = 'string' then c.read->'post'->'posted_at' end as posted_at
+    from public.content_watch_requests q join public.content_reads c on c.id = q.read_id
+    where q.item_id is not null
+  ) r
+  where (s.id = r.item_id or s.facets->>'part_of' = r.item_id::text)
+    and s.facets->'link'->>'request_id' = r.request_id
+    and ((jsonb_typeof(s.facets->'link'->'author') is distinct from 'string' and r.author is not null)
+      or (jsonb_typeof(s.facets->'link'->'posted_at') is distinct from 'string' and r.posted_at is not null))`
+
 /**
  * Link every request whose media reached Drive to its card: for each request filed or read, with no card yet and some
  * media, its card is the card of the first media file (in `media` order) that has one, matched by sha256 against the
- * files listed this run. Then every linked card he has not answered takes the note on its request (followNotes). A dry
- * run counts what it would do and writes nothing.
+ * files listed this run. Then every linked card he has not answered takes the note on its request (followNotes), and a
+ * card linked before its reading arrived takes the post's author and date (FILL_SQL). A dry run counts what it would
+ * link and writes nothing.
  */
 export async function linkRequests(db: Db, files: Map<string, DriveFile>, write = true): Promise<LinkResult> {
   const result: LinkResult = { linked: 0, slides: 0, notes: 0 }
@@ -148,6 +170,7 @@ export async function linkRequests(db: Db, files: Map<string, DriveFile>, write 
   if (!reg?.ok) return result
   await linkNew(db, files, write, result)
   result.notes += await followNotes(db, write)
+  if (write) await db.query(FILL_SQL, [], { write: true })
   return result
 }
 

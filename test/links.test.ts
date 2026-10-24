@@ -17,11 +17,16 @@ function world(init: { requests: Req[]; cards: Card[]; reads?: Read[]; tables?: 
   const requests = init.requests.map(r => ({ ...r }))
   const cards = init.cards.map(c => ({ ...c, facets: { ...c.facets } }))
   const writes: Array<{ sql: string; params: unknown[] }> = []
+  /** Every statement sent as a write, of any kind. */
+  const anyWrite: string[] = []
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = [], o?: { write?: boolean }) {
+      if (o?.write) anyWrite.push(sql)
       // A linked card taking the note on its request runs on the real schema (test/pipeline.int.test.ts); here it finds
       // none to give.
       if (/i\.facets->'link'->>'note'/.test(sql)) return [{ n: 0 }] as T[]
+      // So does a card taking its post's author and date from a reading that arrived after it was linked.
+      if (/join public\.content_reads c on c\.id = q\.read_id/.test(sql)) return [] as T[]
       if (o?.write && /set item_id = \$2::uuid, updated_at = now\(\)\s+where id = \$1::uuid and item_id is null returning 1\)/.test(sql)) {
         // A request pointed at a card another post already took: only the request changes.
         writes.push({ sql, params })
@@ -65,7 +70,7 @@ function world(init: { requests: Req[]; cards: Card[]; reads?: Read[]; tables?: 
     },
     close: async () => {},
   }
-  return { db, requests, cards, writes }
+  return { db, requests, cards, writes, anyWrite }
 }
 
 const request = (over: Partial<Req>): Req => ({
@@ -181,6 +186,7 @@ describe('linkRequests', () => {
     const files = new Map(['a', 'b'].map(x => [`file-${x}`, file(`file-${x}`, sha(x))]))
     expect(await linkRequests(w.db, files, false)).toEqual({ linked: 1, slides: 1, notes: 1 })
     expect(w.writes).toEqual([])
+    expect(w.anyWrite).toEqual([])
     expect(w.requests[0]!.item_id).toBeNull()
   })
 
