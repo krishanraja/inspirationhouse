@@ -20,13 +20,19 @@ export interface Eligible {
 
 // Eligible: enough of his own evidence, spread over at least two days, never
 // proposed in the last eight weeks. Form claims first: they are the ones a
-// reader may use.
+// reader may use. Withdrawn evidence (an answer he took back or replaced) counts
+// for no day, and his quote goes with the claim only while the row it quotes
+// still stands.
 export const ELIGIBLE_SQL = `
-  select c.id::text, c.fingerprint, c.lane, c.layer, c.kind, c.statement, c.krish, c.means, c.flip_rule,
+  select c.id::text, c.fingerprint, c.lane, c.layer, c.kind, c.statement,
+         case when exists (select 1 from public.taste_evidence k where k.id = c.krish_source_id and k.withdrawn_at is null)
+              then c.krish end as krish,
+         c.means, c.flip_rule,
          c.evidence_ids::text[] as evidence_ids, c.counterexample_ids::text[] as counterexample_ids,
          c.support_n, c.counter_n, c.confidence::float as confidence,
          (select count(distinct e.occurred_at::date)::int from public.taste_evidence e
-          where e.id = any(c.evidence_ids) and e.attribution in ('krish_words', 'krish_action')) as days
+          where e.id = any(c.evidence_ids) and e.attribution in ('krish_words', 'krish_action')
+            and e.withdrawn_at is null) as days
   from public.taste_claims c
   where c.status = 'candidate' and c.support_n >= 3
     and not exists (
