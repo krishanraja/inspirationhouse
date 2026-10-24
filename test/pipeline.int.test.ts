@@ -8,6 +8,9 @@ import { explainPending } from '../src/explain/whys.ts'
 import { distil } from '../src/distil/claims.ts'
 import { propose, syncDecisions, ELIGIBLE_SQL, type Eligible } from '../src/publish/propose.ts'
 import { score } from '../src/score/scoreboard.ts'
+import { linkRequests } from '../src/tag/links.ts'
+import { answeredItemEvidence, tagItems } from '../src/tag/items.ts'
+import type { DriveFile, Google } from '../src/google.ts'
 
 // End to end against a real Postgres with the real migrations, and a stub in
 // place of the model. Runs only when both are provided. TASTE_MIGRATION is a
@@ -206,5 +209,65 @@ run('the whole loop, on a real database', () => {
     expect(r.withdrawn).toBe(0)
     expect(r.recounted).toBe(1)
     expect((await client.query(`select support_n from taste_claims where id = $1`, [id])).rows[0].support_n).toBe(2)
+  })
+  // A link he pasted (content-engine 20261109090000): the request, content-watcher's reading, and the cards its media
+  // became in Drive. Synthetic rows only.
+  it('links a pasted link to its card, folds the other slides, keeps his note, and does it once', async () => {
+    const sha = (c: string) => c.repeat(64)
+    const cards = (await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)
+       select 'file-' || x || '-0000000', 'cold_ideas', 'strategy', 'slide-' || x || '.jpg', 'image/jpeg', now()
+       from unnest(array['a', 'b', 'c']) as x returning id::text, drive_file_id`,
+    )).rows as Array<{ id: string; drive_file_id: string }>
+    const cardOf = (x: string) => cards.find(c => c.drive_file_id === `file-${x}-0000000`)!.id
+    const readId = (await client.query(
+      `insert into content_reads (sha256, source_url, platform, shape, engine_rev, read, read_md)
+       values ($1, 'https://www.instagram.com/p/synthetic/', 'instagram', 'carousel', 'cw-1',
+               '{"post": {"author": "a synthetic author", "posted_at": "2026-10-20"}}', '# A synthetic carousel') returning id::text`,
+      [sha('a')],
+    )).rows[0].id as string
+    const requestId = (await client.query(
+      `insert into content_watch_requests (url, url_key, platform, note, status, shape, media, read_id, requested_at)
+       values ('https://www.instagram.com/p/synthetic/', 'https://instagram.com/p/synthetic', 'instagram', 'the slide order tells the story',
+               'read', 'carousel', $1::jsonb, $2::uuid, '2026-10-24T09:00:00Z') returning id::text`,
+      [JSON.stringify(['a', 'b', 'c'].map(x => ({ name: `slide-${x}.jpg`, sha256: sha(x).toUpperCase(), mime: 'image/jpeg', bytes: 1000, folder: 'cold_ideas' }))), readId],
+    )).rows[0].id as string
+    const files = new Map<string, DriveFile>(['a', 'b', 'c'].map(x => [`file-${x}-0000000`, {
+      id: `file-${x}-0000000`, name: `slide-${x}.jpg`, mimeType: 'image/jpeg', modifiedTime: '2026-10-24T09:05:00Z', createdTime: '2026-10-24T09:05:00Z', sha256Checksum: sha(x),
+    }]))
+
+    expect(await linkRequests(db, files)).toEqual({ linked: 1, slides: 2, notes: 1 })
+    expect((await client.query(`select item_id::text from content_watch_requests where id = $1`, [requestId])).rows[0].item_id).toBe(cardOf('a'))
+    const rows = (await client.query(`select id::text, why_here, answered_at, facets from inspiration_items where id = any($1::uuid[]) order by name`, [cards.map(c => c.id)])).rows
+    expect(rows[0]).toMatchObject({ why_here: 'the slide order tells the story', answered_at: null })
+    expect(rows[0].facets.link).toEqual({ request_id: requestId, url: 'https://www.instagram.com/p/synthetic/', platform: 'instagram',
+      author: 'a synthetic author', posted_at: '2026-10-20', requested_at: '2026-10-24T09:00:00+00:00', slides: 3 })
+    expect(rows[1].facets).toMatchObject({ part_of: cardOf('a'), link: { request_id: requestId, slide: 1 } })
+    expect(rows[2].facets).toMatchObject({ part_of: cardOf('a'), link: { slide: 2 } })
+    expect(await linkRequests(db, files)).toEqual({ linked: 0, slides: 0, notes: 0 })
+
+    // The cards job tags the card from its reading and never the slides; the link survives the tagging.
+    const google = { thumbnail: async () => null, text: async () => null, download: async () => { throw new Error('not reached') } } as unknown as Google
+    const llm: Llm = { model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: {
+      tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only', kind: null, opinion: null, reason: null, piece_ref: null,
+      facets: { platform: 'instagram', format: 'carousel', source: null, creator: null, people: [], organisations: [], topics: [] },
+    } as never }) }
+    const t = await tagItems(db, google, llm, files, 10, true, { linked: true })
+    expect(t).toMatchObject({ tagged: 1, fromReading: 1, parts: 2, waitingForReading: 0 })
+    const after = (await client.query(`select tagged_at is not null as tagged, facets from inspiration_items where id = any($1::uuid[]) order by name`, [cards.map(c => c.id)])).rows
+    expect(after.every(r => r.tagged)).toBe(true)
+    expect(after[0].facets).toMatchObject({ read_from: 'content_reads', read_rev: 'cw-1', format: 'carousel', link: { request_id: requestId } })
+    expect(after[1].facets.part_of).toBe(cardOf('a'))
+
+    // His paste note counts as his words while the card waits for his answer, and stands through the page's recount.
+    const page = await answeredItemEvidence(db)
+    expect(page.filter(e => e.sourceRef === cardOf('a'))).toEqual([expect.objectContaining({
+      attribution: 'krish_words', excerpt: 'the slide order tells the story', occurredAt: '2026-10-24T09:00:00+00:00',
+    })])
+    expect(page.some(e => e.sourceRef === cardOf('b'))).toBe(false)
+    await writeEvidence(db, page, runId)
+    await withdrawUncollected(db, 'inspiration_page', page, true)
+    const standing = (await client.query(`select count(*)::int as n from taste_evidence where source_ref = $1 and withdrawn_at is null`, [cardOf('a')])).rows[0].n
+    expect(standing).toBe(1)
   })
 })

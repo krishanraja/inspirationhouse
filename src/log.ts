@@ -6,6 +6,8 @@ const ALLOWED = new Set([
   'seen', 'written', 'skipped', 'failed', 'items', 'whys', 'claims',
   'proposed', 'eligible', 'synced', 'metrics', 'week', 'ms', 'error_class',
   'drafted', 'resolved', 'retired', 'code', 'hint',
+  // Linking the links he pasted to their cards, and the cards job (src/tag/links.ts).
+  'requests_linked', 'slides_folded', 'notes_kept', 'waiting_for_reading',
 ])
 
 export function safeFields(fields: Record<string, unknown>): Record<string, unknown> {

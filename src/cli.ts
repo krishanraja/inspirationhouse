@@ -11,7 +11,9 @@ import { collectDrive, sheetEvidence } from './collect/drive.ts'
 import { collectInstagram } from './collect/instagram.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, type Llm } from './llm.ts'
-import { syncItems, tagItems, answeredItemEvidence } from './tag/items.ts'
+import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
+import { linkRequests } from './tag/links.ts'
+import type { DriveFile } from './google.ts'
 import { explainPending } from './explain/whys.ts'
 import { distil } from './distil/claims.ts'
 import { propose, syncDecisions } from './publish/propose.ts'
@@ -102,6 +104,52 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   ctx.counts.written = written
 }
 
+/** Link the links he pasted to the cards their media became (src/tag/links.ts). A failure is recorded, never thrown. */
+async function link(ctx: Ctx, files: Map<string, DriveFile>): Promise<number> {
+  const l = await linkRequests(ctx.db, files, !ctx.dry).catch(err => {
+    ctx.problems.push(`link: ${(err as Error).name}`)
+    log({ stage: 'link', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!l) return 0
+  ctx.counts.requests_linked = l.linked
+  ctx.counts.slides_folded = l.slides
+  ctx.counts.notes_kept = l.notes
+  log({ stage: 'link', requests_linked: l.linked, slides_folded: l.slides, notes_kept: l.notes, dry_run: ctx.dry })
+  return l.linked
+}
+
+/** Tag the cards that need it. A throw from tagging as a whole (the database, Drive) is recorded, never thrown. */
+async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linked: boolean): Promise<TagResult | null> {
+  if (!ctx.google || !ctx.llm) return null
+  // The class only: an error's message can quote a row.
+  const t = await tagItems(ctx.db, ctx.google, ctx.llm, files, limit, !ctx.dry, linked ? { linked, budgetMs: CARDS_BUDGET_MS } : {}).catch(err => {
+    ctx.problems.push(`tagging stopped: ${(err as Error).name}`)
+    log({ stage: 'tag', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!t) return null
+  ctx.counts.items_tagged = t.tagged
+  ctx.counts.items_watched = t.watched
+  ctx.counts.items_heard = t.heard
+  ctx.counts.items_repaired = t.repaired
+  ctx.counts.items_rehead = t.rehead
+  ctx.counts.items_too_big = t.tooBig
+  ctx.counts.items_gave_up = t.gaveUp
+  ctx.counts.items_deferred = t.deferred
+  ctx.counts.items_kinded = t.kinded
+  ctx.counts.items_feeds = t.feeds
+  ctx.counts.items_parts = t.parts
+  ctx.counts.items_from_reading = t.fromReading
+  ctx.counts.items_tag_failed = t.failed
+  if (linked) ctx.counts.waiting_for_reading = t.waitingForReading
+  if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
+  const unheard = Object.values(t.unheard).reduce((a, b) => a + b, 0)
+  ctx.counts.items_unheard = unheard
+  if (unheard) ctx.problems.push(`no words heard from ${unheard} video(s): ${Object.keys(t.unheard).join(', ')}`)
+  return t
+}
+
 async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
   // The page's own answers live in a ledger table too.
   if (!ctx.ledger) ctx.counts.ledger_missing = true
@@ -112,32 +160,10 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
     if (items) {
       ctx.counts.items_seen = items.seen
       ctx.counts.items_new = items.written
-      // A throw from tagging as a whole (the database, Drive) is recorded and the run still explains: his evidence
-      // is read either way. The class only: an error's message can quote a row.
-      const t = ctx.llm
-        ? await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 60, !ctx.dry).catch(err => {
-          ctx.problems.push(`tagging stopped: ${(err as Error).name}`)
-          log({ stage: 'tag', status: 'failed', error_class: (err as Error).name })
-          return null
-        })
-        : null
-      if (t) {
-        ctx.counts.items_tagged = t.tagged
-        ctx.counts.items_watched = t.watched
-        ctx.counts.items_heard = t.heard
-        ctx.counts.items_repaired = t.repaired
-        ctx.counts.items_rehead = t.rehead
-        ctx.counts.items_too_big = t.tooBig
-        ctx.counts.items_gave_up = t.gaveUp
-        ctx.counts.items_deferred = t.deferred
-        ctx.counts.items_kinded = t.kinded
-        ctx.counts.items_feeds = t.feeds
-        ctx.counts.items_tag_failed = t.failed
-        if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
-        const unheard = Object.values(t.unheard).reduce((a, b) => a + b, 0)
-        ctx.counts.items_unheard = unheard
-        if (unheard) ctx.problems.push(`no words heard from ${unheard} video(s): ${Object.keys(t.unheard).join(', ')}`)
-      }
+      // The same linking the cards job does, so no pasted link depends on Control Center's knock.
+      await link(ctx, items.files)
+      // His evidence is read either way, so the run still explains when tagging stops.
+      await tag(ctx, items.files, 60, false)
     }
   }
   if (ctx.llm) {
@@ -171,6 +197,25 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   return finish(ctx, 1)
 }
 
+/** The most cards one cards run tags, and when it stops starting them: the job is cancelled at 15 minutes. */
+const CARDS_LIMIT = 10
+const CARDS_BUDGET_MS = 8 * 60_000
+
+// The quick job for links he pasted on the Inspiration board: make the cards their media became, link each request to
+// its card, and tag the linked cards from content-watcher's reading. No collecting, explaining or watching: a linked
+// card with no reading yet is left for the daily job.
+async function cards(ctx: Ctx): Promise<{ status: RunStatus; reason: string | null }> {
+  if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
+  if (!ctx.google) return finish(ctx, 0)
+  const items = await syncItems(ctx.db, ctx.google, !ctx.dry).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
+  if (!items) return finish(ctx, 0)
+  ctx.counts.items_seen = items.seen
+  ctx.counts.items_new = items.written
+  const linked = await link(ctx, items.files)
+  const t = await tag(ctx, items.files, CARDS_LIMIT, true)
+  return finish(ctx, linked + (t ? t.tagged + t.failed + t.rehead + t.waitingForReading : 0))
+}
+
 // Propose the approved form rules to the ai-harness voice and design skills, by pull request.
 async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
   if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
@@ -194,8 +239,8 @@ async function main(): Promise<void> {
   // A dry run that costs nothing: collect and count, but call no model.
   const noModel = args.includes('--no-model')
   const trigger = args.includes('--cron') ? 'cron' : 'manual'
-  if (job !== 'daily' && job !== 'weekly' && job !== 'harness') {
-    console.error('usage: engine daily|weekly|harness [--dry-run] [--no-model] [--cron] [--preview]')
+  if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards') {
+    console.error('usage: engine daily|weekly|harness|cards [--dry-run] [--no-model] [--cron] [--preview]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -222,14 +267,14 @@ async function main(): Promise<void> {
 
   let outcome: { status: RunStatus; reason: string | null }
   try {
-    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : await harness(ctx, cfg)
+    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx) : await harness(ctx, cfg)
   } catch (err) {
     outcome = { status: 'failed', reason: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 600) }
   }
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
