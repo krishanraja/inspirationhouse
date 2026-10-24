@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import pg from 'pg'
 import type { Db } from '../src/db.ts'
@@ -31,39 +31,43 @@ const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
 const run = url && migrations.length ? describe : describe.skip
 
+// A fresh public schema with the real migrations, and a Db on it. Every suite here starts from one.
+async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
+  const client = new pg.Client({ connectionString: url })
+  await client.connect()
+  await client.query('drop schema public cascade; create schema public;')
+  await client.query(`do $$ begin
+    if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon; end if;
+    if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
+    if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role; end if;
+  end $$;`)
+  // The tables the engine reads that other repositories own, cut to the columns it uses.
+  await client.query(`
+    create table public.mindmake_studio_learning_proposals (
+      id uuid primary key default gen_random_uuid(), weekly_batch_id text not null, proposal_class text not null,
+      assertion text not null, scope jsonb not null, evidence_event_ids uuid[] not null,
+      independent_session_count integer not null check (independent_session_count > 0),
+      independent_job_count integer not null, counterexamples jsonb not null default '[]',
+      regression_cases jsonb not null, proposed_change jsonb not null,
+      status text not null default 'proposed', decided_at timestamptz, decided_by text check (decided_by is null or decided_by = 'Krish'),
+      created_at timestamptz not null default now());
+    create table public.content_engine_runs (id uuid primary key default gen_random_uuid(), job text, trigger text, status text, reason text, counts jsonb, started_at timestamptz, finished_at timestamptz);
+    create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz, idea text, state text, created_at timestamptz default now());
+    create table public.content_edit_events (actor text, action text, occurred_at timestamptz);`)
+  for (const file of migrations) await client.query(readFileSync(file, 'utf8'))
+  const db: Db = {
+    query: async <T,>(sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows as T[],
+    close: async () => {},
+  }
+  return { client, db }
+}
+
 run('the whole loop, on a real database', () => {
   let client: pg.Client
   let db: Db
   const runId = '11111111-1111-1111-1111-111111111111'
 
-  beforeAll(async () => {
-    client = new pg.Client({ connectionString: url })
-    await client.connect()
-    await client.query('drop schema public cascade; create schema public;')
-    await client.query(`do $$ begin
-      if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon; end if;
-      if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-      if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role; end if;
-    end $$;`)
-    // The tables the engine reads that other repositories own, cut to the columns it uses.
-    await client.query(`
-      create table public.mindmake_studio_learning_proposals (
-        id uuid primary key default gen_random_uuid(), weekly_batch_id text not null, proposal_class text not null,
-        assertion text not null, scope jsonb not null, evidence_event_ids uuid[] not null,
-        independent_session_count integer not null check (independent_session_count > 0),
-        independent_job_count integer not null, counterexamples jsonb not null default '[]',
-        regression_cases jsonb not null, proposed_change jsonb not null,
-        status text not null default 'proposed', decided_at timestamptz, decided_by text check (decided_by is null or decided_by = 'Krish'),
-        created_at timestamptz not null default now());
-      create table public.content_engine_runs (id uuid primary key default gen_random_uuid(), job text, trigger text, status text, reason text, counts jsonb, started_at timestamptz, finished_at timestamptz);
-      create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz);
-      create table public.content_edit_events (actor text, action text, occurred_at timestamptz);`)
-    for (const file of migrations) await client.query(readFileSync(file, 'utf8'))
-    db = {
-      query: async <T,>(sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows as T[],
-      close: async () => {},
-    }
-  })
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
   afterAll(async () => { await client?.end() })
 
   const day = (n: number) => `2026-10-${String(n).padStart(2, '0')}T12:00:00.000Z`
@@ -269,5 +273,43 @@ run('the whole loop, on a real database', () => {
     await withdrawUncollected(db, 'inspiration_page', page, true)
     const standing = (await client.query(`select count(*)::int as n from taste_evidence where source_ref = $1 and withdrawn_at is null`, [cardOf('a')])).rows[0].n
     expect(standing).toBe(1)
+  })
+})
+
+// The review of e0d8884, each case reproduced here first on Postgres 16. Every case starts from empty tables.
+run('the review of the link box, on a real database', () => {
+  let client: pg.Client
+  let db: Db
+  const runId = '22222222-2222-2222-2222-222222222222'
+
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  beforeEach(async () => {
+    await client.query('truncate public.taste_claims, public.taste_evidence, public.content_watch_requests, public.content_reads, public.inspiration_items cascade')
+  })
+  afterAll(async () => { await client?.end() })
+
+  const answer = (ref: string, at: string, picks: string[]): Evidence => ({
+    source: 'inspiration_page', sourceRef: ref, occurredAt: at, attribution: 'krish_words', polarity: 'likes',
+    lane: 'production', layer: null, title: 'synthetic.mp4', excerpt: `synthetic: the cut on the beat ${ref}`, meta: { picked_likes: picks },
+  })
+
+  it('counts the day of an answer he added a pick to, as support does, so its claim can still be proposed', async () => {
+    const v1 = ['p', 'q', 'r', 's'].map((x, i) => answer(`card-${x}`, `2026-10-0${i + 1}T12:00:00Z`, []))
+    await writeEvidence(db, v1, runId)
+    await withdrawUncollected(db, 'inspiration_page', v1, true)
+    const ids = (await client.query(`select id::text from taste_evidence where source = 'inspiration_page' order by source_ref`)).rows.map(r => r.id as string)
+    const [{ id }] = (await client.query(
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, why, means, evidence_ids, flip_rule)
+       values ('b1b1b1b1b1b1b1b1', 'production', 'editing', 'form', 'A synthetic claim.', 'A synthetic why.', 'Do the synthetic thing.',
+               $1::uuid[], 'If the test says otherwise.') returning id::text`, [ids])).rows
+    // He adds a pick to two of them: each gets a new version, and the version the claim cites is withdrawn.
+    const v2 = [answer('card-p', v1[0]!.occurredAt, ['tight pacing']), answer('card-q', v1[1]!.occurredAt, ['tight pacing']), v1[2]!, v1[3]!]
+    await writeEvidence(db, v2, runId)
+    await withdrawUncollected(db, 'inspiration_page', v2, true)
+    expect((await db.query<Eligible>(ELIGIBLE_SQL)).find(e => e.id === id)).toMatchObject({ support_n: 4, days: 4 })
+    expect((await propose(db, new Date('2026-10-24T12:00:00Z'), false)).eligible).toBe(1)
+    // His Undo withdraws every version of a card: then its day goes with its support.
+    await withdrawUncollected(db, 'inspiration_page', v2.slice(0, 3), true)
+    expect((await db.query<Eligible>(ELIGIBLE_SQL)).find(e => e.id === id)).toMatchObject({ support_n: 3, days: 3 })
   })
 })

@@ -6,8 +6,9 @@ import { ELIGIBLE_SQL, mondayOf } from '../src/publish/propose.ts'
 describe('which claims may be proposed', () => {
   const flat = ELIGIBLE_SQL.replace(/\s+/g, ' ')
 
-  it('counts no day from evidence he took back or replaced', () => {
-    expect(flat).toMatch(/e\.attribution in \('krish_words', 'krish_action'\) and e\.withdrawn_at is null\) as days/)
+  it('counts a day while any version of its entry stands, as support does, so only his Undo takes it away', () => {
+    expect(flat).toContain(`e.attribution in ('krish_words', 'krish_action') and exists (select 1 from public.taste_evidence s where s.source = e.source and s.source_ref = e.source_ref and s.withdrawn_at is null)) as days`)
+    expect(flat).not.toMatch(/e\.withdrawn_at is null\) as days/)
   })
 
   it('carries his quote only while the row it quotes still stands', () => {
