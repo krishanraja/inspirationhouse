@@ -245,7 +245,8 @@ run('the whole loop, on a real database', () => {
     const rows = (await client.query(`select id::text, why_here, answered_at, facets from inspiration_items where id = any($1::uuid[]) order by name`, [cards.map(c => c.id)])).rows
     expect(rows[0]).toMatchObject({ why_here: 'the slide order tells the story', answered_at: null })
     expect(rows[0].facets.link).toEqual({ request_id: requestId, url: 'https://www.instagram.com/p/synthetic/', platform: 'instagram',
-      author: 'a synthetic author', posted_at: '2026-10-20', requested_at: '2026-10-24T09:00:00+00:00', slides: 3 })
+      author: 'a synthetic author', posted_at: '2026-10-20', requested_at: '2026-10-24T09:00:00+00:00', slides: 3,
+      note: 'the slide order tells the story' })
     expect(rows[1].facets).toMatchObject({ part_of: cardOf('a'), link: { request_id: requestId, slide: 1 } })
     expect(rows[2].facets).toMatchObject({ part_of: cardOf('a'), link: { slide: 2 } })
     expect(await linkRequests(db, files)).toEqual({ linked: 0, slides: 0, notes: 0 })
@@ -358,5 +359,64 @@ run('the review of the link box, on a real database', () => {
     ])
     // Tagged from its words, it is done: a third run does not pick either card up.
     expect(await tagItems(db, noDrive, tagger().llm, files, 60, true, { watch })).toMatchObject({ tagged: 0, rehead: 0 })
+  })
+
+  // A link he pasted: its request (status read, its media by sha256), and the cards its files became in Drive.
+  const sha = (c: string) => c.repeat(64)
+  const image = (x: string): DriveFile => ({ id: `file-${x}-0000000`, name: `slide-${x}.jpg`, mimeType: 'image/jpeg',
+    modifiedTime: '2026-10-24T09:05:00Z', createdTime: '2026-10-24T09:05:00Z', sha256Checksum: sha(x) })
+  const cardsFor = async (xs: string[]) => {
+    const rows = (await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)
+       select 'file-' || x || '-0000000', 'cold_ideas', 'strategy', 'slide-' || x || '.jpg', 'image/jpeg', now()
+       from unnest($1::text[]) as x returning id::text, drive_file_id`, [xs])).rows as Array<{ id: string; drive_file_id: string }>
+    return Object.fromEntries(rows.map(r => [r.drive_file_id.slice(5, 6), r.id])) as Record<string, string>
+  }
+  const request = async (key: string, xs: string[], note: string | null, status = 'read', readId: string | null = null) =>
+    (await client.query(
+      `insert into content_watch_requests (url, url_key, platform, note, status, shape, media, read_id, requested_at)
+       values ($1, $2, 'instagram', $3, $4, 'carousel', $5::jsonb, $6::uuid, '2026-10-24T09:00:00Z') returning id::text`,
+      [`https://www.instagram.com/p/${key}/`, `https://instagram.com/p/${key}`, note, status,
+        JSON.stringify(xs.map(x => ({ name: `slide-${x}.jpg`, sha256: sha(x), mime: 'image/jpeg', bytes: 1000, folder: 'cold_ideas' }))), readId],
+    )).rows[0].id as string
+  const filesOf = (xs: string[]) => new Map(xs.map(x => [`file-${x}-0000000`, image(x)]))
+  const card = async (id: string) => (await client.query(`select why_here, answered_at, facets from inspiration_items where id = $1`, [id])).rows[0]
+  const pageWords = async (id: string) => (await answeredItemEvidence(db)).filter(e => e.sourceRef === id).map(e => e.excerpt)
+
+  it('takes his new note when he pastes the link again, and gives it back after his Undo, on a card he has not answered', async () => {
+    const c = await cardsFor(['a'])
+    const req = await request('again', ['a'], 'the first thing I noticed')
+    const files = filesOf(['a'])
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 1, notes: 1 })
+    // He pastes it again with a new note (Control Center's pastedAgain writes it to the request).
+    await client.query(`update content_watch_requests set note = 'the second thing I noticed' where id = $1`, [req])
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 0, notes: 1 })
+    expect((await card(c.a!)).why_here).toBe('the second thing I noticed')
+    expect(await pageWords(c.a!)).toEqual(['the second thing I noticed'])
+    // Nothing changed: nothing is written.
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 0, notes: 0 })
+    // His Undo on the page (Control Center's REOPEN_PATCH) clears why_here; his paste note comes back on the next run.
+    await client.query(`update inspiration_items set why_here = null, answered_at = null where id = $1`, [c.a])
+    expect(await linkRequests(db, files)).toMatchObject({ notes: 1 })
+    expect((await card(c.a!)).why_here).toBe('the second thing I noticed')
+  })
+
+  it('never changes an answered card for a new paste note, nor a dry run anything', async () => {
+    const c = await cardsFor(['b'])
+    const req = await request('answered', ['b'], 'the first thing I noticed')
+    const files = filesOf(['b'])
+    await linkRequests(db, files)
+    await client.query(`update inspiration_items set why_here = 'what he wrote when he answered', answered_at = now() where id = $1`, [c.b])
+    await client.query(`update content_watch_requests set note = 'the second thing I noticed' where id = $1`, [req])
+    expect(await linkRequests(db, files)).toMatchObject({ notes: 0 })
+    expect((await card(c.b!)).why_here).toBe('what he wrote when he answered')
+    // He answered with no why_here at all: that stands too.
+    await client.query(`update inspiration_items set why_here = null, why_like = 'what he likes', why_like_source = 'typed' where id = $1`, [c.b])
+    expect(await linkRequests(db, files)).toMatchObject({ notes: 0 })
+    expect((await card(c.b!)).why_here).toBeNull()
+    // Unanswered again, a dry run counts the note it would give back and writes nothing.
+    await client.query(`update inspiration_items set answered_at = null, why_like = null, why_like_source = null where id = $1`, [c.b])
+    expect(await linkRequests(db, files, false)).toMatchObject({ notes: 1 })
+    expect((await card(c.b!)).why_here).toBeNull()
   })
 })

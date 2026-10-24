@@ -19,6 +19,9 @@ function world(init: { requests: Req[]; cards: Card[]; reads?: Read[]; tables?: 
   const writes: Array<{ sql: string; params: unknown[] }> = []
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = [], o?: { write?: boolean }) {
+      // A linked card taking the note on its request runs on the real schema (test/pipeline.int.test.ts); here it finds
+      // none to give.
+      if (/i\.facets->'link'->>'note'/.test(sql)) return [{ n: 0 }] as T[]
       if (o?.write) {
         writes.push({ sql, params })
         const [reqId, cardId, link, note, slides] = params as [string, string, string, string | null, string]
@@ -76,7 +79,7 @@ describe('linkRequests', () => {
     expect(w.cards[0]!.facets).toEqual({
       platform: 'instagram',
       link: { request_id: 'req-1', url: 'https://www.instagram.com/p/abc/', platform: 'instagram', author: 'a synthetic author',
-        posted_at: '2026-10-20', requested_at: '2026-10-24T09:00:00+00:00', slides: 2 },
+        posted_at: '2026-10-20', requested_at: '2026-10-24T09:00:00+00:00', slides: 2, note: null },
     })
   })
 

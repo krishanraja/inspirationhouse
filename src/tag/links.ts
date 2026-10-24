@@ -45,6 +45,8 @@ export function mediaShas(media: unknown): Array<string | null> {
 export interface LinkFacet {
   request_id: string; url: string; platform: string; author: string | null; posted_at: string | null
   requested_at: string; slides: number; slide?: number
+  /** The request's note as the card last took it (the post's own card only), so a new one can replace it. */
+  note?: string | null
 }
 
 /** The request's card and the post's other slides, from the cards of the files its media name. */
@@ -91,10 +93,41 @@ const LINK_SQL = `
          (select count(*) from slides)::int as slides,
          (select count(*) from card where note_kept)::int as notes`
 
+// His note follows the request on a card he has not answered yet: the new note when he pastes the link again (Control
+// Center writes it to the request), or the same note back after his Undo on the page, which clears why_here. It
+// replaces only a why_here that is empty or still the note the card last took, and never touches an answered card:
+// that is his answer. The conditions sit on the updated row, so an answer saved meanwhile is seen and left alone.
+const NOTE_DUE = `
+  q.item_id = i.id and nullif(btrim(q.note), '') is not null
+  and i.answered_at is null and not i.facets ? 'part_of'
+  and i.facets->'link'->>'request_id' = q.id::text
+  and (i.why_here is null or i.why_here = i.facets->'link'->>'note')
+  and i.why_here is distinct from q.note`
+
+/** Give each linked card he has not answered the note on its request (NOTE_DUE). Returns the notes it gave. */
+async function followNotes(db: Db, write: boolean): Promise<number> {
+  const [res] = write
+    ? await db.query<{ n: number }>(
+      `with w as (
+         update public.inspiration_items i
+         set why_here = q.note, facets = jsonb_set(i.facets, '{link,note}', to_jsonb(q.note)), updated_at = now()
+         from public.content_watch_requests q
+         where ${NOTE_DUE}
+         returning 1)
+       select count(*)::int as n from w`,
+      [], { write: true },
+    )
+    : await db.query<{ n: number }>(
+      `select count(*)::int as n from public.content_watch_requests q, public.inspiration_items i where ${NOTE_DUE}`,
+    )
+  return Number(res?.n ?? 0)
+}
+
 /**
  * Link every request whose media reached Drive to its card: for each request filed or read, with no card yet and some
  * media, its card is the card of the first media file (in `media` order) that has one, matched by sha256 against the
- * files listed this run. A dry run counts what it would link and writes nothing.
+ * files listed this run. Then every linked card he has not answered takes the note on its request (followNotes). A dry
+ * run counts what it would do and writes nothing.
  */
 export async function linkRequests(db: Db, files: Map<string, DriveFile>, write = true): Promise<LinkResult> {
   const result: LinkResult = { linked: 0, slides: 0, notes: 0 }
@@ -103,6 +136,12 @@ export async function linkRequests(db: Db, files: Map<string, DriveFile>, write 
     `select to_regclass('public.content_watch_requests') is not null and to_regclass('public.content_reads') is not null as ok`,
   )
   if (!reg?.ok) return result
+  await linkNew(db, files, write, result)
+  result.notes += await followNotes(db, write)
+  return result
+}
+
+async function linkNew(db: Db, files: Map<string, DriveFile>, write: boolean, result: LinkResult): Promise<void> {
   const requests = await db.query<Request>(
     `select id::text, url, platform, note, to_json(requested_at) #>> '{}' as requested_at, media, read_id::text
      from public.content_watch_requests
@@ -110,7 +149,7 @@ export async function linkRequests(db: Db, files: Map<string, DriveFile>, write 
        and jsonb_typeof(media) = 'array' and jsonb_array_length(media) > 0
      order by requested_at`,
   )
-  if (!requests.length) return result
+  if (!requests.length) return
 
   const fileBySha = new Map<string, string>()
   for (const f of files.values()) {
@@ -119,7 +158,7 @@ export async function linkRequests(db: Db, files: Map<string, DriveFile>, write 
   }
   const shasOf = requests.map(r => mediaShas(r.media))
   const fileIds = [...new Set(shasOf.flat().map(sha => (sha ? fileBySha.get(sha) : undefined)).filter((x): x is string => !!x))]
-  if (!fileIds.length) return result
+  if (!fileIds.length) return
   const cards = await db.query<Card>(
     `select id::text, drive_file_id, why_here from public.inspiration_items
      where drive_file_id = any(select jsonb_array_elements_text($1::jsonb))`,
@@ -162,7 +201,7 @@ export async function linkRequests(db: Db, files: Map<string, DriveFile>, write 
     }
     const [res] = await db.query<{ linked: number; slides: number; notes: number }>(
       LINK_SQL,
-      [r.id, placed.card.id, JSON.stringify(link), note,
+      [r.id, placed.card.id, JSON.stringify({ ...link, note }), note,
         JSON.stringify(placed.others.map(o => ({ id: o.card.id, link: { ...link, slide: o.slide } })))],
       { write: true },
     )
@@ -170,5 +209,4 @@ export async function linkRequests(db: Db, files: Map<string, DriveFile>, write 
     result.slides += Number(res?.slides ?? 0)
     result.notes += Number(res?.notes ?? 0)
   }
-  return result
 }
