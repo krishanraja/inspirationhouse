@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderApproved, syncHarness, githubApi, hashLine, pullBody, HARNESS_FILES, SYNC_BRANCH, APPROVED_SQL, type ApprovedRule, type GitHubApi } from '../src/publish/harness.ts'
+import { renderApproved, syncHarness, githubApi, hashLine, pullBody, CLOSEOUT_LINE, HARNESS_FILES, SYNC_BRANCH, APPROVED_SQL, type ApprovedRule, type GitHubApi } from '../src/publish/harness.ts'
 import { contentHash } from '../src/hash.ts'
 import type { Db } from '../src/db.ts'
 
@@ -123,5 +123,14 @@ describe('githubApi', () => {
     expect(seen[0]!.url).toContain(encodeURIComponent(`owner:${SYNC_BRANCH}`))
     await gh.updatePull(3, 'new body')
     expect(seen[1]).toMatchObject({ method: 'PATCH', url: 'https://api.github.com/repos/owner/repo/pulls/3', body: JSON.stringify({ body: 'new body' }) })
+  })
+})
+
+describe('pull request body and ai-harness closeout', () => {
+  it('carries the line ai-harness accepts in place of a NOW.md update', () => {
+    // The same pattern as SKIP in ai-harness scripts/closeout/check.mjs.
+    const SKIP = /^Closeout: not needed, \S.{7,}/m
+    expect(SKIP.test(pullBody('a'.repeat(64)))).toBe(true)
+    expect(pullBody('a'.repeat(64))).toContain(CLOSEOUT_LINE)
   })
 })

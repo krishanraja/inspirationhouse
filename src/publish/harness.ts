@@ -84,6 +84,12 @@ export interface HarnessSyncResult {
 /** The line in a pull request's body that names the exact set of files it proposes. */
 export const hashLine = (hash: string): string => `Taste rules hash: ${hash}`
 
+/**
+ * ai-harness's closeout check (scripts/closeout/check.mjs) asks every pull request that changes a file to update its
+ * NOW.md, or to say why not with this line. The rules files change only by his approval, and NOW.md does not list them.
+ */
+export const CLOSEOUT_LINE = 'Closeout: not needed, the approved taste rules are rendered from what Krish approved; NOW.md does not list them.'
+
 export function pullBody(hash: string): string {
   return [
     'The taste rules Krish approved on the publish board, rendered for the `krish-voice` and `krish-design` skills by the taste ledger (`krishanraja/inspirationhouse`, `engine harness`).',
@@ -91,6 +97,8 @@ export function pullBody(hash: string): string {
     "Nothing reaches a skill until this is merged. This repository is public: each rule's wording, including any rewording in his own words, becomes public on merge.",
     '',
     'Closing this without merging declines this set: the same set is never proposed again, and a pull request opens only once the approved rules change.',
+    '',
+    CLOSEOUT_LINE,
     '',
     hashLine(hash),
   ].join('\n')
