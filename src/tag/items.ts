@@ -68,7 +68,7 @@ const isFolder = (f: DriveFile) => f.mimeType === 'application/vnd.google-apps.f
 export async function syncItems(db: Db, google: Google, write = true): Promise<{ seen: number; written: number; files: Map<string, DriveFile> }> {
   const [cold, video] = await Promise.all([google.listFolder(DRIVE.coldIdeas), google.listFolder(DRIVE.videoInspiration)])
   const rows = [
-    ...cold.filter(f => !isFolder(f)).map(f => ({ f, folder: 'cold_ideas', lane: 'strategy' })),
+    ...cold.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => ({ f, folder: 'cold_ideas', lane: 'strategy' })),
     ...video.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => ({ f, folder: 'video_inspiration', lane: 'production' })),
   ]
   const files = new Map(rows.map(r => [r.f.id, r.f]))

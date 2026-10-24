@@ -41,9 +41,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
 // The two Drive folders Krish drops things into, and the sheet where he says
 // what he likes about a video. Fixed ids, not secrets.
+// Since 2026-10-24 both sit in Ventures > Inspiration (Krish: "one for the content I like ... and one for production
+// quality I like. Can you ensure absolutely everywhere recalibrates to this moving forward first?"):
+// coldIdeas is Content Inspo (the same folder, renamed from Cold Ideas & Inspo), videoInspiration is Production Inspo
+// (the clips of the old Video Engine > Inspiration, whose ID is gone). The keys and the folder values
+// ('cold_ideas', 'video_inspiration') stay, because inspiration_items and content-watcher's media carry them.
 export const DRIVE = {
   coldIdeas: '1FNztJOU82M8zb6IIbUAbvuI6Kr0pF5Hu',
-  videoInspiration: '1eqdc1hoMn6CwqkbKlG5mAmKCYNoR8otU',
+  videoInspiration: '1QxrzxISYFXq0er0DG0XSapm7qhvuRmh-',
+  // Now in Content Inspo; it is read as a sheet, never made a card, whichever folder holds it.
   whatILikeSheet: '1_XBxxMUcU4CFHB5iJqWc1WtYKmJCftMOe5UlZYSM-_U',
   // An uploaded Excel workbook in Cold Ideas: the posts of the Instagram
   // accounts he follows for strategy, captured one row per post.
