@@ -13,7 +13,7 @@ It is headless: no UI of its own and nothing to host. It runs on GitHub Actions,
 | Stage | When | What |
 |---|---|---|
 | collect | daily | Reads, never writes, the places Krish's taste already lands: content-engine's taste files (learnings, title verdicts, golden and rejected lines, style references), idea triage, visibility decisions, creator moves, drive-scan's artifacts, the What I like sheet, both Drive folders, the Instagram workbook in Cold Ideas (each post as an observation, each theme as a machine inference; context, never proof), and his answers on the Inspiration page. |
-| tag | daily | Gives each Drive item a card: a thumbnail, guessed tags, guessed one-tap answers, and facets (platform, format, source, creator, people, organisations, topics), with what the file name proves kept as fact (`src/tag/hints.ts`). A video is watched: eight frames spread across it and its words transcribed on the runner (`src/tag/watch.ts`, ffmpeg and faster-whisper), the words kept on the card. A card tagged under an older revision (`TAG_PROMPT_REV`) is tagged again. A guess stays a guess until he answers. |
+| tag | daily | Gives each Drive item a card: a thumbnail, guessed tags, guessed one-tap answers, and facets (platform, format, source, creator, people, organisations, topics), with what the file name proves kept as fact (`src/tag/hints.ts`). A video is watched: eight frames spread across it and its words transcribed on the runner (`src/tag/watch.ts`, ffmpeg and faster-whisper), the words kept on the card. Whether the words were heard (`words`, `silent` or `failed`, with its class) is kept on the card's facets and counted by the run, which fails while a video goes unheard; an unheard video is tagged again on the next run. A card tagged under an older revision (`TAG_PROMPT_REV`) is tagged again. A guess stays a guess until he answers. |
 | explain | daily | Turns each piece of his evidence into one to three candidate whys, each tagged form (craft) or subject. |
 | distil | weekly | Groups whys into claims. The model drafts; code checks every citation; the database counts the support. |
 | propose | weekly | Puts at most three claims a week to Krish through the existing learning-proposals door. He decides; the engine never does. |
@@ -25,6 +25,7 @@ It is headless: no UI of its own and nothing to host. It runs on GitHub Actions,
 - **Never writes to Drive.** Google scopes are read-only, checked in CI.
 - **His words are his.** A claim can quote him only verbatim, enforced by the database. A tapped suggestion is recorded as his endorsement, never as his words.
 - **Taste shapes form, never subject** (anti-echo). Readers only see `taste_profile_form`.
+- **A model answer is read here, never by the SDK.** The API never receives a schema's length or count limits, so an answer that runs over one is repaired and counted (`src/repair.ts`), never thrown away; an answer that is the wrong shape still fails that one item.
 - **Numbers are computed, never emitted by a model.** Support, confidence and every score come from SQL.
 - **Silence is not feedback.** An unanswered proposal stays proposed, and a quiet week scores as no reading, never zero.
 - **This repository is public.** Nothing Krish said is committed or logged; logs carry counts only (`src/log.ts`). Fixtures are synthetic.

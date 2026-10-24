@@ -52,7 +52,7 @@ export function renderItem(ref: number, r: PendingRow): string {
   ].filter(Boolean).join('\n')
 }
 
-export interface ExplainResult { items: number; whys: number; failed: number }
+export interface ExplainResult { items: number; whys: number; failed: number; repaired: number }
 
 export async function explainPending(db: Db, llm: Llm, runId: string, opts: { batch?: number; maxBatches?: number; write?: boolean } = {}): Promise<ExplainResult> {
   const batch = opts.batch ?? 25
@@ -65,7 +65,7 @@ export async function explainPending(db: Db, llm: Llm, runId: string, opts: { ba
      limit $1`,
     [batch * (opts.maxBatches ?? 8)],
   )
-  const result: ExplainResult = { items: pending.length, whys: 0, failed: 0 }
+  const result: ExplainResult = { items: pending.length, whys: 0, failed: 0, repaired: 0 }
   for (let i = 0; i < pending.length; i += batch) {
     const chunk = pending.slice(i, i + batch)
     const out = await llm.structured({
@@ -74,6 +74,7 @@ export async function explainPending(db: Db, llm: Llm, runId: string, opts: { ba
       content: [{ type: 'text', text: chunk.map((r, ref) => renderItem(ref, r)).join('\n\n') }],
     })
     if (!out.data) { result.failed += chunk.length; continue }
+    result.repaired += out.repairs ?? 0
     const rows = out.data.items.flatMap(item => {
       const ev = chunk[item.ref]
       if (!ev) return []

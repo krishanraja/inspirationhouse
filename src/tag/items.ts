@@ -148,19 +148,28 @@ export function mergeFacets(model: Tagging['facets'], hints: Hints, watched: Wat
     media: hints.media,
     duration_s: watched?.durationS ?? null,
     watched: Boolean(watched && (watched.frames.length > 1 || watched.transcript)),
+    heard: watched?.heard ?? null,
   }
 }
+
+/**
+ * Which cards a run tags: no tags yet, tags from an older revision, or a video watched whose words were never heard
+ * (`facets.heard` not `words` or `silent`, which takes in the clips watched before it was recorded). That last one is
+ * what lets a broken transcriber heal on the next run once it is fixed, with no card reset by hand.
+ */
+export const NEEDS_TAGS = `(tagged_at is null or tag_rev is distinct from $2
+  or (watched_at is not null and transcript is null and coalesce(facets->>'heard', '') not in ('words', 'silent')))`
 
 const VIDEO_MAX_BYTES = 150_000_000
 const IMAGE_MAX_BYTES = 4_500_000
 
-export interface TagResult { tagged: number; failed: number; watched: number; failures: Record<string, number> }
+export interface TagResult { tagged: number; failed: number; watched: number; heard: number; repaired: number; failures: Record<string, number>; unheard: Record<string, number> }
 
 /** Tag the cards that have no tags yet, or tags from an older revision, at most `limit` per run, newest first. */
 export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<string, DriveFile>, limit = 60, write = true): Promise<TagResult> {
   const pending = await db.query<{ id: string; drive_file_id: string; note_for_claude: string | null }>(
     `select id::text, drive_file_id, note_for_claude from public.inspiration_items
-     where (tagged_at is null or tag_rev is distinct from $2) and dismissed_at is null
+     where ${NEEDS_TAGS} and dismissed_at is null
      order by (tagged_at is null) desc, drive_created_at desc limit $1`,
     [limit, TAG_PROMPT_REV],
   )
@@ -173,7 +182,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
   )).map(r => r.why_like)
   const system = tagSystemPrompt(profile, recent)
 
-  const result: TagResult = { tagged: 0, failed: 0, watched: 0, failures: {} }
+  const result: TagResult = { tagged: 0, failed: 0, watched: 0, heard: 0, repaired: 0, failures: {}, unheard: {} }
   for (const item of pending) {
     const f = files.get(item.drive_file_id)
     if (!f) continue
@@ -189,7 +198,10 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     if (media === 'video') {
       const bytes = await google.download(f.id, VIDEO_MAX_BYTES).catch(() => null)
       watched = bytes ? await watchVideo(bytes).catch(() => null) : null
+      if (!watched) result.unheard[bytes ? 'runner' : 'download'] = (result.unheard[bytes ? 'runner' : 'download'] ?? 0) + 1
       if (watched?.frames.length) result.watched++
+      if (watched?.heard === 'words') result.heard++
+      if (watched?.unheard) result.unheard[watched.unheard] = (result.unheard[watched.unheard] ?? 0) + 1
     } else if (media === 'image' && /^image\/(jpeg|png|webp)$/.test(f.mimeType)) {
       const bytes = await google.download(f.id, IMAGE_MAX_BYTES).catch(() => null)
       if (bytes) full = { bytes, mime: f.mimeType }
@@ -204,6 +216,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
       result.failures[out.failure ?? 'unparsed'] = (result.failures[out.failure ?? 'unparsed'] ?? 0) + 1
       continue
     }
+    result.repaired += out.repairs ?? 0
     if (write) {
       await db.query(
         `update public.inspiration_items
@@ -214,7 +227,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
              facets = $8::jsonb, tag_rev = $9,
              transcript = coalesce($10, transcript),
              watched_at = case when $11 then now() else watched_at end
-         where id = $1 and (tagged_at is null or tag_rev is distinct from $9)`,
+         where id = $1 and ${NEEDS_TAGS.replaceAll('$2', '$9')}`,
         [item.id, JSON.stringify(out.data.tags), JSON.stringify(out.data.predicted), out.data.route,
           thumb ? thumb.bytes.toString('base64') : null, thumb?.mime ?? null, out.model,
           JSON.stringify(mergeFacets(out.data.facets, hints, watched)), TAG_PROMPT_REV,

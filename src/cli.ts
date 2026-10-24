@@ -100,8 +100,13 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
         const t = await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 60, !ctx.dry)
         ctx.counts.items_tagged = t.tagged
         ctx.counts.items_watched = t.watched
+        ctx.counts.items_heard = t.heard
+        ctx.counts.items_repaired = t.repaired
         ctx.counts.items_tag_failed = t.failed
         if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
+        const unheard = Object.values(t.unheard).reduce((a, b) => a + b, 0)
+        ctx.counts.items_unheard = unheard
+        if (unheard) ctx.problems.push(`no words heard from ${unheard} video(s): ${Object.keys(t.unheard).join(', ')}`)
       }
     }
   }
@@ -109,6 +114,7 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
     const ex = await explainPending(ctx.db, ctx.llm, ctx.runId, { write: !ctx.dry })
     ctx.counts.explain_items = ex.items
     ctx.counts.whys = ex.whys
+    ctx.counts.explain_repaired = ex.repaired
     if (ex.failed) ctx.problems.push(`explain failed on ${ex.failed} item(s)`)
     const judged = judgeRun(ex.items, ex.whys)
     if (judged.status === 'failed') ctx.problems.push(judged.reason!)
@@ -124,7 +130,7 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   ctx.counts.retired = s.retired
   if (ctx.llm) {
     const d = await distil(ctx.db, ctx.llm, ctx.runId, !ctx.dry)
-    Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written })
+    Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written, distil_repaired: d.repaired })
     if (d.failed) ctx.problems.push('distil: the model answer was refused, cut off or unparsed')
   }
   const p = await propose(ctx.db, now, !ctx.dry)
@@ -192,7 +198,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
