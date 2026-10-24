@@ -419,4 +419,40 @@ run('the review of the link box, on a real database', () => {
     expect(await linkRequests(db, files, false)).toMatchObject({ notes: 1 })
     expect((await card(c.b!)).why_here).toBeNull()
   })
+
+  it('points a second paste of the same post at its card and leaves that card as the first paste made it', async () => {
+    const c = await cardsFor(['c', 'd'])
+    const first = await request('post-c', ['c', 'd'], 'the first paste')
+    const files = filesOf(['c', 'd'])
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 1, slides: 1 })
+    const before = await card(c.c!)
+    // The same post under another address is a second request (another url_key).
+    const second = await request('reel-c', ['c', 'd'], 'the second paste')
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 1, slides: 0, notes: 0 })
+    expect((await client.query(`select item_id::text from content_watch_requests where id = $1`, [second])).rows[0].item_id).toBe(c.c)
+    expect(await card(c.c!)).toEqual(before)
+    expect((await card(c.c!)).facets.link.request_id).toBe(first)
+    expect((await card(c.d!)).facets).toMatchObject({ part_of: c.c, link: { request_id: first, slide: 1 } })
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 0, slides: 0, notes: 0 })
+  })
+
+  it('never takes a slide folded into another post\'s card, nor two new pastes one card in the same run', async () => {
+    const c = await cardsFor(['e', 'f', '7'])
+    const carousel = await request('carousel-e', ['e', 'f'], 'the carousel')
+    const files = filesOf(['e', 'f', '7'])
+    await linkRequests(db, files)
+    // A single post whose picture is the carousel's second slide: it points at the carousel's card, which stays as it was.
+    const single = await request('single-f', ['f'], 'the single post')
+    const slide = await card(c.f!)
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 1, slides: 0, notes: 0 })
+    expect((await client.query(`select item_id::text from content_watch_requests where id = $1`, [single])).rows[0].item_id).toBe(c.e)
+    expect(await card(c.f!)).toEqual(slide)
+    expect((await card(c.e!)).facets.link.request_id).toBe(carousel)
+    expect(await pageWords(c.f!)).toEqual([])
+    // Two new pastes of one post in the same run: the first takes the card, the second points at it.
+    const one = await request('twice-1', ['7'], 'pasted first')
+    await request('twice-2', ['7'], 'pasted second')
+    expect(await linkRequests(db, files)).toMatchObject({ linked: 2, notes: 1 })
+    expect(await card(c['7']!)).toMatchObject({ why_here: 'pasted first', facets: { link: { request_id: one } } })
+  })
 })

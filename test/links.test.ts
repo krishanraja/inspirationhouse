@@ -22,6 +22,14 @@ function world(init: { requests: Req[]; cards: Card[]; reads?: Read[]; tables?: 
       // A linked card taking the note on its request runs on the real schema (test/pipeline.int.test.ts); here it finds
       // none to give.
       if (/i\.facets->'link'->>'note'/.test(sql)) return [{ n: 0 }] as T[]
+      if (o?.write && /set item_id = \$2::uuid, updated_at = now\(\)\s+where id = \$1::uuid and item_id is null returning 1\)/.test(sql)) {
+        // A request pointed at a card another post already took: only the request changes.
+        writes.push({ sql, params })
+        const req = requests.find(r => r.id === params[0])!
+        if (req.item_id !== null) return [{ n: 0 }] as T[]
+        req.item_id = params[1] as string
+        return [{ n: 1 }] as T[]
+      }
       if (o?.write) {
         writes.push({ sql, params })
         const [reqId, cardId, link, note, slides] = params as [string, string, string, string | null, string]
@@ -45,7 +53,8 @@ function world(init: { requests: Req[]; cards: Card[]; reads?: Read[]; tables?: 
       }
       if (/from public\.inspiration_items/.test(sql)) {
         const ids = JSON.parse(params[0] as string) as string[]
-        return cards.filter(c => ids.includes(c.drive_file_id)) as T[]
+        return cards.filter(c => ids.includes(c.drive_file_id)).map(c => ({ ...c,
+          owner: (c.facets.link as { request_id?: string } | undefined)?.request_id ?? null, part_of: c.facets.part_of ?? null })) as T[]
       }
       if (/from public\.content_reads/.test(sql)) {
         const ids = JSON.parse(params[0] as string) as string[]
@@ -126,6 +135,34 @@ describe('linkRequests', () => {
     expect(w.writes[0]!.sql).toMatch(/exists \(select 1 from req\)/)
   })
 
+  it('points a request whose cards another post already took at that post\'s card, and changes no card', async () => {
+    const link = { request_id: 'req-1', url: 'https://www.instagram.com/p/abc/', slides: 2 }
+    const w = world({
+      requests: [
+        request({ id: 'req-1', media: [{ sha256: sha('a') }, { sha256: sha('b') }], item_id: 'card-a' }),
+        request({ id: 'req-2', note: 'the same post again', media: [{ sha256: sha('a') }] }),
+        request({ id: 'req-3', note: 'a single picture', media: [{ sha256: sha('b') }] }),
+      ],
+      cards: [card('card-a', 'file-a', { facets: { link } }), card('card-b', 'file-b', { facets: { part_of: 'card-a', link: { ...link, slide: 1 } } })],
+    })
+    const before = JSON.stringify(w.cards)
+    const files = new Map(['a', 'b'].map(x => [`file-${x}`, file(`file-${x}`, sha(x))]))
+    expect(await linkRequests(w.db, files)).toEqual({ linked: 2, slides: 0, notes: 0 })
+    expect(w.requests.map(r => r.item_id)).toEqual(['card-a', 'card-a', 'card-a'])
+    expect(JSON.stringify(w.cards)).toBe(before)
+    expect(w.writes.map(x => x.params.length)).toEqual([2, 2])
+  })
+
+  it('lets the first of two new pastes of one post take its card, and points the second at it', async () => {
+    const w = world({
+      requests: [request({ id: 'req-1', note: 'pasted first', media: [{ sha256: sha('a') }] }), request({ id: 'req-2', note: 'pasted second', media: [{ sha256: sha('a') }] })],
+      cards: [card('card-a', 'file-a')],
+    })
+    expect(await linkRequests(w.db, new Map([['file-a', file('file-a', sha('a'))]]))).toEqual({ linked: 2, slides: 0, notes: 1 })
+    expect(w.cards[0]).toMatchObject({ why_here: 'pasted first', facets: { link: { request_id: 'req-1' } } })
+    expect(w.requests[1]!.item_id).toBe('card-a')
+  })
+
   it('matches a file by its sha256 whatever the case on either side', async () => {
     const w = world({ requests: [request({ media: [{ sha256: sha('A') }] })], cards: [card('card-a', 'file-a')] })
     expect((await linkRequests(w.db, new Map([['file-a', file('file-a', sha('a'))]]))).linked).toBe(1)
@@ -164,8 +201,8 @@ describe('the pieces of linking', () => {
     expect(driveSha(file('f', 'abc'))).toBeNull()
   })
   it('never folds the card into itself, and folds a card once', () => {
-    const c = { id: 'card-a', drive_file_id: 'f', why_here: null }
-    const d = { id: 'card-d', drive_file_id: 'g', why_here: null }
+    const c = { id: 'card-a', drive_file_id: 'f', why_here: null, owner: null, part_of: null }
+    const d = { id: 'card-d', drive_file_id: 'g', why_here: null, owner: null, part_of: null }
     const placed = placeRequest([sha('a'), sha('a'), sha('d'), sha('d')], s => (s === sha('a') ? c : d))!
     expect(placed.card).toBe(c)
     expect(placed.others).toEqual([{ card: d, slide: 2 }])

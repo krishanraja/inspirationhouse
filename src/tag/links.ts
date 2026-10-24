@@ -20,7 +20,11 @@ export interface LinkResult {
 interface Request {
   id: string; url: string; platform: string; note: string | null; requested_at: string; media: unknown; read_id: string | null
 }
-interface Card { id: string; drive_file_id: string; why_here: string | null }
+interface Card {
+  id: string; drive_file_id: string; why_here: string | null
+  /** The request whose post this card already is (facets.link.request_id), and the card it is a slide of (part_of). */
+  owner: string | null; part_of: string | null
+}
 interface Reading { id: string; sha256: string; author: string | null; posted_at: string | null }
 
 const SHA256 = /^[a-f0-9]{64}$/
@@ -66,13 +70,19 @@ export function placeRequest(shas: Array<string | null>, cardOf: (sha: string) =
   return { card, main, others }
 }
 
-// One request in one statement: the request takes its card only while it has none, and the card and its slides change
-// only when it did, so a second run, or two runs at once, change nothing. His note becomes why_here only when the card
-// has none; `o` is the card as it was, so the count says whether this statement kept the note.
+/** A card no other post has taken: not a slide of another card, and not the card of another request. */
+const freeFor = (requestId: string) => (c: Card) => !c.part_of && (!c.owner || c.owner === requestId)
+const FREE = (a: string) => `not ${a}.facets ? 'part_of' and coalesce(${a}.facets->'link'->>'request_id', $1::text) = $1::text`
+
+// One request in one statement: the request takes its card only while it has none and the card is still free, and the
+// card and its slides change only when it did, so a second run, or two runs at once, change nothing. His note becomes
+// why_here only when the card has none; `o` is the card as it was, so the count says whether this statement kept the
+// note. A slide another post already took is left as it is.
 const LINK_SQL = `
   with req as (
     update public.content_watch_requests set item_id = $2::uuid, updated_at = now()
     where id = $1::uuid and item_id is null
+      and exists (select 1 from public.inspiration_items f where f.id = $2::uuid and ${FREE('f')})
     returning id
   ), card as (
     update public.inspiration_items i
@@ -86,7 +96,7 @@ const LINK_SQL = `
     update public.inspiration_items s
     set facets = s.facets || jsonb_build_object('part_of', $2::text, 'link', x.link), updated_at = now()
     from jsonb_to_recordset($5::jsonb) as x(id uuid, link jsonb)
-    where s.id = x.id and exists (select 1 from req)
+    where s.id = x.id and exists (select 1 from req) and ${FREE('s')}
     returning 1
   )
   select (select count(*) from req)::int as linked,
@@ -160,7 +170,10 @@ async function linkNew(db: Db, files: Map<string, DriveFile>, write: boolean, re
   const fileIds = [...new Set(shasOf.flat().map(sha => (sha ? fileBySha.get(sha) : undefined)).filter((x): x is string => !!x))]
   if (!fileIds.length) return
   const cards = await db.query<Card>(
-    `select id::text, drive_file_id, why_here from public.inspiration_items
+    `select id::text, drive_file_id, why_here,
+            case when jsonb_typeof(facets->'link'->'request_id') = 'string' then facets->'link'->>'request_id' end as owner,
+            case when jsonb_typeof(facets->'part_of') = 'string' then facets->>'part_of' end as part_of
+     from public.inspiration_items
      where drive_file_id = any(select jsonb_array_elements_text($1::jsonb))`,
     [JSON.stringify(fileIds)],
   )
@@ -182,8 +195,25 @@ async function linkNew(db: Db, files: Map<string, DriveFile>, write: boolean, re
 
   for (const [i, r] of requests.entries()) {
     const shas = shasOf[i]!
-    const placed = placeRequest(shas, cardOf)
-    if (!placed) continue
+    // Only cards no other post has taken: the same post pasted under a second address, or a single picture that is
+    // already a slide of another post, never rewrites that post's card.
+    const free = freeFor(r.id)
+    const placed = placeRequest(shas, sha => { const c = cardOf(sha); return c && free(c) ? c : null })
+    if (!placed) {
+      // Every card is another post's: the request points at that post's card, so it stops waiting, and changes nothing.
+      const taken = shas.map(sha => (sha ? cardOf(sha) : null)).find(c => c !== null)
+      if (!taken) continue
+      if (!write) { result.linked++; continue }
+      const [res] = await db.query<{ n: number }>(
+        `with req as (
+           update public.content_watch_requests set item_id = $2::uuid, updated_at = now()
+           where id = $1::uuid and item_id is null returning 1)
+         select count(*)::int as n from req`,
+        [r.id, taken.part_of ?? taken.id], { write: true },
+      )
+      result.linked += Number(res?.n ?? 0)
+      continue
+    }
     const reading = (r.read_id ? readById.get(r.read_id) : undefined)
       ?? readBySha.get(shas[placed.main]!)
       ?? shas.map(sha => (sha ? readBySha.get(sha) : undefined)).find(Boolean)
@@ -193,10 +223,16 @@ async function linkNew(db: Db, files: Map<string, DriveFile>, write: boolean, re
     }
     // His words, typed when he pasted it; blank is no note.
     const note = typeof r.note === 'string' && r.note.trim() ? r.note : null
+    // Later requests this run see the cards this one takes.
+    const take = () => {
+      placed.card.owner = r.id
+      for (const o of placed.others) o.card.part_of = placed.card.id
+    }
     if (!write) {
       result.linked++
       result.slides += placed.others.length
       if (note && placed.card.why_here === null) result.notes++
+      take()
       continue
     }
     const [res] = await db.query<{ linked: number; slides: number; notes: number }>(
@@ -208,5 +244,6 @@ async function linkNew(db: Db, files: Map<string, DriveFile>, write: boolean, re
     result.linked += Number(res?.linked ?? 0)
     result.slides += Number(res?.slides ?? 0)
     result.notes += Number(res?.notes ?? 0)
+    if (Number(res?.linked ?? 0)) take()
   }
 }
