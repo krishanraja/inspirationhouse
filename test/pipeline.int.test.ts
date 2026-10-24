@@ -521,4 +521,17 @@ run('the review of the link box, on a real database', () => {
     long.excerpt = 'a'.repeat(1999) + '\u{1F600}\u{1F600}'
     expect((await writeEvidence(db, [long, answer('card-plain', '2026-10-05T12:00:00Z', [])], runId)).written).toBe(2)
   })
+
+  it('never marks a video heard from a reading that says nothing about its words', async () => {
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)
+       values ('vid-noheard-0', 'video_inspiration', 'production', 'vid-noheard-0.mp4', 'video/mp4', now())`)
+    await client.query(
+      `insert into content_reads (sha256, shape, engine_rev, read, read_md)
+       values ($1, 'video', 'cw-0', '{"post": null}', '## Shots\n- 4 cuts\n## Pace and sound\n- no speech')`, [sha('8')])
+    await tagItems(db, noDrive, tagger().llm, new Map([['vid-noheard-0', video('vid-noheard-0', { sha256Checksum: sha('8') })]]), 60, true,
+      { watch: async () => { throw new Error('a read file is never watched') } })
+    const [row] = (await client.query(`select facets->>'heard' as heard, transcript from inspiration_items`)).rows
+    expect(row).toEqual({ heard: null, transcript: null })
+  })
 })

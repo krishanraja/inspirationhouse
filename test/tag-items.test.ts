@@ -430,7 +430,7 @@ describe('tagItems and content-watcher\'s readings', () => {
     expect(w.sql).toMatch(/facets = \$8::jsonb \|\| case when facets \? 'link' then jsonb_build_object\('link', facets->'link'\) else '\{\}'::jsonb end \|\| case when facets \? 'part_of'/)
   })
 
-  it('says a video was heard when its reading says so, or when the reading has text and says nothing', async () => {
+  it('says a video was heard when its reading says so, or, saying nothing, when the reading has its words', async () => {
     const silent = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: false, facets: {} }], { reads: [read({ heard: 'silent', words_text: null })] })
     await tagItems(silent.db, silent.google, silent.llm, new Map([['a', file('a', { sha256Checksum: sha })]]), 60, true, notReached)
     expect(JSON.parse(silent.writes.at(-1)!.params[7] as string)).toMatchObject({ heard: 'silent' })
@@ -442,6 +442,18 @@ describe('tagItems and content-watcher\'s readings', () => {
     await tagItems(image.db, image.google, image.llm, new Map([['i', file('i', { name: 'i.jpg', mimeType: 'image/jpeg', sha256Checksum: sha })]]))
     expect(image.downloads).toEqual([])
     expect(JSON.parse(image.writes.at(-1)!.params[7] as string)).toMatchObject({ heard: null, read_from: 'content_reads' })
+  })
+
+  it('takes a reading that does not say whether it heard a video as heard only when it has a transcript section', async () => {
+    const tag = async (read_md: string) => {
+      const h = harness([{ id: '1', drive_file_id: 'a', note_for_claude: null, healing: false, facets: {} }], { reads: [read({ heard: null, words_text: null, read_md })] })
+      await tagItems(h.db, h.google, h.llm, new Map([['a', file('a', { sha256Checksum: sha })]]), 60, true, notReached)
+      return JSON.parse(h.writes.at(-1)!.params[7] as string) as { heard: string | null; heard_tries: number }
+    }
+    // content-watcher's transcript heading (content_watcher/read/render.py): "## Words (whisper, en)".
+    expect(await tag('## Hook (first 3 seconds)\n- a cut\n\n## Words (whisper, en)\n[0:01] what was said')).toMatchObject({ heard: 'words', heard_tries: 0 })
+    // A reading with only its shots, its pace and the words on screen heard nothing it says, so it is no hearing, and a try.
+    expect(await tag('## Shots\n1. a shot\n\n## Pace and sound\n- no speech\n\n## Words on screen\n[0:01] a caption')).toMatchObject({ heard: null, heard_tries: 1 })
   })
 
   it('counts a reading that did not hear a video as a try, and stops after the last one', async () => {

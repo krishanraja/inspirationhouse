@@ -267,6 +267,11 @@ export interface TagDeps {
 /** A reading of a file by content-watcher (content-engine's content_reads), found by the file's sha256. */
 interface ReadRow { sha256: string; engine_rev: string; read_md: string; heard: string | null; words_text: string | null }
 const READ_HEARD = new Set(['words', 'silent', 'failed'])
+/**
+ * A reading's transcript section: the heading content-watcher writes ("## Words (whisper, en)", in
+ * content_watcher/read/render.py), never "## Words on screen", which is text seen, not heard.
+ */
+const READ_WORDS_HEADING = /^## Words(?:[ \t]*\(|[ \t]*$)/m
 /** The longest transcript the card keeps (inspiration_items.transcript). */
 const TRANSCRIPT_MAX_CHARS = 20_000
 
@@ -452,7 +457,8 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     let words: string | null = null
     let readFacets: Record<string, unknown> = {}
     if (read) {
-      const heard = read.heard && READ_HEARD.has(read.heard) ? read.heard : media === 'video' && read.read_md.trim() ? 'words' : null
+      // With no heard field, a video was heard only when the reading has a transcript section (design: the link box).
+      const heard = read.heard && READ_HEARD.has(read.heard) ? read.heard : media === 'video' && READ_WORDS_HEADING.test(read.read_md) ? 'words' : null
       // A reading that did not hear a video is a try, as a failed hearing here is: the same reading comes back on every
       // run, so without one the card would be picked up again for ever. After HEAR_TRIES it is left as it is.
       const charged = media === 'video' && !(HEARD_FINAL as readonly string[]).includes(heard ?? '')
