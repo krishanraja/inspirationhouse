@@ -18,3 +18,19 @@ describe('filenameHints', () => {
     expect(filenameHints('https://claude..txt', 'text/plain')).toMatchObject({ platform: 'web', source: 'a link he saved' })
   })
 })
+
+import { mergeFacets } from '../src/tag/items.ts'
+describe('mergeFacets', () => {
+  it('keeps at most six of each list, keeps what the file name proves, and records a watched clip', () => {
+    const m = mergeFacets(
+      { platform: 'unknown', format: 'single_image', source: null, creator: null, people: [], organisations: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'a'], topics: [] },
+      { platform: 'instagram', format: 'screenshot', media: 'image', source: 'a screenshot on his phone, in Instagram' },
+      null,
+    )
+    expect(m.organisations).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(m.platform).toBe('instagram')
+    expect(m.format).toBe('screenshot')
+    expect(m.source).toBe('a screenshot on his phone, in Instagram')
+    expect(m.watched).toBe(false)
+  })
+})

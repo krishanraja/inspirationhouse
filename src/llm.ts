@@ -30,13 +30,21 @@ export function anthropicLlm(cfg: Config): Llm {
     async structured({ schema, system, content, maxTokens = 16000 }) {
       // Streamed: the SDK refuses a non-streaming call whose max_tokens could run past ten minutes (the weekly distil
       // asks for 32000), and finalMessage() still parses the structured output.
-      const res = await client.messages.stream({
-        model,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: 'user', content }],
-        output_config: { format: zodOutputFormat(schema) },
-      }).finalMessage()
+      let res
+      try {
+        res = await client.messages.stream({
+          model,
+          max_tokens: maxTokens,
+          system,
+          messages: [{ role: 'user', content }],
+          output_config: { format: zodOutputFormat(schema) },
+        }).finalMessage()
+      } catch (err) {
+        // An answer that breaks the schema fails that one item, never the whole run: the SDK throws while parsing
+        // (2026-10-24, a seventh organisation where six were allowed stopped the daily run). Anything else still throws.
+        if (/Failed to parse structured output/.test((err as Error)?.message ?? '')) return { data: null, failure: 'unparsed', model }
+        throw err
+      }
       // The stop reason first, always: a refused or cut-off answer is not data.
       if (res.stop_reason === 'refusal') return { data: null, failure: 'refusal', model: res.model }
       if (res.stop_reason === 'max_tokens') return { data: null, failure: 'max_tokens', model: res.model }
