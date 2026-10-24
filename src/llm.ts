@@ -28,13 +28,15 @@ export function anthropicLlm(cfg: Config): Llm {
   return {
     model,
     async structured({ schema, system, content, maxTokens = 16000 }) {
-      const res = await client.messages.parse({
+      // Streamed: the SDK refuses a non-streaming call whose max_tokens could run past ten minutes (the weekly distil
+      // asks for 32000), and finalMessage() still parses the structured output.
+      const res = await client.messages.stream({
         model,
         max_tokens: maxTokens,
         system,
         messages: [{ role: 'user', content }],
         output_config: { format: zodOutputFormat(schema) },
-      })
+      }).finalMessage()
       // The stop reason first, always: a refused or cut-off answer is not data.
       if (res.stop_reason === 'refusal') return { data: null, failure: 'refusal', model: res.model }
       if (res.stop_reason === 'max_tokens') return { data: null, failure: 'max_tokens', model: res.model }

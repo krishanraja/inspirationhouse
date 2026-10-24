@@ -157,6 +157,15 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
 
 /** His answers on the page become evidence: typed words are his words, a
  *  tapped guess is his endorsement of it. */
+/**
+ * The lane an answered card's evidence counts toward. A card he routes to "A room or stage to go for" is evidence about
+ * the rooms he wants, so it counts for the visibility lane, whichever folder it came from; every other route keeps its
+ * folder's lane.
+ */
+export function answerLane(folderLane: 'strategy' | 'production', route: string | null): 'strategy' | 'production' | 'visibility' {
+  return route === 'visibility' ? 'visibility' : folderLane
+}
+
 export async function answeredItemEvidence(db: Db) {
   const rows = await db.query<{
     id: string; lane: 'strategy' | 'production'; name: string; why_here: string | null; why_like: string | null
@@ -172,7 +181,7 @@ export async function answeredItemEvidence(db: Db) {
     occurredAt: r.answered_at,
     attribution: r.why_like_source === 'typed' ? 'krish_words' as const : 'krish_action' as const,
     polarity: 'likes' as const,
-    lane: r.lane,
+    lane: answerLane(r.lane, r.route),
     layer: null,
     title: r.name,
     excerpt: r.why_like ?? r.why_here ?? r.would_do,
