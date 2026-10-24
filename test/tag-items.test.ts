@@ -1,21 +1,22 @@
 import { describe, it, expect } from 'vitest'
-import { tagItems, HEAR_TRIES, needsTags, nameWords } from '../src/tag/items.ts'
+import { tagItems, HEAR_TRIES, needsTags, nameWords, answerEvidence, apiFailureClass, INSTRUCTED_SINCE, type AnsweredRow } from '../src/tag/items.ts'
 import type { Db } from '../src/db.ts'
 import type { Google, DriveFile } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
 import type { Watched } from '../src/tag/watch.ts'
 
 // Synthetic cards and files only; nothing here is anything Krish saved.
-type Row = { id: string; drive_file_id: string; note_for_claude: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null }
+type Row = { id: string; drive_file_id: string; note_for_claude: string | null; read_as?: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null }
 const file = (id: string, over: Partial<DriveFile> = {}): DriveFile =>
   ({ id, name: `clip-${id}.mp4`, mimeType: 'video/mp4', modifiedTime: '2026-10-24T00:00:00Z', createdTime: '2026-10-24T00:00:00Z', size: '1000', ...over })
 
-function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown> } = {}) {
+function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown>; throwOn?: (call: number) => unknown } = {}) {
   const writes: Array<{ sql: string; params: unknown[] }> = []
+  const pendingSelects: Array<{ sql: string; params: unknown[] }> = []
   const db: Db = {
     async query<T>(sql: string, params: unknown[] = []) {
       if (/^\s*update/i.test(sql)) { writes.push({ sql, params }); return [] as T[] }
-      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) return rows.map(r => ({ kind: null, kind_source: null, ...r })) as T[]
+      if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) { pendingSelects.push({ sql, params }); return rows.map(r => ({ kind: null, kind_source: null, read_as: null, ...r })) as T[] }
       if (/select id::text, drive_file_id, kind, kind_source from public\.inspiration_items/.test(sql)) return (opts.known ?? []) as T[]
       if (/from public\.content_ideas/.test(sql)) return (opts.slate ?? []) as T[]
       return [] as T[]
@@ -34,11 +35,13 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
     async structured(args) {
       calls++
       prompts.push(JSON.stringify(args.content))
+      const thrown = opts.throwOn?.(calls)
+      if (thrown) throw thrown
       return { data: { tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only', kind: null, opinion: null, reason: null, piece_ref: null,
         facets: { platform: 'instagram', format: 'short_video', source: null, creator: null, people: [], organisations: [], topics: [] }, ...opts.answer } as never, failure: null, model: 'm' }
     },
   }
-  return { db, google, llm, writes, downloads, prompts, calls: () => calls }
+  return { db, google, llm, writes, pendingSelects, downloads, prompts, calls: () => calls }
 }
 const watched = (over: Partial<Watched>): Watched => ({ frames: [{ bytes: Buffer.from('f'), mime: 'image/jpeg' }, { bytes: Buffer.from('f'), mime: 'image/jpeg' }], transcript: null, durationS: 30, heard: 'failed', unheard: 'decode', ...over })
 
@@ -119,6 +122,99 @@ describe('needsTags', () => {
     expect(needsTags(9)).toContain('tag_rev is distinct from $9')
     expect(needsTags(9)).not.toContain('$2')
     expect(needsTags(2)).toContain(`< ${HEAR_TRIES}`)
+  })
+  it('tags a card again once when he told how to read it after it was tagged', () => {
+    expect(needsTags(2)).toContain(INSTRUCTED_SINCE)
+    expect(INSTRUCTED_SINCE).toBe('coalesce(instructed_at > tagged_at, false)')
+  })
+})
+
+describe('tagItems and what is in Drive this run', () => {
+  it('asks only for cards whose file is in Drive, so a gone file never takes a slot', async () => {
+    const h = harness([])
+    const docs = new Map(['a', 'b'].map(d => [d, file(d, { mimeType: 'application/vnd.google-apps.document', name: d })]))
+    await tagItems(h.db, h.google, h.llm, docs)
+    expect(h.pendingSelects).toHaveLength(1)
+    const { sql, params } = h.pendingSelects[0]!
+    expect(sql).toMatch(/drive_file_id = any\(select jsonb_array_elements_text\(\$3::jsonb\)\)/)
+    expect(JSON.parse(params[2] as string)).toEqual(['a', 'b'])
+    // A card he instructed since it was tagged is tagged in full, never only heard again.
+    expect(sql).toContain(`and not ${INSTRUCTED_SINCE}) as healing`)
+  })
+})
+
+describe('tagItems and his instructions', () => {
+  it('tells the tagger how he said to take the file in, in plain words', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: 'the second half matters', read_as: 'look', healing: false, facets: {} }])
+    await tagItems(h.db, h.google, h.llm, new Map([['d', file('d', { mimeType: 'application/vnd.google-apps.document', name: 'A note.md' })]]))
+    expect(h.prompts[0]).toContain('Krish says how to take it in: a look is enough.')
+    expect(h.prompts[0]).toContain('<note>the second half matters</note>')
+  })
+  it('says nothing about it when he gave no way to read it', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }])
+    await tagItems(h.db, h.google, h.llm, new Map([['d', file('d', { mimeType: 'application/vnd.google-apps.document', name: 'A note.md' })]]))
+    expect(h.prompts[0]).not.toContain('how to take it in')
+  })
+})
+
+describe('tagItems when the model call throws', () => {
+  it('fails that card only, by its status, and tags the next', async () => {
+    const rows = ['a', 'b', 'c'].map((d, i) => ({ id: String(i), drive_file_id: d, note_for_claude: null, healing: false, facets: {} }))
+    const h = harness(rows, { throwOn: n => (n === 1 ? Object.assign(new Error('bad image'), { status: 400 }) : n === 2 ? new Error('socket hang up') : null) })
+    const docs = new Map(['a', 'b', 'c'].map(d => [d, file(d, { mimeType: 'application/vnd.google-apps.document', name: d })]))
+    const r = await tagItems(h.db, h.google, h.llm, docs)
+    expect(h.calls()).toBe(3)
+    expect(r).toMatchObject({ tagged: 1, failed: 2, failures: { api_400: 1, api_error: 1 } })
+    expect(h.writes.filter(w => /auto_tags/.test(w.sql))).toHaveLength(1)
+  })
+  it('names the class by status only', () => {
+    expect(apiFailureClass(Object.assign(new Error('x'), { status: 529 }))).toBe('api_529')
+    expect(apiFailureClass({ status: 'oops' })).toBe('api_error')
+    expect(apiFailureClass(null)).toBe('api_error')
+  })
+})
+
+describe('answerEvidence', () => {
+  // Synthetic answers only.
+  const row = (over: Partial<AnsweredRow>): AnsweredRow => ({
+    id: 'card-1', lane: 'production', name: 'clip.mp4', why_here: null, why_like: null, why_like_source: null, would_do: null,
+    route: null, confirmed_tags: [], answered_at: '2026-10-24T10:00:00Z', read_as: null, note_for_claude: null,
+    picked_likes: [], routes: [], kind: null, piece_id: null, ...over,
+  })
+
+  it('quotes what he typed about what he likes, first', () => {
+    const e = answerEvidence(row({ why_like: 'the cut on the beat', why_like_source: 'typed', why_here: 'for the opener', picked_likes: ['tight pacing'] }))
+    expect(e).toMatchObject({ attribution: 'krish_words', excerpt: 'the cut on the beat' })
+    expect(e.meta).toMatchObject({ picked_likes: ['tight pacing'], why_here: 'for the opener' })
+  })
+
+  it('quotes why he saved it when he only tapped likes, so his typed words are his', () => {
+    const e = answerEvidence(row({ why_like: 'tight pacing', why_like_source: 'picked', picked_likes: ['tight pacing', 'clean captions'], why_here: 'to copy the pacing' }))
+    expect(e).toMatchObject({ attribution: 'krish_words', excerpt: 'to copy the pacing' })
+    expect(e.meta.picked_likes).toEqual(['tight pacing', 'clean captions'])
+  })
+
+  it('quotes what he would do with it when that is all he typed', () => {
+    expect(answerEvidence(row({ would_do: 'try it on Monday', picked_likes: ['a'] }))).toMatchObject({ attribution: 'krish_words', excerpt: 'try it on Monday' })
+  })
+
+  it('records only taps as his action, with every pick listed', () => {
+    const e = answerEvidence(row({ why_like: 'tight pacing', why_like_source: 'picked', picked_likes: ['tight pacing', 'clean captions'] }))
+    expect(e).toMatchObject({ attribution: 'krish_action', excerpt: 'tight pacing; clean captions' })
+    // A pick from before several picks lives in why_like alone.
+    expect(answerEvidence(row({ why_like: 'one pick', why_like_source: 'picked', picked_likes: [] }))).toMatchObject({ attribution: 'krish_action', excerpt: 'one pick' })
+  })
+
+  it('keeps the whole answer in meta, and the kind and piece only when set', () => {
+    const e = answerEvidence(row({ why_here: 'x', routes: ['make_piece', 'visibility'], route: 'make_piece', confirmed_tags: ['hook'], read_as: 'watch', note_for_claude: 'skip the intro', kind: 'video', piece_id: 'p-1' }))
+    expect(e.lane).toBe('visibility')
+    expect(e.meta).toEqual({
+      why_here: 'x', would_do: null, why_like_source: null, picked_likes: [], route: 'make_piece', routes: ['make_piece', 'visibility'],
+      confirmed_tags: ['hook'], read_as: 'watch', note_for_claude: 'skip the intro', kind: 'video', piece_id: 'p-1',
+    })
+    const bare = answerEvidence(row({ why_here: 'x' }))
+    expect(bare.meta).not.toHaveProperty('kind')
+    expect(bare.meta).not.toHaveProperty('piece_id')
   })
 })
 

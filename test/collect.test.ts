@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { collectGitTaste, TASTE_FILES } from '../src/collect/gitTaste.ts'
 import { sheetEvidence } from '../src/collect/drive.ts'
-import { versionOf, normalise, clip } from '../src/evidence.ts'
+import { versionOf, normalise, clip, excerptMax } from '../src/evidence.ts'
 import { answerLane } from '../src/tag/items.ts'
 
 // Synthetic files only. No real taste data is ever committed here.
@@ -72,6 +72,18 @@ describe('evidence versions', () => {
     const long = 'word '.repeat(200)
     expect(normalise({ source: 'learnings_json', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'voice', layer: 'nonsense', title: null, excerpt: long, meta: {} }).excerpt!.length).toBeLessThanOrEqual(400)
     expect(clip('a b c', 3)).toBe('a b')
+  })
+
+  it('keeps an Inspiration answer up to 2000 characters, and every other source at 400', () => {
+    const long = 'word '.repeat(450)
+    const page = normalise({ source: 'inspiration_page', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'production', layer: null, title: null, excerpt: long, meta: {} })
+    expect(page.excerpt!.length).toBeGreaterThan(1900)
+    expect(page.excerpt!.length).toBeLessThanOrEqual(2000)
+    expect(excerptMax('inspiration_page')).toBe(2000)
+    for (const source of ['learnings_json', 'title_verdicts', 'style_references', 'drive_artifact', 'what_i_like_sheet'] as const) {
+      expect(excerptMax(source)).toBe(400)
+      expect(normalise({ ...page, source }).excerpt!.length).toBeLessThanOrEqual(400)
+    }
   })
 })
 

@@ -5,7 +5,8 @@ import { mondayOf } from '../publish/propose.ts'
 // by SQL anyone can re-run (query_rev pins the version). A week with nothing to
 // count is a no_reading, never a zero: silence is not feedback.
 
-export const QUERY_REV = 'score-v1'
+// score-v2 (2026-10-24): the answered rate counts a card from when he first answered it (first_answered_at).
+export const QUERY_REV = 'score-v2'
 
 interface Metric { metric: string; sql: string }
 
@@ -43,7 +44,9 @@ export const METRICS: Metric[] = [
   {
     metric: 'inspiration_answered_rate',
     sql: `
-      select count(*) filter (where answered_at is not null and answered_at < $2::date)::numeric as numerator,
+      -- A card still answered, counted from when he first answered it: an edit restamps answered_at, never
+      -- first_answered_at, and a card not yet stamped with it falls back to answered_at.
+      select count(*) filter (where answered_at is not null and coalesce(first_answered_at, answered_at) < $2::date)::numeric as numerator,
              count(*)::numeric as denominator
       from public.inspiration_items
       -- Cumulative to the end of the week. $1 is bound so every metric takes

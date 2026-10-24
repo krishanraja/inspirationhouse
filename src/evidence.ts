@@ -23,7 +23,7 @@ export interface Evidence {
   layer: string | null
   title: string | null
   // Krish's own words when attribution is krish_words; otherwise a short
-  // recorded reason. Never more than 400 characters (the column enforces it).
+  // recorded reason. Cut to excerptMax(source) characters (the column holds 2000).
   excerpt: string | null
   meta: Record<string, unknown>
 }
@@ -63,13 +63,21 @@ export function versionOf(e: Evidence): string {
   })
 }
 
+/**
+ * How long an excerpt may be. His answers on the Inspiration page run to 2000 characters, so they keep all of it; every
+ * other source stays at 400, since a longer cut there would change the version of every row it has already written.
+ */
+export function excerptMax(source: Source): number {
+  return source === 'inspiration_page' ? 2000 : 400
+}
+
 export function normalise(e: Evidence): Evidence {
   return {
     ...e,
     sourceRef: e.sourceRef.slice(0, 300),
     layer: asLayer(e.layer),
     title: clip(e.title, 300),
-    excerpt: clip(e.excerpt, 400),
+    excerpt: clip(e.excerpt, excerptMax(e.source)),
   }
 }
 
@@ -111,4 +119,56 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
     written += Number(res[0]?.n ?? 0)
   }
   return { seen: rows.length, written }
+}
+
+export interface WithdrawResult { withdrawn: number; restored: number; recounted: number }
+
+/**
+ * An answer he took back, or replaced, stops counting as his support. After a source is collected, every standing row
+ * of it whose version was not collected this run is withdrawn (a reopened card, or an answer with a newer version), and
+ * a withdrawn row whose version was collected again stands again (an answer he gave back as it was). Then every claim
+ * citing one of those rows is touched, so the database's trigger recounts its support. Only for a source that is read
+ * whole on every run: a row missing from one run is gone, never just unread. A dry run counts and writes nothing.
+ */
+export async function withdrawUncollected(db: Db, source: 'inspiration_page', rows: Evidence[], write: boolean): Promise<WithdrawResult> {
+  const keep = JSON.stringify(rows.map(normalise).filter(e => e.source === source).map(e => ({ r: e.sourceRef, v: versionOf(e) })))
+  const kept = `exists (select 1 from jsonb_to_recordset($2::jsonb) as k(r text, v text) where k.r = e.source_ref and k.v = e.source_version)`
+  if (!write) {
+    const [res] = await db.query<{ withdrawn: number; restored: number }>(
+      `select count(*) filter (where e.withdrawn_at is null and not ${kept})::int as withdrawn,
+              count(*) filter (where e.withdrawn_at is not null and ${kept})::int as restored
+       from public.taste_evidence e where e.source = $1`,
+      [source, keep],
+    )
+    return { withdrawn: Number(res?.withdrawn ?? 0), restored: Number(res?.restored ?? 0), recounted: 0 }
+  }
+  const gone = await db.query<{ id: string }>(
+    `update public.taste_evidence e set withdrawn_at = now()
+     where e.source = $1 and e.withdrawn_at is null and not ${kept}
+     returning e.id::text`,
+    [source, keep],
+    { write: true },
+  )
+  const back = await db.query<{ id: string }>(
+    `update public.taste_evidence e set withdrawn_at = null
+     where e.source = $1 and e.withdrawn_at is not null and ${kept}
+     returning e.id::text`,
+    [source, keep],
+    { write: true },
+  )
+  const ids = [...gone, ...back].map(r => r.id)
+  let recounted = 0
+  if (ids.length) {
+    const [res] = await db.query<{ n: number }>(
+      `with c as (
+         update public.taste_claims set updated_at = now()
+         where (evidence_ids || counterexample_ids) && array(select jsonb_array_elements_text($1::jsonb))::uuid[]
+         returning 1)
+       select count(*)::int as n from c`,
+      [JSON.stringify(ids)],
+      { write: true },
+    )
+    recounted = Number(res?.n ?? 0)
+  }
+  return { withdrawn: gone.length, restored: back.length, recounted }
 }

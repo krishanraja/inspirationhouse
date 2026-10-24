@@ -12,7 +12,7 @@ export function safeFields(fields: Record<string, unknown>): Record<string, unkn
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(fields)) {
     // Per-source and per-stage counters are numbers, so they are safe by shape.
-    const counter = /^(seen|new|items|explain|distil|score)_[a-z_]+$/.test(k) && typeof v === 'number'
+    const counter = /^(seen|new|items|explain|distil|score|evidence)_[a-z_]+$/.test(k) && typeof v === 'number'
     if (!ALLOWED.has(k) && !counter) continue
     if (typeof v === 'number' || typeof v === 'boolean') out[k] = v
     else if (typeof v === 'string') out[k] = v.length <= 80 ? v : `${v.slice(0, 77)}...`

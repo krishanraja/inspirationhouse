@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { loadConfig, DRIVE } from './config.ts'
 import { connect, readOnly, type Db } from './db.ts'
-import { writeEvidence, normalise, versionOf, type Evidence } from './evidence.ts'
+import { writeEvidence, normalise, versionOf, withdrawUncollected, type Evidence } from './evidence.ts'
 import { collectGitTaste, githubFetcher } from './collect/gitTaste.ts'
 import {
   collectIdeaTriage, collectVisibility, collectCreatorMoves, collectDriveArtifacts, collectFeedbackHistory,
@@ -68,8 +68,9 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   let seen = 0
   let written = 0
   for (const [name, fn] of groups) {
+    let rows: Evidence[]
     try {
-      const rows = await fn()
+      rows = await fn()
       const res = ctx.dry ? { seen: rows.length, written: await countNew(ctx.db, rows, ctx.ledger) } : await writeEvidence(ctx.db, rows, ctx.runId)
       ctx.counts[`seen_${name}`] = res.seen
       ctx.counts[`new_${name}`] = res.written
@@ -80,6 +81,21 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
     } catch (err) {
       ctx.problems.push(`collect ${name}: ${(err as Error).message.slice(0, 120)}`)
       log({ stage: 'collect', source: name, status: 'failed', error_class: (err as Error).name })
+      continue
+    }
+    // The page is read whole on every run, so an answer it no longer holds (Undo, or an edit) stops counting as his.
+    // Only after its rows were collected and written: a failed read withdraws nothing.
+    if (name === 'inspiration_page') {
+      try {
+        const w = await withdrawUncollected(ctx.db, 'inspiration_page', rows, !ctx.dry)
+        ctx.counts.evidence_withdrawn = w.withdrawn
+        ctx.counts.evidence_restored = w.restored
+        ctx.counts.claims_recounted = w.recounted
+        log({ stage: 'withdraw', source: name, evidence_withdrawn: w.withdrawn, evidence_restored: w.restored, claims: w.recounted, dry_run: ctx.dry })
+      } catch (err) {
+        ctx.problems.push(`withdraw ${name}: ${(err as Error).name}`)
+        log({ stage: 'withdraw', source: name, status: 'failed', error_class: (err as Error).name })
+      }
     }
   }
   ctx.counts.seen = seen
@@ -96,8 +112,16 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
     if (items) {
       ctx.counts.items_seen = items.seen
       ctx.counts.items_new = items.written
-      if (ctx.llm) {
-        const t = await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 60, !ctx.dry)
+      // A throw from tagging as a whole (the database, Drive) is recorded and the run still explains: his evidence
+      // is read either way. The class only: an error's message can quote a row.
+      const t = ctx.llm
+        ? await tagItems(ctx.db, ctx.google, ctx.llm, items.files, 60, !ctx.dry).catch(err => {
+          ctx.problems.push(`tagging stopped: ${(err as Error).name}`)
+          log({ stage: 'tag', status: 'failed', error_class: (err as Error).name })
+          return null
+        })
+        : null
+      if (t) {
         ctx.counts.items_tagged = t.tagged
         ctx.counts.items_watched = t.watched
         ctx.counts.items_heard = t.heard
@@ -152,7 +176,8 @@ async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ 
   if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
   if (!cfg.HARNESS_SYNC_TOKEN) { ctx.problems.push('harness: HARNESS_SYNC_TOKEN not configured'); return finish(ctx, 0) }
   const r = await syncHarness(ctx.db, githubApi(cfg.HARNESS_REPO, cfg.HARNESS_SYNC_TOKEN), !ctx.dry)
-  Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, ...(r.pull ? { pull: r.pull } : {}) })
+  Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, files_written: r.written,
+    ...(r.pull ? { pull: r.pull } : {}), ...(r.declined ? { declined_pull: r.declined } : {}) })
   return finish(ctx, 1)
 }
 
@@ -204,7 +229,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
