@@ -5,7 +5,7 @@ import type { Db } from './db.ts'
 export type RunStatus = 'ok' | 'skipped' | 'failed'
 
 export interface RunRecord {
-  job: 'taste_daily' | 'taste_weekly'
+  job: 'taste_daily' | 'taste_weekly' | 'taste_harness'
   trigger: 'cron' | 'manual'
   status: RunStatus
   reason: string | null

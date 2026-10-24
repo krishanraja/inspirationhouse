@@ -16,6 +16,7 @@ import { explainPending } from './explain/whys.ts'
 import { distil } from './distil/claims.ts'
 import { propose, syncDecisions } from './publish/propose.ts'
 import { score } from './score/scoreboard.ts'
+import { githubApi, syncHarness } from './publish/harness.ts'
 import { recordRun, judgeRun, type RunStatus } from './runs.ts'
 import { log } from './log.ts'
 
@@ -133,6 +134,15 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   return finish(ctx, 1)
 }
 
+// Propose the approved form rules to the ai-harness voice and design skills, by pull request.
+async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
+  if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
+  if (!cfg.HARNESS_SYNC_TOKEN) { ctx.problems.push('harness: HARNESS_SYNC_TOKEN not configured'); return finish(ctx, 0) }
+  const r = await syncHarness(ctx.db, githubApi(cfg.HARNESS_REPO, cfg.HARNESS_SYNC_TOKEN), !ctx.dry)
+  Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, ...(r.pull ? { pull: r.pull } : {}) })
+  return finish(ctx, 1)
+}
+
 function finish(ctx: Ctx, input: number): { status: RunStatus; reason: string | null } {
   if (ctx.problems.length) return { status: 'failed', reason: ctx.problems.join('; ').slice(0, 600) }
   if (input === 0) return { status: 'skipped', reason: 'no input' }
@@ -146,8 +156,8 @@ async function main(): Promise<void> {
   // A dry run that costs nothing: collect and count, but call no model.
   const noModel = args.includes('--no-model')
   const trigger = args.includes('--cron') ? 'cron' : 'manual'
-  if (job !== 'daily' && job !== 'weekly') {
-    console.error('usage: engine daily|weekly [--dry-run] [--no-model] [--cron] [--preview]')
+  if (job !== 'daily' && job !== 'weekly' && job !== 'harness') {
+    console.error('usage: engine daily|weekly|harness [--dry-run] [--no-model] [--cron] [--preview]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -164,21 +174,24 @@ async function main(): Promise<void> {
   if (!ctx.ledger && !dry) ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration')
 
   // A scheduled run without its credentials is a broken run, not a quiet one.
-  if (googleConfigured(cfg)) ctx.google = await connectGoogle(cfg)
-  else if (!dry) ctx.problems.push('Google service account not configured: Drive and Inspiration cards skipped')
-  if (cfg.ANTHROPIC_API_KEY && !noModel) ctx.llm = anthropicLlm(cfg)
-  else if (!dry) ctx.problems.push(noModel ? 'run with --no-model: tagging and explaining skipped' : 'ANTHROPIC_API_KEY not configured: tagging and explaining skipped')
+  // The harness job reads the database and GitHub only: no Google, no model.
+  if (job !== 'harness') {
+    if (googleConfigured(cfg)) ctx.google = await connectGoogle(cfg)
+    else if (!dry) ctx.problems.push('Google service account not configured: Drive and Inspiration cards skipped')
+    if (cfg.ANTHROPIC_API_KEY && !noModel) ctx.llm = anthropicLlm(cfg)
+    else if (!dry) ctx.problems.push(noModel ? 'run with --no-model: tagging and explaining skipped' : 'ANTHROPIC_API_KEY not configured: tagging and explaining skipped')
+  }
 
   let outcome: { status: RunStatus; reason: string | null }
   try {
-    outcome = job === 'daily' ? await daily(ctx, cfg) : await weekly(ctx, started)
+    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : await harness(ctx, cfg)
   } catch (err) {
     outcome = { status: 'failed', reason: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 600) }
   }
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|explain|distil|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|items|tagging|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
