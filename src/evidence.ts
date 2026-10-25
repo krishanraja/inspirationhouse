@@ -138,6 +138,19 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
 export interface WithdrawResult { withdrawn: number; restored: number; recounted: number }
 
 /**
+ * The sources read whole on every run, so a row missing from a run is gone: his Inspiration answers, and the
+ * Instagram feed's posts and themes (the workbook is read whole; a re-uploaded workbook gives every post a new
+ * version, since its file id is in the meta, and the old versions must stop standing beside the new). A null scope is
+ * the whole source; a list is the source_ref prefixes this collector writes within a shared source.
+ */
+export const WITHDRAW_SCOPE = {
+  inspiration_page: null,
+  drive_cold: ['instagram:', 'instagram-theme:'],
+} as const satisfies Record<string, readonly string[] | null>
+export type WithdrawSource = keyof typeof WITHDRAW_SCOPE
+const inScope = (ref: string, prefixes: readonly string[] | null) => !prefixes || prefixes.some(p => ref.startsWith(p))
+
+/**
  * An answer he took back, or replaced, stops counting as his support. After a source is collected, every standing row
  * of it whose version was not collected this run is withdrawn (a reopened card, or an answer with a newer version), and
  * a withdrawn row whose version was collected again stands again (an answer he gave back as it was). Then every claim
@@ -146,32 +159,40 @@ export interface WithdrawResult { withdrawn: number; restored: number; recounted
  * next one. Only for a source that is read whole on every run: a row missing from one run is gone, never just unread.
  * A dry run counts and writes nothing.
  */
-export async function withdrawUncollected(db: Db, source: 'inspiration_page', rows: Evidence[], write: boolean): Promise<WithdrawResult> {
-  const keep = JSON.stringify(rows.map(normalise).filter(e => e.source === source).map(e => ({ r: e.sourceRef, v: versionOf(e) })))
+export async function withdrawUncollected(db: Db, source: WithdrawSource, rows: Evidence[], write: boolean): Promise<WithdrawResult> {
+  const prefixes = WITHDRAW_SCOPE[source]
+  const keep = JSON.stringify(rows.map(normalise).filter(e => e.source === source && inScope(e.sourceRef, prefixes))
+    .map(e => ({ r: e.sourceRef, v: versionOf(e) })))
   const kept = `exists (select 1 from jsonb_to_recordset($2::jsonb) as k(r text, v text) where k.r = e.source_ref and k.v = e.source_version)`
-  const citing = `(evidence_ids || counterexample_ids) && array(select id from public.taste_evidence where source = $1)`
+  // A source shared by several collectors (drive_cold holds Drive files and the feed's posts) is withdrawn only within
+  // the refs this collector writes, so a feed read never withdraws a Drive file's row.
+  const scoped = prefixes ? ` and e.source_ref like any($3::text[])` : ''
+  const likes = prefixes ? [prefixes.map(p => `${p}%`)] : []
+  const citing = prefixes
+    ? `(evidence_ids || counterexample_ids) && array(select id from public.taste_evidence where source = $1 and source_ref like any($2::text[]))`
+    : `(evidence_ids || counterexample_ids) && array(select id from public.taste_evidence where source = $1)`
   if (!write) {
     const [res] = await db.query<{ withdrawn: number; restored: number; recounted: number }>(
       `select count(*) filter (where e.withdrawn_at is null and not ${kept})::int as withdrawn,
               count(*) filter (where e.withdrawn_at is not null and ${kept})::int as restored,
-              (select count(*)::int from public.taste_claims where ${citing}) as recounted
-       from public.taste_evidence e where e.source = $1`,
-      [source, keep],
+              (select count(*)::int from public.taste_claims where ${prefixes ? citing.replace('$2', '$3') : citing}) as recounted
+       from public.taste_evidence e where e.source = $1${scoped}`,
+      [source, keep, ...likes],
     )
     return { withdrawn: Number(res?.withdrawn ?? 0), restored: Number(res?.restored ?? 0), recounted: Number(res?.recounted ?? 0) }
   }
   const gone = await db.query<{ id: string }>(
     `update public.taste_evidence e set withdrawn_at = now()
-     where e.source = $1 and e.withdrawn_at is null and not ${kept}
+     where e.source = $1 and e.withdrawn_at is null and not ${kept}${scoped}
      returning e.id::text`,
-    [source, keep],
+    [source, keep, ...likes],
     { write: true },
   )
   const back = await db.query<{ id: string }>(
     `update public.taste_evidence e set withdrawn_at = null
-     where e.source = $1 and e.withdrawn_at is not null and ${kept}
+     where e.source = $1 and e.withdrawn_at is not null and ${kept}${scoped}
      returning e.id::text`,
-    [source, keep],
+    [source, keep, ...likes],
     { write: true },
   )
   const [res] = await db.query<{ n: number }>(
@@ -180,7 +201,7 @@ export async function withdrawUncollected(db: Db, source: 'inspiration_page', ro
        where ${citing}
        returning 1)
      select count(*)::int as n from c`,
-    [source],
+    [source, ...likes],
     { write: true },
   )
   return { withdrawn: gone.length, restored: back.length, recounted: Number(res?.n ?? 0) }
