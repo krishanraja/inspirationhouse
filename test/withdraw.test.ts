@@ -90,3 +90,38 @@ describe('versionOf', () => {
     expect(versionOf(other({ kind: 'video' }))).not.toBe(versionOf(other({})))
   })
 })
+
+describe('withdrawUncollected on the Instagram feed', () => {
+  // Synthetic posts only.
+  const post = (id: string, file: string): Evidence => ({
+    source: 'drive_cold', sourceRef: `instagram:${id}`, occurredAt: '2026-10-24T10:00:00Z', attribution: 'observation',
+    polarity: 'neutral', lane: 'strategy', layer: null, title: `post ${id}`, excerpt: 'an invented summary',
+    meta: { kind: 'instagram_post', file },
+  })
+
+  it('withdraws only within the feed\'s own refs, never a Drive file\'s row in the same source', async () => {
+    const { db, calls } = fakeDb({ gone: ['old-1'] })
+    const rows = [post('p1', 'new-file'), post('p2', 'new-file')]
+    await withdrawUncollected(db, 'drive_cold', rows, true)
+    const gone = calls.find(c => /set withdrawn_at = now\(\)/.test(c.sql))!
+    expect(gone.sql).toMatch(/e\.source_ref like any\(\$3::text\[\]\)/)
+    expect(gone.params).toEqual(['drive_cold', JSON.stringify(rows.map(normalise).map(e => ({ r: e.sourceRef, v: versionOf(e) }))), ['instagram:%', 'instagram-theme:%']])
+    const claims = calls.find(c => /update public\.taste_claims/.test(c.sql))!
+    expect(claims.sql).toMatch(/source = \$1 and source_ref like any\(\$2::text\[\]\)/)
+    expect(claims.params).toEqual(['drive_cold', ['instagram:%', 'instagram-theme:%']])
+  })
+
+  it('keeps out of the kept set any drive_cold row that is not the feed\'s', async () => {
+    const { db, calls } = fakeDb()
+    const driveFile: Evidence = { ...post('x', 'f'), sourceRef: '1someDriveFileId' }
+    await withdrawUncollected(db, 'drive_cold', [post('p1', 'f'), driveFile], true)
+    expect(JSON.parse(calls[0]!.params[1] as string).map((k: { r: string }) => k.r)).toEqual(['instagram:p1'])
+  })
+
+  it('leaves the page path exactly as it was: the whole source, no ref filter', async () => {
+    const { db, calls } = fakeDb()
+    await withdrawUncollected(db, 'inspiration_page', [], true)
+    expect(calls.every(c => !/like any/.test(c.sql))).toBe(true)
+    expect(calls.find(c => /update public\.taste_claims/.test(c.sql))!.params).toEqual(['inspiration_page'])
+  })
+})

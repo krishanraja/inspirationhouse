@@ -535,3 +535,45 @@ run('the review of the link box, on a real database', () => {
     expect(row).toEqual({ heard: null, transcript: null })
   })
 })
+
+run('the Instagram feed after its workbook is re-uploaded', () => {
+  let client: pg.Client
+  let db: Db
+  const runId = '33333333-3333-3333-3333-333333333333'
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  // Synthetic posts only: the same two posts, read from the old workbook and then from its re-upload.
+  const post = (id: string, file: string): Evidence => ({
+    source: 'drive_cold', sourceRef: `instagram:${id}`, occurredAt: '2026-10-24T10:00:00.000Z', attribution: 'observation',
+    polarity: 'neutral', lane: 'strategy', layer: null, title: `post ${id}`, excerpt: 'an invented summary',
+    meta: { kind: 'instagram_post', file },
+  })
+  const driveFile: Evidence = {
+    source: 'drive_cold', sourceRef: '1anInventedDriveFileId', occurredAt: '2026-10-20T10:00:00.000Z', attribution: 'krish_action',
+    polarity: 'likes', lane: 'strategy', layer: null, title: 'a dropped file', excerpt: null, meta: { kind: 'drive_file' },
+  }
+  const standing = async () => (await db.query<{ ref: string; file: string | null }>(
+    `select source_ref as ref, meta->>'file' as file from public.taste_evidence where withdrawn_at is null order by 1, 2`))
+
+  it('keeps one standing version of each post, the latest workbook\'s, and never touches a Drive file\'s row', async () => {
+    await writeEvidence(db, [driveFile, post('p1', 'old-workbook'), post('p2', 'old-workbook')], runId)
+    await writeEvidence(db, [post('p1', 'new-workbook'), post('p2', 'new-workbook')], runId)
+    expect((await standing()).filter(r => r.ref.startsWith('instagram:'))).toHaveLength(4)
+    const [before] = await db.query<{ posts: number }>(`select posts::int from public.inspiration_feed_stats`)
+
+    const w = await withdrawUncollected(db, 'drive_cold', [post('p1', 'new-workbook'), post('p2', 'new-workbook')], true)
+    expect(w.withdrawn).toBe(2)
+    expect(await standing()).toEqual([
+      { ref: '1anInventedDriveFileId', file: null },
+      { ref: 'instagram:p1', file: 'new-workbook' },
+      { ref: 'instagram:p2', file: 'new-workbook' },
+    ])
+    const [after] = await db.query<{ posts: number }>(`select posts::int from public.inspiration_feed_stats`)
+    expect(after?.posts).toBe(before?.posts)
+
+    // A second run with the same workbook changes nothing.
+    const again = await withdrawUncollected(db, 'drive_cold', [post('p1', 'new-workbook'), post('p2', 'new-workbook')], true)
+    expect([again.withdrawn, again.restored]).toEqual([0, 0])
+  })
+})

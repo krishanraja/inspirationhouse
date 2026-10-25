@@ -99,6 +99,20 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
         log({ stage: 'withdraw', source: name, status: 'failed', error_class: (err as Error).name })
       }
     }
+    // The Instagram workbook is read whole too. A re-uploaded workbook (a new file id in every post's meta) gives each
+    // post a new version, and the old one must stop standing beside it, or the feed's posts are read twice. A read
+    // that found no rows withdraws nothing: an empty workbook is a broken read, never "every post is gone".
+    if (name === 'instagram' && rows.length) {
+      try {
+        const w = await withdrawUncollected(ctx.db, 'drive_cold', rows, !ctx.dry)
+        ctx.counts.feed_withdrawn = w.withdrawn
+        ctx.counts.feed_restored = w.restored
+        log({ stage: 'withdraw', source: name, feed_withdrawn: w.withdrawn, feed_restored: w.restored, dry_run: ctx.dry })
+      } catch (err) {
+        ctx.problems.push(`withdraw ${name}: ${(err as Error).name}`)
+        log({ stage: 'withdraw', source: name, status: 'failed', error_class: (err as Error).name })
+      }
+    }
   }
   ctx.counts.seen = seen
   ctx.counts.written = written
