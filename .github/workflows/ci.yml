@@ -9,8 +9,32 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      # A throwaway database for test/pipeline.int.test.ts, which drops and recreates schema public. The same major
+      # and encoding as the live project (17, UTF8): under SQL_ASCII char_length counts bytes and the emoji test fails.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: --encoding=UTF8
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      # The taste tables' DDL has one home, krishanraja/content-engine (public): read at main, never copied here.
+      - uses: actions/checkout@v4
+        with:
+          repository: krishanraja/content-engine
+          ref: main
+          path: .content-engine
+          sparse-checkout: supabase/migrations/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -18,4 +42,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - name: Hand the database tests their database and migrations
+        shell: bash
+        run: |
+          test "$(docker exec ${{ job.services.postgres.id }} psql -U postgres -Atc 'show server_encoding')" = UTF8
+          M=.content-engine/supabase/migrations
+          files=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261112090000_*.sql | paste -sd, -)
+          test -n "$files"
+          echo "TASTE_MIGRATION=$files" >> "$GITHUB_ENV"
       - run: pnpm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          REQUIRE_DB_TESTS: '1'

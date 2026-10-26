@@ -59,12 +59,12 @@ export function isoOr(value: unknown, fallback: string): string {
 }
 
 /**
- * Parts of an Inspiration page answer's meta that are not his answer: the card's kind (a reading of the file) and how he
- * said to read it (read_as, note_for_claude), which are instructions to the tagger. They stay in meta for the readers,
- * but out of the version, so only a change to his answer makes a new version. A new version withdraws the old one, and
- * a kind settled again or a note added later is no reason to.
+ * Parts of an Inspiration page answer's meta that are not his answer: the card's kind (a reading of the file) and who
+ * settled it (kind_source), and how he said to read it (read_as, note_for_claude), which are instructions to the
+ * tagger. They stay in meta for the readers, but out of the version, so only a change to his answer makes a new
+ * version. A new version withdraws the old one, and a kind settled again or a note added later is no reason to.
  */
-export const PAGE_META_UNVERSIONED: readonly string[] = ['kind', 'read_as', 'note_for_claude']
+export const PAGE_META_UNVERSIONED: readonly string[] = ['kind', 'kind_source', 'read_as', 'note_for_claude']
 
 // The version is a hash of the entry's own content: an edited entry is a new
 // row, an unchanged one is never inserted twice.

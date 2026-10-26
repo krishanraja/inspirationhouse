@@ -76,6 +76,8 @@ describe('versionOf', () => {
     const base = versionOf(page({ why_here: 'for the opener', picked_likes: [] }))
     expect(versionOf(page({ why_here: 'for the opener', picked_likes: [], kind: 'video' }))).toBe(base)
     expect(versionOf(page({ why_here: 'for the opener', picked_likes: [], kind: 'image', read_as: 'watch', note_for_claude: 'the end matters' }))).toBe(base)
+    // Who settled the kind rides beside it, out of the version too: adding it re-versions no row he has answered.
+    expect(versionOf(page({ why_here: 'for the opener', picked_likes: [], kind: 'corpus', kind_source: 'model' }))).toBe(base)
   })
 
   it('makes a new version when his answer changes', () => {
