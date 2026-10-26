@@ -36,7 +36,7 @@ if (process.env.REQUIRE_DB_TESTS && !(url && migrations.length)) {
   throw new Error('REQUIRE_DB_TESTS is set but TEST_DATABASE_URL or TASTE_MIGRATION is missing')
 }
 // freshSchema drops schema public, so only ever a local throwaway database.
-if (url && !/@(localhost|127\.0\.0\.1)(:\d+)?\//.test(url)) {
+if (url && !/^postgres(ql)?:\/\/([^@/]*@)?(localhost|127\.0\.0\.1)(:\d+)?\//.test(url)) {
   throw new Error('TEST_DATABASE_URL must point at a local throwaway database')
 }
 const run = url && migrations.length ? describe : describe.skip
@@ -703,6 +703,8 @@ run('a claim he has been shown', () => {
     // The database refuses it too, from any writer, and still lets a recount and a status change through.
     await expect(client.query(`update taste_claims set krish = null, krish_source_id = null`)).rejects.toThrow(/never rewritten/)
     await expect(client.query(`update taste_claims set evidence_ids = evidence_ids[1:2]`)).rejects.toThrow(/never rewritten/)
+    // Nor taken off its proposal first, which would let a later write past the check.
+    await expect(client.query(`update taste_claims set proposal_id = null, status = 'candidate'`)).rejects.toThrow(/never rewritten/)
     await client.query(`update taste_claims set updated_at = now()`)
     expect(await held()).toEqual(shown)
   })

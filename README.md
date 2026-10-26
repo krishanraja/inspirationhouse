@@ -43,7 +43,8 @@ It also reads what **content-watcher** leaves behind. When Krish pastes a link i
 pnpm install
 pnpm test && pnpm typecheck
 # The database tests (test/pipeline.int.test.ts) need a local UTF8 Postgres and content-engine's migrations; CI
-# (.github/workflows/ci.yml) runs them on every push, and the test file's header says how to run them by hand.
+# (.github/workflows/ci.yml) runs them on every pull request and every push to main or a claude/ branch, and the test
+# file's header says how to run them by hand.
 pnpm engine daily --dry-run --preview    # read-only; a readable preview goes to preview/, which is gitignored
 pnpm engine weekly --dry-run --preview
 ```
