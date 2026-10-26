@@ -609,7 +609,8 @@ export interface AnsweredRow {
   id: string; lane: 'strategy' | 'production'; name: string; why_here: string | null; why_like: string | null
   why_like_source: 'typed' | 'picked' | null; would_do: string | null; route: string | null
   confirmed_tags: unknown[] | null; answered_at: string; read_as: string | null; note_for_claude: string | null
-  picked_likes: string[] | null; routes: string[] | null; kind: Kind | null; piece_id: string | null
+  picked_likes: string[] | null; routes: string[] | null; kind: Kind | null
+  kind_source: 'rule' | 'model' | 'krish' | null; piece_id: string | null
 }
 
 const filled = (v: string | null | undefined): string | null => (typeof v === 'string' && v.trim() ? v : null)
@@ -640,7 +641,8 @@ export function answerEvidence(r: AnsweredRow): Evidence {
       why_here: r.why_here, would_do: r.would_do, why_like_source: r.why_like_source,
       picked_likes: picks, route: r.route, routes: r.routes ?? [], confirmed_tags: r.confirmed_tags ?? [],
       read_as: r.read_as, note_for_claude: r.note_for_claude,
-      ...(r.kind ? { kind: r.kind } : {}), ...(r.piece_id ? { piece_id: r.piece_id } : {}),
+      // Who settled the kind rides with it, so the explainer states only a kind the file proves or he set as fact.
+      ...(r.kind ? { kind: r.kind, kind_source: r.kind_source } : {}), ...(r.piece_id ? { piece_id: r.piece_id } : {}),
     },
   }
 }
@@ -656,7 +658,7 @@ export async function answeredItemEvidence(db: Db): Promise<Evidence[]> {
     `select id::text, lane, name, why_here, why_like, why_like_source, would_do, route, confirmed_tags,
             case when answered_at is not null then answered_at::text
                  else coalesce(facets->'link'->>'requested_at', updated_at::text) end as answered_at,
-            read_as, note_for_claude, picked_likes, routes, kind, piece_id::text
+            read_as, note_for_claude, picked_likes, routes, kind, kind_source, piece_id::text
      from public.inspiration_items
      where (answered_at is not null
             or (why_here is not null and facets ? 'link' and not facets ? 'part_of'))

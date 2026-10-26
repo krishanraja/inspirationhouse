@@ -23,12 +23,22 @@ import type { DriveFile, Google } from '../src/google.ts'
 //   20261108090000_inspiration_answers_hold.sql
 //   20261109090000_content_watch.sql          (the link queue and content_reads)
 //   20261110090000_taste_support_by_card.sql
-// For example, from a content-engine checkout:
+//   20261111090000_taste_quote_holds.sql
+// For example, from a content-engine checkout (CI runs the same, .github/workflows/ci.yml):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261111090000_*.sql | paste -sd, -)
+// The database must be UTF8 (under SQL_ASCII char_length counts bytes, and the emoji excerpt test fails).
 const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
+// CI sets REQUIRE_DB_TESTS: a missing database or migration list there is a fault, never a quiet skip.
+if (process.env.REQUIRE_DB_TESTS && !(url && migrations.length)) {
+  throw new Error('REQUIRE_DB_TESTS is set but TEST_DATABASE_URL or TASTE_MIGRATION is missing')
+}
+// freshSchema drops schema public, so only ever a local throwaway database.
+if (url && !/@(localhost|127\.0\.0\.1)(:\d+)?\//.test(url)) {
+  throw new Error('TEST_DATABASE_URL must point at a local throwaway database')
+}
 const run = url && migrations.length ? describe : describe.skip
 
 // A fresh public schema with the real migrations, and a Db on it. Every suite here starts from one.
@@ -165,21 +175,16 @@ run('the whole loop, on a real database', () => {
       [fingerprint, krish, krishSource, ids],
     )).rows[0].id as string
 
-  it('updates a claim re-cited without its quote\'s row, and drops the quote rather than failing', async () => {
-    const llm: Llm = {
-      model: 'stub',
-      structured: async () => ({
-        failure: null, model: 'stub',
-        data: { claims: [
-          { statement: 'Titles say what happens, in plain words.', lane: 'voice', layer: 'packaging', kind: 'form',
-            why: 'He picks titles that name the event.', means: 'Write the event, not the theme.',
-            support: [2, 4, 6], counter: [], krish_quote_ref: null, krish_quote: null, flip_rule: 'He picks two abstract titles in a month.' },
-        ] } as never,
-      }),
-    }
-    expect((await distil(db, llm, runId)).written).toBe(1)
-    const [c] = (await client.query(`select krish, krish_source_id, support_n from taste_claims where kind = 'form' and statement like 'Titles%'`)).rows
-    expect(c).toEqual({ krish: null, krish_source_id: null, support_n: 3 })
+  it('updates a candidate claim re-cited without its quote\'s row, and drops the quote rather than failing', async () => {
+    const thumbs = (support: number[], ref: number | null, quote: string | null) => ({
+      statement: 'Thumbnails name the event, in plain words.', lane: 'voice', layer: 'packaging', kind: 'form',
+      why: 'He picks thumbnails that name the event.', means: 'Put the event on the thumbnail.',
+      support, counter: [], krish_quote_ref: ref, krish_quote: quote, flip_rule: 'He picks two abstract thumbnails in a month.' })
+    const llm = (c: unknown): Llm => ({ model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { claims: [c] } as never }) })
+    expect((await distil(db, llm(thumbs([0, 2, 4], 0, 'say what happens')), runId)).written).toBe(1)
+    expect((await distil(db, llm(thumbs([2, 4, 6], null, null)), runId)).written).toBe(1)
+    const [c] = (await client.query(`select krish, krish_source_id, support_n, status from taste_claims where statement like 'Thumbnails%'`)).rows
+    expect(c).toEqual({ krish: null, krish_source_id: null, support_n: 3, status: 'candidate' })
   })
 
   it('counts no day from withdrawn evidence and carries no quote whose row was withdrawn', async () => {
@@ -312,6 +317,38 @@ run('the review of the link box, on a real database', () => {
     // His Undo withdraws every version of a card: then its day goes with its support.
     await withdrawUncollected(db, 'inspiration_page', v2.slice(0, 3), true)
     expect((await db.query<Eligible>(ELIGIBLE_SQL)).find(e => e.id === id)).toMatchObject({ support_n: 3, days: 3 })
+  })
+
+  it('gives a claim his quote back when the answer it quotes stands again, and shows it to no reader in between', async () => {
+    const v1 = ['p', 'q', 'r'].map((x, i) => answer(`card-${x}`, `2026-10-0${i + 1}T12:00:00Z`, []))
+    await writeEvidence(db, v1, runId)
+    await withdrawUncollected(db, 'inspiration_page', v1, true)
+    const rows = (await client.query(`select id::text, source_ref from taste_evidence where source = 'inspiration_page' order by source_ref`)).rows
+    const quoted = rows.find(r => r.source_ref === 'card-p')!.id as string
+    const [{ id: proposal }] = (await client.query(
+      `insert into mindmake_studio_learning_proposals (weekly_batch_id, proposal_class, assertion, scope, evidence_event_ids,
+         independent_session_count, independent_job_count, regression_cases, proposed_change, status, decided_at, decided_by)
+       values ('taste-2026-10-05', 'taste', 'A synthetic claim.', '{}', '{}', 1, 0, '[]', '{}', 'approved', now(), 'Krish')
+       returning id::text`)).rows
+    const [{ id }] = (await client.query(
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, krish, krish_source_id, why, means, evidence_ids, flip_rule,
+         status, proposal_id)
+       values ('b2b2b2b2b2b2b2b2', 'production', 'editing', 'form', 'A synthetic claim.', 'the cut on the beat', $2::uuid,
+               'A synthetic why.', 'Do the synthetic thing.', $1::uuid[], 'If the test says otherwise.', 'proposed', $3::uuid)
+       returning id::text`,
+      [rows.map(r => r.id), quoted, proposal])).rows
+    const quote = async () => ({
+      claim: (await client.query(`select krish, krish_source_id::text as source, support_n from taste_claims where id = $1`, [id])).rows[0],
+      shown: (await client.query(`select krish from taste_profile_form where id = $1`, [id])).rows[0]?.krish ?? null,
+    })
+    // He adds a pick to card-p: the version the claim quotes is withdrawn, so no reader may show those words.
+    const v2 = [answer('card-p', v1[0]!.occurredAt, ['tight pacing']), v1[1]!, v1[2]!]
+    await writeEvidence(db, v2, runId)
+    await withdrawUncollected(db, 'inspiration_page', v2, true)
+    expect((await quote()).shown).toBeNull()
+    // He takes the pick off again: the version it quotes stands again, and his quote is back where it was.
+    await withdrawUncollected(db, 'inspiration_page', v1, true)
+    expect(await quote()).toEqual({ claim: { krish: 'the cut on the beat', source: quoted, support_n: 3 }, shown: 'the cut on the beat' })
   })
 
   // A stand-in for the model: it answers, or throws the status it is given, and keeps every prompt it was sent.
@@ -621,5 +658,52 @@ run('his answers on corpus cards', () => {
     expect(byTitle.get('a-model-corpus-pick.txt')!.attribution).toBe('krish_action')
     expect(byTitle.get('a-model-corpus-why-here.txt')!.attribution).toBe('krish_words')
     expect(byTitle.get('a-model-corpus-room.txt')!.lane).toBe('visibility')
+  })
+})
+
+
+run('a claim he has been shown', () => {
+  let client: pg.Client
+  let db: Db
+  const runId = '22222222-2222-2222-2222-222222222222'
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  const stub = (claims: unknown[]): Llm => ({ model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { claims } as never }) })
+  const titles = (support: number[], counter: number[], quoteRef: number | null, quote: string | null) => ({
+    statement: 'Titles say what happens, in plain words.', lane: 'voice', layer: 'packaging', kind: 'form',
+    why: 'He picks titles that name the event.', means: 'Write the event, not the theme.',
+    support, counter, krish_quote_ref: quoteRef, krish_quote: quote, flip_rule: 'He picks two abstract titles in a month.' })
+
+  it('is never rewritten by a later distil, while he decides or after he approves', async () => {
+    const rows: Evidence[] = [1, 2, 3, 4, 5, 6].map(n => ({
+      source: 'title_verdicts', sourceRef: `d${n}`, occurredAt: `2026-10-0${n}T12:00:00.000Z`,
+      attribution: n <= 4 ? 'krish_words' : 'observation', polarity: 'likes', lane: 'voice', layer: 'packaging',
+      title: null, excerpt: `synthetic: words ${n} here`, meta: {},
+    }))
+    await writeEvidence(db, rows, runId)
+    await client.query(`insert into taste_whys (evidence_id, statement, lane, layer, kind, origin, model, prompt_rev, fingerprint)
+      select id, 'A synthetic why for ' || source_ref || '.', 'voice', 'packaging', 'form', 'krish', 'stub', 'r1', substr(md5(source_ref), 1, 16)
+      from taste_evidence`)
+    // Refs follow occurred_at, newest first: ref 0 is d6 and ref 5 is d1.
+    await distil(db, stub([titles([5, 4, 3], [], 5, 'words 1')]), runId)
+    expect((await propose(db, new Date('2026-10-24T12:00:00Z'))).proposed).toBe(1)
+    const held = async () => (await client.query(`select krish, krish_source_id::text, support_n, counter_n, evidence_ids::text[] as ev, counterexample_ids::text[] as counter from taste_claims`)).rows[0]
+    const shown = await held()
+    // A later week drafts the same statement on other rows (one of his, two observations), against two of his, quoting another line.
+    const redraft = stub([titles([2, 1, 0], [5, 4], 2, 'words 4')])
+    expect((await distil(db, redraft, runId)).written).toBe(0)
+    expect(await held()).toEqual(shown)
+    await client.query(`update mindmake_studio_learning_proposals set status = 'approved', decided_at = now(), decided_by = 'Krish' where status = 'proposed'`)
+    expect((await distil(db, redraft, runId)).written).toBe(0)
+    expect(await held()).toEqual(shown)
+    const [v] = (await client.query(`select v.krish, v.support_n, v.counter_n, position(v.krish in p.assertion) > 0 as quote_he_approved
+      from taste_profile_current v join taste_claims c on c.id = v.id join mindmake_studio_learning_proposals p on p.id = c.proposal_id`)).rows
+    expect(v).toEqual({ krish: 'words 1', support_n: 3, counter_n: 0, quote_he_approved: true })
+    // The database refuses it too, from any writer, and still lets a recount and a status change through.
+    await expect(client.query(`update taste_claims set krish = null, krish_source_id = null`)).rejects.toThrow(/never rewritten/)
+    await expect(client.query(`update taste_claims set evidence_ids = evidence_ids[1:2]`)).rejects.toThrow(/never rewritten/)
+    await client.query(`update taste_claims set updated_at = now()`)
+    expect(await held()).toEqual(shown)
   })
 })

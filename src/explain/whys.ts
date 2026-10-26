@@ -23,7 +23,8 @@ export const WhySchema = z.object({
 })
 
 // explain-v2 (2026-10-24): an Inspiration answer shows every part of it, each labelled (pageLines).
-export const EXPLAIN_PROMPT_REV = 'explain-v2'
+// explain-v3 (2026-10-26): a kind the tagger guessed is shown as its guess, never as fact (kindLine).
+export const EXPLAIN_PROMPT_REV = 'explain-v3'
 
 export const EXPLAIN_SYSTEM = [
   'You are building a record of why Krish Raja likes or rejects things, so the systems that write and produce for him get closer to his taste.',
@@ -50,9 +51,22 @@ const one = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? 
 const many = (v: unknown): string[] => (Array.isArray(v) ? v.map(one).filter((x): x is string => x !== null) : [])
 
 /**
+ * The card's kind, as fact only when the file proves it (rule) or Krish set it (krish). The tagger's reading (model),
+ * or a kind with no source (a row collected before the kind carried one), is a guess and says so.
+ */
+export function kindLine(m: Record<string, unknown>): string {
+  const kind = one(m.kind)
+  if (!kind) return ''
+  return m.kind_source === 'rule' || m.kind_source === 'krish'
+    ? `What kind of thing it is: ${kind}`
+    : `What kind of thing it is (the tagger's guess, he has not confirmed it): ${kind}`
+}
+
+/**
  * Every part of an Inspiration answer, each labelled, so the explainer reads all of it: what he typed as his words,
  * the guesses he tapped as reasons he agreed with (never his words), the tags he confirmed, where he sent it and what
- * kind of thing it is. `covered` gets each text shown, so the excerpt is not shown twice.
+ * kind of thing it is (a guessed kind labelled a guess, kindLine). `covered` gets each text shown, so the excerpt is
+ * not shown twice.
  */
 function pageLines(r: PendingRow, covered: Set<string>): string[] {
   const m = r.meta
@@ -69,7 +83,7 @@ function pageLines(r: PendingRow, covered: Set<string>): string[] {
     picks.length ? `Reasons he agreed with (guesses he tapped, not his words): ${picks.join('; ')}` : '',
     many(m.confirmed_tags).length ? `Tags he confirmed: ${many(m.confirmed_tags).join(', ')}` : '',
     routes.length ? `Where he sent it: ${routes.map(x => ROUTE_WORDS[x] ?? x).join('; ')}` : '',
-    one(m.kind) ? `What kind of thing it is: ${one(m.kind)}` : '',
+    kindLine(m),
   ]
 }
 

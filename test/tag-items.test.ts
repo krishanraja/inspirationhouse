@@ -279,7 +279,7 @@ describe('answerEvidence', () => {
   const row = (over: Partial<AnsweredRow>): AnsweredRow => ({
     id: 'card-1', lane: 'production', name: 'clip.mp4', why_here: null, why_like: null, why_like_source: null, would_do: null,
     route: null, confirmed_tags: [], answered_at: '2026-10-24T10:00:00Z', read_as: null, note_for_claude: null,
-    picked_likes: [], routes: [], kind: null, piece_id: null, ...over,
+    picked_likes: [], routes: [], kind: null, kind_source: null, piece_id: null, ...over,
   })
 
   it('quotes what he typed about what he likes, first', () => {
@@ -306,14 +306,15 @@ describe('answerEvidence', () => {
   })
 
   it('keeps the whole answer in meta, and the kind and piece only when set', () => {
-    const e = answerEvidence(row({ why_here: 'x', routes: ['make_piece', 'visibility'], route: 'make_piece', confirmed_tags: ['hook'], read_as: 'watch', note_for_claude: 'skip the intro', kind: 'video', piece_id: 'p-1' }))
+    const e = answerEvidence(row({ why_here: 'x', routes: ['make_piece', 'visibility'], route: 'make_piece', confirmed_tags: ['hook'], read_as: 'watch', note_for_claude: 'skip the intro', kind: 'video', kind_source: 'rule', piece_id: 'p-1' }))
     expect(e.lane).toBe('visibility')
     expect(e.meta).toEqual({
       why_here: 'x', would_do: null, why_like_source: null, picked_likes: [], route: 'make_piece', routes: ['make_piece', 'visibility'],
-      confirmed_tags: ['hook'], read_as: 'watch', note_for_claude: 'skip the intro', kind: 'video', piece_id: 'p-1',
+      confirmed_tags: ['hook'], read_as: 'watch', note_for_claude: 'skip the intro', kind: 'video', kind_source: 'rule', piece_id: 'p-1',
     })
     const bare = answerEvidence(row({ why_here: 'x' }))
     expect(bare.meta).not.toHaveProperty('kind')
+    expect(bare.meta).not.toHaveProperty('kind_source')
     expect(bare.meta).not.toHaveProperty('piece_id')
   })
 })
@@ -538,12 +539,14 @@ describe('answeredItemEvidence and a note he typed when he pasted a link', () =>
       sql = q
       return [{ id: 'card-1', lane: 'production', name: 'clip.mp4', why_here: 'the pacing in the first three seconds', why_like: null, why_like_source: null,
         would_do: null, route: null, confirmed_tags: [], answered_at: '2026-10-24T09:00:00+00:00', read_as: null, note_for_claude: null,
-        picked_likes: [], routes: [], kind: 'video', piece_id: null }]
+        picked_likes: [], routes: [], kind: 'video', kind_source: 'rule', piece_id: null }]
     }, close: async () => {} } as unknown as Db
     const [e] = await answeredItemEvidence(db)
     expect(e).toMatchObject({ source: 'inspiration_page', sourceRef: 'card-1', attribution: 'krish_words', excerpt: 'the pacing in the first three seconds', occurredAt: '2026-10-24T09:00:00+00:00' })
     const flat = sql.replace(/\s+/g, ' ')
     expect(flat).toContain(`where (answered_at is not null or (why_here is not null and facets ? 'link' and not facets ? 'part_of'))`)
+    expect(flat).toContain('picked_likes, routes, kind, kind_source, piece_id::text')
+    expect(e!.meta).toMatchObject({ kind: 'video', kind_source: 'rule' })
     expect(flat).toContain(`case when answered_at is not null then answered_at::text else coalesce(facets->'link'->>'requested_at', updated_at::text) end as answered_at`)
   })
 })

@@ -117,9 +117,11 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
   if (!write) return result
 
   for (const r of resolved) {
-    // A claim already decided against, or retired, is never put back. An update writes the quote this draft resolved
-    // (or none), never the one the claim held before: an old quote whose row this draft no longer cites would trip the
-    // database's check that a quote is a verbatim excerpt of a cited row of his words.
+    // Only a candidate is rewritten. A claim once proposed (while he decides, approved or reworded), rejected or
+    // retired is never rewritten or put back: what he was shown is what he decides, and an approved rule changes only
+    // with his word or his own Undo. An update writes the quote this draft resolved (or none), never the one the claim
+    // held before: an old quote whose row this draft no longer cites would trip the database's check that a quote is a
+    // verbatim excerpt of a cited row of his words.
     const rows = await db.query<{ n: number }>(
       `with prior as (
          select id, status from public.taste_claims where fingerprint = $1 order by version desc limit 1
@@ -128,7 +130,7 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
          set evidence_ids = array(select jsonb_array_elements_text($2::jsonb))::uuid[],
              counterexample_ids = array(select jsonb_array_elements_text($3::jsonb))::uuid[],
              krish = $8, krish_source_id = $9::uuid
-         from prior where c.id = prior.id and prior.status in ('candidate', 'proposed')
+         from prior where c.id = prior.id and prior.status = 'candidate'
          returning 1
        ), ins as (
          insert into public.taste_claims

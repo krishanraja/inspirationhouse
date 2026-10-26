@@ -9,7 +9,7 @@ import type { Llm } from '../src/llm.ts'
 const answered = (over: Partial<AnsweredRow>): AnsweredRow => ({
   id: 'card-1', lane: 'production', name: 'clip.mp4', why_here: null, why_like: null, why_like_source: null, would_do: null,
   route: null, confirmed_tags: [], answered_at: '2026-10-24T10:00:00Z', read_as: null, note_for_claude: null,
-  picked_likes: [], routes: [], kind: null, piece_id: null, ...over,
+  picked_likes: [], routes: [], kind: null, kind_source: null, piece_id: null, ...over,
 })
 const pendingOf = (row: AnsweredRow, id = 'e1') => {
   const e = normalise(answerEvidence(row))
@@ -20,7 +20,7 @@ describe('renderItem for an Inspiration answer', () => {
   it('shows every part of it, each labelled, his words as his and his taps as reasons he agreed with', () => {
     const text = renderItem(0, pendingOf(answered({
       why_like: 'the cut on the beat', why_like_source: 'typed', why_here: 'for my opener', would_do: 'try it Monday',
-      picked_likes: ['tight pacing', 'clean captions'], confirmed_tags: ['hook', 'jump cut'], routes: ['study_style', 'make_piece'], kind: 'video',
+      picked_likes: ['tight pacing', 'clean captions'], confirmed_tags: ['hook', 'jump cut'], routes: ['study_style', 'make_piece'], kind: 'video', kind_source: 'rule',
       note_for_claude: 'skip the intro',
     })))
     expect(text).toContain('Krish said what he likes about it: the cut on the beat')
@@ -33,6 +33,20 @@ describe('renderItem for an Inspiration answer', () => {
     // The excerpt is one of those parts, so it is not shown a second time; an instruction is never a why.
     expect(text.match(/the cut on the beat/g)).toHaveLength(1)
     expect(text).not.toContain('skip the intro')
+  })
+
+  it('labels a kind the tagger guessed as a guess, and keeps a kind the file proves or he set as fact', () => {
+    const guessed = renderItem(0, pendingOf(answered({ why_here: 'for the money piece', kind: 'corpus', kind_source: 'model' })))
+    expect(guessed).toContain("What kind of thing it is (the tagger's guess, he has not confirmed it): corpus")
+    expect(guessed).not.toContain('What kind of thing it is: corpus')
+    for (const source of ['rule', 'krish'] as const) {
+      const fact = renderItem(0, pendingOf(answered({ why_here: 'for my opener', kind: 'video', kind_source: source })))
+      expect(fact).toContain('What kind of thing it is: video')
+      expect(fact).not.toContain('guess')
+    }
+    // A row collected before its kind carried a source proves nothing either.
+    const unsourced = renderItem(0, { ...pendingOf(answered({ why_here: 'x' })), meta: { why_here: 'x', kind: 'idea' } })
+    expect(unsourced).toContain("What kind of thing it is (the tagger's guess, he has not confirmed it): idea")
   })
 
   it('shows taps alone as taps, never as his words', () => {
