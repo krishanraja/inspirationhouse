@@ -104,3 +104,5 @@ which piece a card became. Each proved by a test that fails without the change a
   `observation`; Control Center's `report_to_taste_engine` on the account connector (`api/harness/_taste-mcp.ts`).
   Proved by `test/pipeline.int.test.ts` ("what sessions in other repositories report"), which fails without the
   migration: an observation never changes a claim's support, and his words are kept only with where and when.
+  Known gap, left for a follow-up: a cue made from a report stays open when his later verdict on the same idea
+  contradicts it (the cues stage supersedes only within the queue and card threads it reads).

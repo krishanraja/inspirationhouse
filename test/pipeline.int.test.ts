@@ -768,6 +768,9 @@ run('what sessions in other repositories report', () => {
     // Filed once: a second run reads nothing, and a filed report is never edited.
     expect((await syncReports(db, runId, { write: true })).read).toBe(0)
     await expect(client.query(`update taste_reports set body = 'synthetic: changed'`)).rejects.toThrow(/kept as it was reported/)
+    await expect(client.query(`update taste_reports set collected_at = null`)).rejects.toThrow(/stays filed/)
+    // Nothing he typed predates the engine.
+    await expect(insert(report({ kind: 'krish_words', said_where: 'a synthetic chat', said_at: '1999-12-31T00:00:00Z' }))).rejects.toThrow(/said_since_2020/)
   })
 
   it('never lets an observation change a claim\'s support, and never explains it', async () => {

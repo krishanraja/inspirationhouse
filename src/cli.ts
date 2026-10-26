@@ -214,7 +214,8 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
   // The page's own answers live in a ledger table too.
   if (!ctx.ledger) ctx.counts.ledger_missing = true
   await collect(ctx, cfg)
-  // Before the cues stage, which reads the cues table: a report's cue is in place for the same run's counts.
+  // After collect, before cues: a report's evidence and cue are written in the same run. The cues stage never reads
+  // or retires a session_report cue (it reads only its own sources).
   await reports(ctx)
   await cues(ctx)
   if (!ctx.ledger) return finish(ctx, Number(ctx.counts.seen ?? 0))
