@@ -577,3 +577,49 @@ run('the Instagram feed after its workbook is re-uploaded', () => {
     expect([again.withdrawn, again.restored]).toEqual([0, 0])
   })
 })
+
+run('his answers on corpus cards', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  // Synthetic cards and answers only.
+  const card = async (name: string, kind: string, kindSource: string, answer: Record<string, unknown>) => {
+    const cols = Object.keys(answer)
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, kind, kind_source, answered_at, answered_by, ${cols.join(', ')})
+       values ($1, 'cold_ideas', 'strategy', $2, 'text/plain', now(), $3, $4, now(), 'Krish', ${cols.map((_, i) => `$${i + 5}`).join(', ')})`,
+      [`corpusAnswerFile${name.replace(/[^A-Za-z0-9]/g, '')}`, name, kind, kindSource, ...cols.map(c => answer[c])],
+    )
+  }
+
+  it('counts every answer on a corpus card but one that only names its piece, whoever set the kind', async () => {
+    const [piece] = (await client.query(`insert into content_ideas (idea, state) values ('an invented piece', 'drafting') returning id::text`)).rows
+    const kept = [
+      ['a-model-corpus-pick.txt', 'model', { why_like: 'an invented picked reason', why_like_source: 'picked', picked_likes: ['an invented picked reason'] }],
+      ['a-model-corpus-old-pick.txt', 'model', { why_like: 'an invented older pick', why_like_source: 'picked' }],
+      ['a-model-corpus-typed.txt', 'model', { why_like: 'invented typed words', why_like_source: 'typed' }],
+      ['a-model-corpus-why-here.txt', 'model', { why_here: 'invented words on why he saved it' }],
+      ['a-model-corpus-would-do.txt', 'model', { would_do: 'invented words on what he would do' }],
+      ['a-model-corpus-room.txt', 'model', { routes: ['visibility'], route: 'visibility' }],
+      ['a-model-corpus-old-route.txt', 'model', { route: 'study_style' }],
+      ['a-model-corpus-tags.txt', 'model', { routes: ['make_piece'], route: 'make_piece', confirmed_tags: JSON.stringify(['an invented tag']) }],
+      ['a-krish-corpus-typed.csv', 'krish', { piece_id: piece.id, why_like: 'invented typed words', why_like_source: 'typed' }],
+    ] as const
+    const left = [
+      ['a-model-corpus-piece.txt', 'model', { piece_id: piece.id, routes: [], route: null }],
+      ['a-model-corpus-new-piece.txt', 'model', { routes: ['make_piece'], route: 'make_piece' }],
+      ['a-rule-corpus-piece.csv', 'rule', { piece_id: piece.id, routes: [], route: null }],
+      ['a-krish-corpus-piece.csv', 'krish', { piece_id: piece.id }],
+    ] as const
+    for (const [name, source, answer] of [...kept, ...left]) await card(name, 'corpus', source, answer)
+    await card('a-feed.xlsx', 'feed', 'rule', { why_like: 'never asked', why_like_source: 'typed' })
+    const rows = await answeredItemEvidence(db)
+    expect(rows.map(r => r.title).sort()).toEqual(kept.map(([name]) => name).sort())
+    const byTitle = new Map(rows.map(r => [r.title, r]))
+    expect(byTitle.get('a-model-corpus-pick.txt')!.attribution).toBe('krish_action')
+    expect(byTitle.get('a-model-corpus-why-here.txt')!.attribution).toBe('krish_words')
+    expect(byTitle.get('a-model-corpus-room.txt')!.lane).toBe('visibility')
+  })
+})
