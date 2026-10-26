@@ -95,3 +95,12 @@ From a session in another repository with the Control Center connector: the read
 (empty today, and a synthetic approved rule in a test database proves the shape); a report of his exact words and a
 report of an observation both land, labelled as what they are; an observation changes no claim; content-engine records
 which piece a card became. Each proved by a test that fails without the change and by a live read-back.
+
+## Progress
+
+- **Step 1, the report tool and its store (2026-10-26).** content-engine `20261113090000_taste_reports.sql` (the inbox
+  `taste_reports`, and the source `session_report` on `taste_evidence` and `feedback_cues`); this repository's daily
+  `reports` stage (`src/collect/sessionReports.ts`), which files his words as `krish_words` and everything else as an
+  `observation`; Control Center's `report_to_taste_engine` on the account connector (`api/harness/_taste-mcp.ts`).
+  Proved by `test/pipeline.int.test.ts` ("what sessions in other repositories report"), which fails without the
+  migration: an observation never changes a claim's support, and his words are kept only with where and when.

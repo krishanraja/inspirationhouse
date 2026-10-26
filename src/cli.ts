@@ -10,6 +10,7 @@ import {
 import { collectDrive, sheetEvidence } from './collect/drive.ts'
 import { collectInstagram } from './collect/instagram.ts'
 import { syncCues } from './collect/feedbackCues.ts'
+import { syncReports } from './collect/sessionReports.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, type Llm } from './llm.ts'
 import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
@@ -187,10 +188,34 @@ async function cues(ctx: Ctx): Promise<void> {
   log({ stage: 'cues', dry_run: ctx.dry, ...counts })
 }
 
+/**
+ * What sessions in other repositories reported through Control Center's report_to_taste_engine tool, filed as his
+ * words or as an observation (src/collect/sessionReports.ts). Needs the ledger, and content-engine's taste_reports
+ * migration: until it is applied the stage reads nothing and counts reports_table_missing. A failure is recorded,
+ * never thrown.
+ */
+async function reports(ctx: Ctx): Promise<void> {
+  if (!ctx.ledger) return
+  const r = await syncReports(ctx.db, ctx.runId, { write: !ctx.dry }).catch(err => {
+    ctx.problems.push(`reports: ${(err as Error).name}`)
+    log({ stage: 'reports', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!r) return
+  const counts = {
+    reports_read: r.read, reports_words: r.words, reports_observations: r.observations, reports_cues: r.cues,
+    reports_refused: r.refused, reports_evidence_written: r.evidenceWritten, reports_table_missing: r.missing ? 1 : 0,
+  }
+  Object.assign(ctx.counts, counts)
+  log({ stage: 'reports', dry_run: ctx.dry, ...counts })
+}
+
 async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
   // The page's own answers live in a ledger table too.
   if (!ctx.ledger) ctx.counts.ledger_missing = true
   await collect(ctx, cfg)
+  // Before the cues stage, which reads the cues table: a report's cue is in place for the same run's counts.
+  await reports(ctx)
   await cues(ctx)
   if (!ctx.ledger) return finish(ctx, Number(ctx.counts.seen ?? 0))
   if (ctx.google) {

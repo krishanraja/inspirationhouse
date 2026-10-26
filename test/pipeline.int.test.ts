@@ -10,6 +10,7 @@ import { propose, syncDecisions, ELIGIBLE_SQL, type Eligible } from '../src/publ
 import { score } from '../src/score/scoreboard.ts'
 import { linkRequests } from '../src/tag/links.ts'
 import { answeredItemEvidence, tagItems, HEAR_TRIES } from '../src/tag/items.ts'
+import { syncReports } from '../src/collect/sessionReports.ts'
 import type { DriveFile, Google } from '../src/google.ts'
 
 // End to end against a real Postgres with the real migrations, and a stub in
@@ -23,11 +24,13 @@ import type { DriveFile, Google } from '../src/google.ts'
 //   20261108090000_inspiration_answers_hold.sql
 //   20261109090000_content_watch.sql          (the link queue and content_reads)
 //   20261110090000_taste_support_by_card.sql
+//   20261111090000_feedback_cues.sql          (the cues a report of his words can become)
 //   20261112090000_taste_quote_holds.sql
+//   20261113090000_taste_reports.sql          (what sessions in other repositories report)
 // For example, from a content-engine checkout (CI runs the same, .github/workflows/ci.yml):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261112090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-3]090000_*.sql | paste -sd, -)
 // The database must be UTF8 (under SQL_ASCII char_length counts bytes, and the emoji excerpt test fails).
 const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
@@ -707,5 +710,77 @@ run('a claim he has been shown', () => {
     await expect(client.query(`update taste_claims set proposal_id = null, status = 'candidate'`)).rejects.toThrow(/never rewritten/)
     await client.query(`update taste_claims set updated_at = now()`)
     expect(await held()).toEqual(shown)
+  })
+})
+
+run('what sessions in other repositories report', () => {
+  let client: pg.Client
+  let db: Db
+  const runId = '33333333-3333-3333-3333-333333333333'
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  // Synthetic words and references only. Every report carries its session, repository and when it was reported.
+  const report = (over: Record<string, unknown>) => ({
+    kind: 'observation', body: 'synthetic: the session noticed short titles did better', said_where: null, said_at: null,
+    lane: 'voice', polarity: 'neutral', subject_ref: null, subject: null, session_ref: 'session_synthetic_0001',
+    repository: 'krishanraja/synthetic-repo', surface: 'claude-code-web', emitter_id: 'emitter-synthetic',
+    client_report_id: `synthetic-report-${Math.random().toString(36).slice(2, 12)}`, ...over,
+  })
+  const insert = (r: Record<string, unknown>) => client.query(
+    `insert into taste_reports (kind, body, said_where, said_at, lane, polarity, subject_ref, subject, session_ref,
+       repository, surface, emitter_id, client_report_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id::text`,
+    [r.kind, r.body, r.said_where, r.said_at, r.lane, r.polarity, r.subject_ref, r.subject, r.session_ref,
+      r.repository, r.surface, r.emitter_id, r.client_report_id])
+
+  it('keeps his words only with where and when he typed them, and never lets an observation pass for them', async () => {
+    await expect(insert(report({ kind: 'krish_words', said_where: 'a synthetic chat', said_at: null }))).rejects.toThrow(/words_say_where_and_when/)
+    await expect(insert(report({ kind: 'krish_words', said_where: null, said_at: '2026-10-26T09:00:00Z' }))).rejects.toThrow(/words_say_where_and_when/)
+    await expect(insert(report({ said_where: 'a synthetic chat', said_at: '2026-10-26T09:00:00Z' }))).rejects.toThrow(/observation_is_not_words/)
+    const r = report({})
+    await insert(r)
+    // A retry is a no-op the tool reads back; the same id twice is refused, never a second row.
+    await expect(insert(r)).rejects.toThrow(/retry_once/)
+    expect(Number((await client.query('select count(*) from taste_reports')).rows[0].count)).toBe(1)
+  })
+
+  it('files his words as his, an observation as context, a cue only where his words name it, each once', async () => {
+    await insert(report({
+      kind: 'krish_words', body: 'synthetic: keep an eye on this one', said_where: 'a synthetic chat in a synthetic repo',
+      said_at: '2026-10-26T09:00:00Z', polarity: 'likes', subject_ref: 'idea:00000000-0000-0000-0000-0000000000aa', subject: 'A synthetic idea',
+    }))
+    const dry = await syncReports(db, runId, { write: false })
+    expect(dry).toMatchObject({ read: 2, words: 1, observations: 1, cues: 1, refused: 0, evidenceWritten: 0 })
+    expect(Number((await client.query('select count(*) from taste_evidence')).rows[0].count)).toBe(0)
+
+    expect(await syncReports(db, runId, { write: true })).toMatchObject({ read: 2, words: 1, observations: 1, cues: 1, evidenceWritten: 2 })
+    const ev = (await client.query(`select attribution, excerpt, meta->>'said_where' as said_where, meta->>'repository' as repository,
+      meta->>'session_ref' as session_ref, occurred_at from taste_evidence where source = 'session_report' order by attribution`)).rows
+    expect(ev.map(e => [e.attribution, e.said_where, e.repository, e.session_ref])).toEqual([
+      ['krish_words', 'a synthetic chat in a synthetic repo', 'krishanraja/synthetic-repo', 'session_synthetic_0001'],
+      ['observation', null, 'krishanraja/synthetic-repo', 'session_synthetic_0001'],
+    ])
+    expect(new Date(ev[0].occurred_at).toISOString()).toBe('2026-10-26T09:00:00.000Z')
+    const cues = (await client.query(`select source, subject_ref, said, use, use_origin from feedback_cues`)).rows
+    expect(cues).toEqual([{ source: 'session_report', subject_ref: '00000000-0000-0000-0000-0000000000aa',
+      said: 'synthetic: keep an eye on this one', use: 'track_over_time', use_origin: 'krish' }])
+    // Filed once: a second run reads nothing, and a filed report is never edited.
+    expect((await syncReports(db, runId, { write: true })).read).toBe(0)
+    await expect(client.query(`update taste_reports set body = 'synthetic: changed'`)).rejects.toThrow(/kept as it was reported/)
+  })
+
+  it('never lets an observation change a claim\'s support, and never explains it', async () => {
+    const ids = Object.fromEntries((await client.query(`select attribution, id::text from taste_evidence where source = 'session_report'`)).rows
+      .map(r => [r.attribution, r.id]))
+    const claim = async (evidence: string[]) => (await client.query(
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, why, means, evidence_ids, flip_rule)
+       values (substr(md5(random()::text), 1, 16), 'voice', null, 'subject', 'A synthetic claim on reports.', 'A synthetic why for it.',
+         'A synthetic meaning for it.', $1::uuid[], 'A synthetic flip rule for it.') returning support_n`, [evidence])).rows[0].support_n
+    expect(await claim([ids.krish_words])).toBe(1)
+    expect(await claim([ids.krish_words, ids.observation])).toBe(1)
+    expect(await claim([ids.observation])).toBe(0)
+    const stub: Llm = { model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { items: [] } as never }) }
+    expect((await explainPending(db, stub, runId, { write: false })).items).toBe(1)
   })
 })

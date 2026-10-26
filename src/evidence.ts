@@ -11,7 +11,7 @@ export type Source =
   | 'learnings_json' | 'title_verdicts' | 'golden_examples' | 'rejected_lines'
   | 'style_references' | 'style_bank' | 'drive_cold' | 'drive_video'
   | 'what_i_like_sheet' | 'idea_triage' | 'feedback_hist' | 'creator_move'
-  | 'visibility_target' | 'drive_artifact' | 'inspiration_page'
+  | 'visibility_target' | 'drive_artifact' | 'inspiration_page' | 'session_report'
 
 export interface Evidence {
   source: Source
@@ -78,11 +78,12 @@ export function versionOf(e: Evidence): string {
 }
 
 /**
- * How long an excerpt may be. His answers on the Inspiration page run to 2000 characters, so they keep all of it; every
- * other source stays at 400, since a longer cut there would change the version of every row it has already written.
+ * How long an excerpt may be. His answers on the Inspiration page and a session's report (content-engine's
+ * taste_reports holds 2000) run to 2000 characters, so they keep all of it; every other source stays at 400, since a
+ * longer cut there would change the version of every row it has already written.
  */
 export function excerptMax(source: Source): number {
-  return source === 'inspiration_page' ? 2000 : 400
+  return source === 'inspiration_page' || source === 'session_report' ? 2000 : 400
 }
 
 export function normalise(e: Evidence): Evidence {
