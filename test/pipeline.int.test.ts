@@ -799,15 +799,18 @@ run('which piece each card became', () => {
     const card = async (name: string) => (await client.query(
       `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)
        values ($1, 'cold_ideas', 'strategy', $2, 'image/png', now()) returning id::text`, [`synthetic-${name.replace(/\W/g, '')}-0001`, name])).rows[0].id as string
-    const piece = async (idea: string, state: string, covers: string[], published = false, buried = false) => (await client.query(
-      `insert into content_ideas (idea, state, meta, published_at, buried_at) values ($1, $2, $3::jsonb, $4, $5) returning id::text`,
-      [idea, state, JSON.stringify({ covers }), published ? '2026-10-26T10:00:00Z' : null, buried ? '2026-10-26T10:00:00Z' : null])).rows[0].id as string
-    const [picked, offered, named, gone] = [await card('synthetic picked'), await card('synthetic offered'), await card('synthetic named'), await card('synthetic buried')]
-    const p1 = await piece('synthetic piece one', 'published', [picked, 'said-1'], true)
-    await piece('synthetic option only', 'seeded', [offered])
-    const p3 = await piece('synthetic corpus piece', 'drafting', [named])
+    // Covers are kept by the week whose option said so; a picked piece counts only scheduled inside that week.
+    const piece = async (idea: string, state: string, covers: Record<string, string[]>, scheduled: string | null, published = false, buried = false) => (await client.query(
+      `insert into content_ideas (idea, state, meta, scheduled_for, published_at, buried_at) values ($1, $2, $3::jsonb, $4, $5, $6) returning id::text`,
+      [idea, state, JSON.stringify({ covers }), scheduled, published ? '2026-10-26T10:00:00Z' : null, buried ? '2026-10-26T10:00:00Z' : null])).rows[0].id as string
+    const [picked, offered, named, gone, other] = [await card('synthetic picked'), await card('synthetic offered'), await card('synthetic named'), await card('synthetic buried'), await card('synthetic other week')]
+    const p1 = await piece('synthetic piece one', 'published', { '2026-10-19': [picked, 'said-1'] }, '2026-10-21', true)
+    await piece('synthetic option only', 'seeded', { '2026-10-19': [offered] }, null)
+    const p3 = await piece('synthetic corpus piece', 'drafting', {}, null)
     await client.query(`update inspiration_items set piece_id = $1 where id = $2`, [p3, named])
-    await piece('synthetic buried piece', 'drafting', [gone], false, true)
+    await piece('synthetic buried piece', 'drafting', { '2026-10-19': [gone] }, '2026-10-21', false, true)
+    // Offered for one week, picked for another: the card was answered by that week's pick, not this piece.
+    await piece('synthetic later pick', 'drafting', { '2026-10-12': [other], 'not-a-week': [other] }, '2026-10-21')
     const rows = (await client.query(`select card_id::text, piece_id::text, basis, state, published from inspiration_card_pieces order by piece`)).rows
     expect(rows).toEqual([
       { card_id: named, piece_id: p3, basis: 'krish', state: 'drafting', published: false },
