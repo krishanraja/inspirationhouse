@@ -106,3 +106,7 @@ which piece a card became. Each proved by a test that fails without the change a
   migration: an observation never changes a claim's support, and his words are kept only with where and when.
   Known gap, left for a follow-up: a cue made from a report stays open when his later verdict on the same idea
   contradicts it (the cues stage supersedes only within the queue and card threads it reads).
+- **Step 3, which piece a card became (2026-10-26).** content-engine keeps a Sunday option's `covers` on the piece
+  (`meta.covers`) and adds the view `inspiration_card_pieces` (`20261114090000`): each card's piece, `krish` (he named
+  it) or `plan` (a picked piece whose option covered it), and whether it published. Proved by
+  `test/pipeline.int.test.ts` ("which piece each card became").

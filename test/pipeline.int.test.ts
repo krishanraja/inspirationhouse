@@ -27,10 +27,11 @@ import type { DriveFile, Google } from '../src/google.ts'
 //   20261111090000_feedback_cues.sql          (the cues a report of his words can become)
 //   20261112090000_taste_quote_holds.sql
 //   20261113090000_taste_reports.sql          (what sessions in other repositories report)
+//   20261114090000_inspiration_card_pieces.sql (which piece each card became)
 // For example, from a content-engine checkout (CI runs the same, .github/workflows/ci.yml):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-3]090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-4]090000_*.sql | paste -sd, -)
 // The database must be UTF8 (under SQL_ASCII char_length counts bytes, and the emoji excerpt test fails).
 const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
@@ -65,7 +66,8 @@ async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
       status text not null default 'proposed', decided_at timestamptz, decided_by text check (decided_by is null or decided_by = 'Krish'),
       created_at timestamptz not null default now());
     create table public.content_engine_runs (id uuid primary key default gen_random_uuid(), job text, trigger text, status text, reason text, counts jsonb, started_at timestamptz, finished_at timestamptz);
-    create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz, idea text, state text, created_at timestamptz default now());
+    create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz, idea text, state text, created_at timestamptz default now(),
+      meta jsonb not null default '{}', scheduled_for date, buried_at timestamptz);
     create table public.content_edit_events (actor text, action text, occurred_at timestamptz);`)
   for (const file of migrations) await client.query(readFileSync(file, 'utf8'))
   const db: Db = {
@@ -785,5 +787,31 @@ run('what sessions in other repositories report', () => {
     expect(await claim([ids.observation])).toBe(0)
     const stub: Llm = { model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { items: [] } as never }) }
     expect((await explainPending(db, stub, runId, { write: false })).items).toBe(1)
+  })
+})
+
+run('which piece each card became', () => {
+  let client: pg.Client
+  beforeAll(async () => { ({ client } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  it('names the piece a card became, by his naming or a picked piece whose option covered it, and whether it published', async () => {
+    const card = async (name: string) => (await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at)
+       values ($1, 'cold_ideas', 'strategy', $2, 'image/png', now()) returning id::text`, [`synthetic-${name.replace(/\W/g, '')}-0001`, name])).rows[0].id as string
+    const piece = async (idea: string, state: string, covers: string[], published = false, buried = false) => (await client.query(
+      `insert into content_ideas (idea, state, meta, published_at, buried_at) values ($1, $2, $3::jsonb, $4, $5) returning id::text`,
+      [idea, state, JSON.stringify({ covers }), published ? '2026-10-26T10:00:00Z' : null, buried ? '2026-10-26T10:00:00Z' : null])).rows[0].id as string
+    const [picked, offered, named, gone] = [await card('synthetic picked'), await card('synthetic offered'), await card('synthetic named'), await card('synthetic buried')]
+    const p1 = await piece('synthetic piece one', 'published', [picked, 'said-1'], true)
+    await piece('synthetic option only', 'seeded', [offered])
+    const p3 = await piece('synthetic corpus piece', 'drafting', [named])
+    await client.query(`update inspiration_items set piece_id = $1 where id = $2`, [p3, named])
+    await piece('synthetic buried piece', 'drafting', [gone], false, true)
+    const rows = (await client.query(`select card_id::text, piece_id::text, basis, state, published from inspiration_card_pieces order by piece`)).rows
+    expect(rows).toEqual([
+      { card_id: named, piece_id: p3, basis: 'krish', state: 'drafting', published: false },
+      { card_id: picked, piece_id: p1, basis: 'plan', state: 'published', published: true },
+    ])
   })
 })
