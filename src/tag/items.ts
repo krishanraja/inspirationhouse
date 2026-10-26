@@ -660,11 +660,14 @@ export async function answeredItemEvidence(db: Db): Promise<Evidence[]> {
      from public.inspiration_items
      where (answered_at is not null
             or (why_here is not null and facets ? 'link' and not facets ? 'part_of'))
-       -- A feed is never asked anything. Naming a corpus's piece says nothing about taste, but a reason he gave on a
-       -- card does, whatever kind it is: a kind can be the model's guess, and a guess never takes his answer away.
+       -- A feed is never asked anything. A corpus is asked only which piece it serves, and naming it (or a new piece,
+       -- routes make_piece) says nothing about taste. Anything else he gave on a card counts, whatever its kind: words,
+       -- picks, confirmed tags or another route. A kind can be the model's guess, and a guess never takes that away.
+       -- Only "Make a piece from it" with nothing else looks the same as naming a new piece, so it stays out.
        and coalesce(kind, '') <> 'feed'
        and not (coalesce(kind, '') = 'corpus' and why_like is null and why_here is null and would_do is null
-                and coalesce(cardinality(picked_likes), 0) = 0)`,
+                and coalesce(cardinality(picked_likes), 0) = 0 and coalesce(jsonb_array_length(confirmed_tags), 0) = 0
+                and coalesce(routes, '{}') <@ array['make_piece']::text[] and coalesce(route, 'make_piece') = 'make_piece')`,
   )
   return rows.map(answerEvidence)
 }

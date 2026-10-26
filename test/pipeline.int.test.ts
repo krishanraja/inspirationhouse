@@ -594,13 +594,32 @@ run('his answers on corpus cards', () => {
     )
   }
 
-  it('keeps a reason he gave on a card the model guessed is a corpus, and leaves out an answer that only names its piece', async () => {
+  it('counts every answer on a corpus card but one that only names its piece, whoever set the kind', async () => {
     const [piece] = (await client.query(`insert into content_ideas (idea, state) values ('an invented piece', 'drafting') returning id::text`)).rows
-    await card('a-link-he-saved.txt', 'corpus', 'model', { why_like: 'an invented picked reason', why_like_source: 'picked', picked_likes: ['an invented picked reason'] })
-    await card('a-research-corpus.csv', 'corpus', 'rule', { piece_id: piece.id, routes: [], route: null })
+    const kept = [
+      ['a-model-corpus-pick.txt', 'model', { why_like: 'an invented picked reason', why_like_source: 'picked', picked_likes: ['an invented picked reason'] }],
+      ['a-model-corpus-old-pick.txt', 'model', { why_like: 'an invented older pick', why_like_source: 'picked' }],
+      ['a-model-corpus-typed.txt', 'model', { why_like: 'invented typed words', why_like_source: 'typed' }],
+      ['a-model-corpus-why-here.txt', 'model', { why_here: 'invented words on why he saved it' }],
+      ['a-model-corpus-would-do.txt', 'model', { would_do: 'invented words on what he would do' }],
+      ['a-model-corpus-room.txt', 'model', { routes: ['visibility'], route: 'visibility' }],
+      ['a-model-corpus-old-route.txt', 'model', { route: 'study_style' }],
+      ['a-model-corpus-tags.txt', 'model', { routes: ['make_piece'], route: 'make_piece', confirmed_tags: JSON.stringify(['an invented tag']) }],
+      ['a-krish-corpus-typed.csv', 'krish', { piece_id: piece.id, why_like: 'invented typed words', why_like_source: 'typed' }],
+    ] as const
+    const left = [
+      ['a-model-corpus-piece.txt', 'model', { piece_id: piece.id, routes: [], route: null }],
+      ['a-model-corpus-new-piece.txt', 'model', { routes: ['make_piece'], route: 'make_piece' }],
+      ['a-rule-corpus-piece.csv', 'rule', { piece_id: piece.id, routes: [], route: null }],
+      ['a-krish-corpus-piece.csv', 'krish', { piece_id: piece.id }],
+    ] as const
+    for (const [name, source, answer] of [...kept, ...left]) await card(name, 'corpus', source, answer)
     await card('a-feed.xlsx', 'feed', 'rule', { why_like: 'never asked', why_like_source: 'typed' })
     const rows = await answeredItemEvidence(db)
-    expect(rows.map(r => r.title)).toEqual(['a-link-he-saved.txt'])
-    expect(rows[0]!.attribution).toBe('krish_action')
+    expect(rows.map(r => r.title).sort()).toEqual(kept.map(([name]) => name).sort())
+    const byTitle = new Map(rows.map(r => [r.title, r]))
+    expect(byTitle.get('a-model-corpus-pick.txt')!.attribution).toBe('krish_action')
+    expect(byTitle.get('a-model-corpus-why-here.txt')!.attribution).toBe('krish_words')
+    expect(byTitle.get('a-model-corpus-room.txt')!.lane).toBe('visibility')
   })
 })
