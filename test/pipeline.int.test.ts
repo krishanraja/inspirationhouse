@@ -577,3 +577,30 @@ run('the Instagram feed after its workbook is re-uploaded', () => {
     expect([again.withdrawn, again.restored]).toEqual([0, 0])
   })
 })
+
+run('his answers on corpus cards', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  // Synthetic cards and answers only.
+  const card = async (name: string, kind: string, kindSource: string, answer: Record<string, unknown>) => {
+    const cols = Object.keys(answer)
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, kind, kind_source, answered_at, answered_by, ${cols.join(', ')})
+       values ($1, 'cold_ideas', 'strategy', $2, 'text/plain', now(), $3, $4, now(), 'Krish', ${cols.map((_, i) => `$${i + 5}`).join(', ')})`,
+      [`corpusAnswerFile${name.replace(/[^A-Za-z0-9]/g, '')}`, name, kind, kindSource, ...cols.map(c => answer[c])],
+    )
+  }
+
+  it('keeps a reason he gave on a card the model guessed is a corpus, and leaves out an answer that only names its piece', async () => {
+    const [piece] = (await client.query(`insert into content_ideas (idea, state) values ('an invented piece', 'drafting') returning id::text`)).rows
+    await card('a-link-he-saved.txt', 'corpus', 'model', { why_like: 'an invented picked reason', why_like_source: 'picked', picked_likes: ['an invented picked reason'] })
+    await card('a-research-corpus.csv', 'corpus', 'rule', { piece_id: piece.id, routes: [], route: null })
+    await card('a-feed.xlsx', 'feed', 'rule', { why_like: 'never asked', why_like_source: 'typed' })
+    const rows = await answeredItemEvidence(db)
+    expect(rows.map(r => r.title)).toEqual(['a-link-he-saved.txt'])
+    expect(rows[0]!.attribution).toBe('krish_action')
+  })
+})

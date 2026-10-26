@@ -660,8 +660,11 @@ export async function answeredItemEvidence(db: Db): Promise<Evidence[]> {
      from public.inspiration_items
      where (answered_at is not null
             or (why_here is not null and facets ? 'link' and not facets ? 'part_of'))
-       -- A feed is never asked anything, and naming a corpus's piece says nothing about taste.
-       and coalesce(kind, '') not in ('feed', 'corpus')`,
+       -- A feed is never asked anything. Naming a corpus's piece says nothing about taste, but a reason he gave on a
+       -- card does, whatever kind it is: a kind can be the model's guess, and a guess never takes his answer away.
+       and coalesce(kind, '') <> 'feed'
+       and not (coalesce(kind, '') = 'corpus' and why_like is null and why_here is null and would_do is null
+                and coalesce(cardinality(picked_likes), 0) = 0)`,
   )
   return rows.map(answerEvidence)
 }
