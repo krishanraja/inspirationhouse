@@ -9,6 +9,7 @@ import {
 } from './collect/supabaseSources.ts'
 import { collectDrive, sheetEvidence } from './collect/drive.ts'
 import { collectInstagram } from './collect/instagram.ts'
+import { syncCues } from './collect/feedbackCues.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, type Llm } from './llm.ts'
 import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
@@ -164,10 +165,33 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
   return t
 }
 
+/**
+ * His feedback on ideas and cards as cues the Sunday session draws on (src/collect/feedbackCues.ts). The cards are read
+ * only when the ledger's tables are there. Until content-engine's feedback_cues migration is applied the stage writes
+ * nothing and says so in its counts (cues_table_missing), without failing the run. A failure is recorded, never thrown.
+ */
+async function cues(ctx: Ctx): Promise<void> {
+  const r = await syncCues(ctx.db, ctx.llm, { write: !ctx.dry, cards: ctx.ledger }).catch(err => {
+    ctx.problems.push(`cues: ${(err as Error).name}`)
+    log({ stage: 'cues', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!r) return
+  const counts = {
+    cues_inputs: r.inputs, cues_open: r.cues, cues_inserted: r.inserted, cues_updated: r.updated, cues_withdrawn: r.withdrawn,
+    cues_superseded: r.superseded, cues_guessed: r.guessed, cues_reused: r.reused, cues_skipped: r.skipped,
+    cues_unclassified: r.unclassified, cues_failed: r.failed, cues_table_missing: r.missing ? 1 : 0,
+  }
+  Object.assign(ctx.counts, counts)
+  if (r.failed) ctx.problems.push(`cues: the model gave no guess for ${r.failed} answer(s)`)
+  log({ stage: 'cues', dry_run: ctx.dry, ...counts })
+}
+
 async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
   // The page's own answers live in a ledger table too.
   if (!ctx.ledger) ctx.counts.ledger_missing = true
   await collect(ctx, cfg)
+  await cues(ctx)
   if (!ctx.ledger) return finish(ctx, Number(ctx.counts.seen ?? 0))
   if (ctx.google) {
     const items = await syncItems(ctx.db, ctx.google, !ctx.dry).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
@@ -288,7 +312,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|cues|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
