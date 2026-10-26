@@ -23,11 +23,11 @@ import type { DriveFile, Google } from '../src/google.ts'
 //   20261108090000_inspiration_answers_hold.sql
 //   20261109090000_content_watch.sql          (the link queue and content_reads)
 //   20261110090000_taste_support_by_card.sql
-//   20261111090000_taste_quote_holds.sql
+//   20261112090000_taste_quote_holds.sql
 // For example, from a content-engine checkout (CI runs the same, .github/workflows/ci.yml):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261111090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261112090000_*.sql | paste -sd, -)
 // The database must be UTF8 (under SQL_ASCII char_length counts bytes, and the emoji excerpt test fails).
 const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)

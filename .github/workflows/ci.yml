@@ -47,7 +47,7 @@ jobs:
         run: |
           test "$(docker exec ${{ job.services.postgres.id }} psql -U postgres -Atc 'show server_encoding')" = UTF8
           M=.content-engine/supabase/migrations
-          files=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261111090000_*.sql | paste -sd, -)
+          files=$(ls $M/2026110[4-9]*.sql $M/20261110090000_*.sql $M/20261112090000_*.sql | paste -sd, -)
           test -n "$files"
           echo "TASTE_MIGRATION=$files" >> "$GITHUB_ENV"
       - run: pnpm test
