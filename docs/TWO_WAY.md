@@ -106,7 +106,24 @@ which piece a card became. Each proved by a test that fails without the change a
   migration: an observation never changes a claim's support, and his words are kept only with where and when.
   Known gap, left for a follow-up: a cue made from a report stays open when his later verdict on the same idea
   contradicts it (the cues stage supersedes only within the queue and card threads it reads).
+- **Step 2, the read tool (2026-10-26).** Control Center's `get_approved_taste` on the account connector
+  (`api/harness/_taste-mcp.ts`, PR 559) reads `taste_profile_form` by lane: only rules Krish approved or reworded,
+  form only, his quote only while the answer it quotes stands. It says which words are his and which the engine
+  wrote, and an empty list says none is approved yet and not to invent one. Proved by `tests/api/tasteMcp.test.ts`.
 - **Step 3, which piece a card became (2026-10-26).** content-engine keeps a Sunday option's `covers` on the piece
   (`meta.covers`) and adds the view `inspiration_card_pieces` (`20261114090000`): each card's piece, `krish` (he named
   it) or `plan` (a picked piece whose option covered it), and whether it published. Proved by
   `test/pipeline.int.test.ts` ("which piece each card became").
+- **Step 4, ai-harness (2026-10-26).** The canon block's Taste line (PR 165): where the connector offers them,
+  read approved rules before writing or designing; send his exact typed corrections to `report_to_taste_engine`
+  with where and when, and anything else only as an observation. Ruling (Krish, 2026-10-26): "reports to my taste
+  ledger are exempt from the approval wall". `krish-voice` and `krish-design` carry the same, with their copies as
+  the fallback without the connector. Proved by `scripts/test-canon-sync.mjs`.
+- **Step 5, Control Center writers (2026-10-26).** Every writer (the email drafts in his name, video and clip
+  scripts, growth stall drafts) reads approved voice rules after the voice block, through `api/_voice.ts` and
+  `api/_content.ts` (PR 560). No judge or scorer may read them (`tests/api/approvedTaste.test.ts`).
+- **Step 6, the engines (2026-10-26).** Control Center's growth directive carries `taste` from protocol 1.5.0
+  (PR 561): approved voice rules, an empty list until he approves one, never used to judge. growth-mindmake (PR 9)
+  and growth-makeyourmindup (PR 12) draft with them; AEO-Engine (PR 24) adds a wording-only voice step that runs
+  only when at least one rule is approved, about $0.03 a subject, and keeps the rules out of its judging digest.
+  Each engine's tests prove the rules reach drafting and never a score.
