@@ -2,10 +2,11 @@
 
 The taste ledger. It turns what Krish saves and judges into a record of **why** he likes it, asks him to confirm the patterns, and gives the confirmed ones to the systems that write and produce for him, so their output gets closer to his taste every week.
 
-It is headless: no UI of its own and nothing to host. It runs on GitHub Actions, keeps its state in the Mindmaker OS Supabase project, and is read by two consumers:
+It is headless: no UI of its own and nothing to host. It runs on GitHub Actions, keeps its state in the Mindmaker OS Supabase project, and is read by these consumers:
 
 - **content-engine** reads approved claims while drafting and revising (never while judging or ranking).
 - **ai-harness**'s `krish-voice` and `krish-design` skills read them from a file each, which arrives only by a pull request Krish merges (`pnpm engine harness`).
+- **Sessions in every repository** read the approved form rules through Control Center's `get_approved_taste` tool, and report back through its `report_to_taste_engine` tool (the `reports` stage below). How that two-way path was built: `docs/TWO_WAY.md`.
 - **Control Center** shows the Inspiration page (one card per thing saved in Drive), and its Visibility scorer reads the cards he routed to "A room or stage to go for" as the kind of room he wants. An answer with that route counts as visibility-lane evidence here, whichever folder the card came from.
 
 It also reads what **content-watcher** leaves behind. When Krish pastes a link into the box on the Inspiration board, Control Center queues it (`content_watch_requests`), content-watcher on one of his home computers fetches the post, files its media into his Drive folder and reads it into text (`content_reads`, one reading per file, found by the file's sha256). This engine then makes the card, links the request to it, and tags it from that reading.
@@ -22,7 +23,7 @@ It also reads what **content-watcher** leaves behind. When Krish pastes a link i
 | explain | daily | Turns each piece of his evidence into one to three candidate whys, each tagged form (craft) or subject. Each piece is read once (`explained_at`), even when it gives no why; withdrawn evidence is never read. A card's kind is given to it as fact only when the file proves it or Krish set it; a kind the tagger guessed is labelled its guess (`kindLine`). |
 | distil | weekly | Groups whys into claims. The model drafts; code checks every citation; the database counts the support. Only a candidate is rewritten: once a claim is put to Krish, its words, evidence and quote never change, while he decides or after, enforced by the database. |
 | propose | weekly | Puts at most three claims a week to Krish through the existing learning-proposals door. He decides; the engine never does. |
-| harness | daily | Renders the approved form rules into `skills/krish-voice/references/approved-taste.md` and `skills/krish-design/references/approved-taste.md` and, when they differ from ai-harness `main`, opens or refreshes one pull request there (branch `taste/approved-rules`). An open pull request that already holds the set is left alone, a rule he reworded carries only his words, and a set he closed without merging is never proposed again (its hash is in the pull request's body). Nothing reaches those skills until Krish merges it (Ruling, Krish, 2026-10-24: rules arrive by PR). |
+| harness | daily | Renders the approved form rules into ai-harness's `skills/krish-voice/references/approved-taste.md` and `skills/krish-design/references/approved-taste.md` and, when they differ from ai-harness `main`, opens or refreshes one pull request there (branch `taste/approved-rules`). An open pull request that already holds the set is left alone, a rule he reworded carries only his words, and a set he closed without merging is never proposed again (its hash is in the pull request's body). Nothing reaches those skills until Krish merges it (Ruling, Krish, 2026-10-24: rules arrive by PR). |
 | score | weekly | Computes the scoreboard. The moat metric is corrections per published piece: lower means the output needed him less. |
 
 ## Rules it keeps
@@ -37,7 +38,7 @@ It also reads what **content-watcher** leaves behind. When Krish pastes a link i
 
 ## The schema
 
-`supabase/migrations/20261104090000_taste_ledger.sql` (and `20261111090000_feedback_cues.sql` for the cues, `20261113090000_taste_reports.sql` for what sessions report) lives in **content-engine**, which owns content DDL, and is applied with the Supabase MCP `apply_migration`, never `db push`.
+The tables live in **content-engine** (`supabase/migrations/`), which owns content DDL, and are applied with the Supabase MCP `apply_migration`, never `db push`. This engine reads a run of its migrations, starting at `20261104090000_taste_ledger.sql`. The ordered list, with what each one is for, is in the header of `test/pipeline.int.test.ts`, which applies them: that header is the one list. The cues and reports stages write nothing until their own migrations (`20261111090000_feedback_cues.sql`, `20261113090000_taste_reports.sql`) are applied; every other stage needs the ledger.
 
 ## Running it
 
@@ -55,7 +56,7 @@ A dry run refuses every write. Without `DATABASE_URL` it reads through the Supab
 
 ## Turning it on
 
-1. Apply the taste ledger migration (content-engine PR). The cues stage needs content-engine's `feedback_cues` migration too; until it is applied the stage writes nothing.
+1. Apply content-engine's migrations in the order listed in the header of `test/pipeline.int.test.ts`. The cues and reports stages write nothing until their own migrations are applied.
 2. Add repository secrets: `DATABASE_URL`, `ANTHROPIC_API_KEY`, `HARNESS_SYNC_TOKEN` (a fine-grained token with contents and pull request write on `krishanraja/ai-harness` only), and `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` holding the service account's whole JSON key file (or the bare PEM, with `GOOGLE_SERVICE_ACCOUNT_EMAIL` beside it). Share both Drive folders and the What I like sheet with the service account as Viewer.
 3. Run each workflow once by hand with `dry_run` on and `use_model` off: it proves every source is reachable and costs nothing. Then run it with both off for the first real run, and `use_model` on when it should tag and explain.
 4. Set the repository variable `TASTE_ENABLED` to `true`. Until then the schedules do nothing.

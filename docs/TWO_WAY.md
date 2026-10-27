@@ -1,5 +1,8 @@
 # Two-way: every repository reads Krish's taste and reports back
 
+Status: Built. All six steps landed on 2026-10-26; Progress, at the end, says what each one is and how it was proved. This file is kept as the design record. Everything before Progress is the original brief: it is in the future tense and describes the world on 2026-10-26, not now.
+Last verified: 2026-10-27 against this repository's code and the Control Center and ai-harness checkouts (the files cited exist). content-engine, and the pull requests cited in other repositories, were not re-read.
+
 Handover for the build, written 2026-10-26 by the session that ran the audit. Krish, 2026-10-26: "start the two-way
 build in a fresh session". This file is the whole brief: read it, then `README.md` and `AGENTS.md`, then each
 repository's own `AGENTS.md` before you change it.
@@ -8,7 +11,7 @@ repository's own `AGENTS.md` before you change it.
 
 He asked which repositories can work with the inspiration engine both ways: read what he likes, and tell the engine
 something back. An audit across the fleet (2026-10-24, each reading checked by a skeptic) found that no session in any
-repository could do both. The state it found, corrected for what has landed since:
+repository could do both. The state it found, corrected on 2026-10-26 for what had landed by then and before any of steps 1 to 6 below:
 
 | Repository | Reads his taste today | Tells the engine anything back | The missing direction that matters most |
 |---|---|---|---|
@@ -57,12 +60,12 @@ repository could do both. The state it found, corrected for what has landed sinc
   read `taste_profile_current` / `taste_profile_form`, which already do.
 - **Control Center writes on the Inspiration route come only from his browser** (`hasBrowserSession`, PR 553). The
   report tool is a different route with session attribution; it must never be able to write as Krish.
-- **Approved rules today: none.** `taste_profile_current` has 0 rows (22 claims, 3 put to him and waiting). The read
+- **Approved rules on 2026-10-26: none.** `taste_profile_current` had 0 rows (22 claims, 3 put to him and waiting). The read
   tool must return an empty, well-formed answer and say so, never invent a rule.
 - **The Anthropic API is at its usage limit until 2026-11-01.** Model calls fail. Nothing in this build should need one;
   never verify by a paid call without Krish's yes.
 
-## What to build, in order
+## What to build, in order (the original plan; all six are done, see Progress)
 
 1. **The report tool and its store** (this repository's procedure, content-engine's migration for any table, Control
    Center's connector for the tool). Decide the shape from the rulings above. Reuse `feedback_cues` or
@@ -94,7 +97,7 @@ ruling in the commit body as `Ruling (Krish, YYYY-MM-DD): ...`, and update that 
 From a session in another repository with the Control Center connector: the read tool returns the approved rules
 (empty today, and a synthetic approved rule in a test database proves the shape); a report of his exact words and a
 report of an observation both land, labelled as what they are; an observation changes no claim; content-engine records
-which piece a card became. Each proved by a test that fails without the change and by a live read-back.
+which piece a card became. Each proved by a test that fails without the change and by a live read-back. Progress records the tests for each step; a live read-back from a session in another repository is not recorded here.
 
 ## Progress
 
@@ -118,7 +121,7 @@ which piece a card became. Each proved by a test that fails without the change a
   read approved rules before writing or designing; send his exact typed corrections to `report_to_taste_engine`
   with where and when, and anything else only as an observation. Ruling (Krish, 2026-10-26): "reports to my taste
   ledger are exempt from the approval wall". `krish-voice` and `krish-design` carry the same, with their copies as
-  the fallback without the connector. Proved by `scripts/test-canon-sync.mjs`.
+  the fallback without the connector. Proved by `scripts/test-canon-sync.mjs`. A repository receives the Taste line only when its rendered canon block is next synced to a release that carries it (ai-harness's own block does, at release v2026.10.26.1); the release stamp is at the top of the canon block in each repository's `AGENTS.md`.
 - **Step 5, Control Center writers (2026-10-26).** Every writer (the email drafts in his name, video and clip
   scripts, growth stall drafts) reads approved voice rules after the voice block, through `api/_voice.ts` and
   `api/_content.ts` (PR 560). No judge or scorer may read them (`tests/api/approvedTaste.test.ts`).
