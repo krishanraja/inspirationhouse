@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import pg from 'pg'
 import type { Db } from '../src/db.ts'
 import type { Llm } from '../src/llm.ts'
-import { writeEvidence, withdrawUncollected, type Evidence } from '../src/evidence.ts'
+import { writeEvidence, withdrawUncollected, normalise, type Evidence } from '../src/evidence.ts'
 import { explainPending } from '../src/explain/whys.ts'
 import { distil } from '../src/distil/claims.ts'
 import { propose, syncDecisions, ELIGIBLE_SQL, type Eligible } from '../src/publish/propose.ts'
@@ -11,6 +11,7 @@ import { score } from '../src/score/scoreboard.ts'
 import { linkRequests } from '../src/tag/links.ts'
 import { answeredItemEvidence, tagItems, HEAR_TRIES } from '../src/tag/items.ts'
 import { syncReports } from '../src/collect/sessionReports.ts'
+import { extractSignals, SIGNAL_PROMPT_REV } from '../src/signal/extract.ts'
 import type { DriveFile, Google } from '../src/google.ts'
 
 // End to end against a real Postgres with the real migrations, and a stub in
@@ -28,10 +29,11 @@ import type { DriveFile, Google } from '../src/google.ts'
 //   20261112090000_taste_quote_holds.sql
 //   20261113090000_taste_reports.sql          (what sessions in other repositories report)
 //   20261114090000_inspiration_card_pieces.sql (which piece each card became)
+//   20261115090000_taste_signals.sql          (his answers as countable tags; its suite runs once the file is listed)
 // For example, from a content-engine checkout (CI runs the same, .github/workflows/ci.yml):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-4]090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-5]090000_*.sql | paste -sd, -)
 // The database must be UTF8 (under SQL_ASCII char_length counts bytes, and the emoji excerpt test fails).
 const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
@@ -44,6 +46,8 @@ if (url && !/^postgres(ql)?:\/\/([^@/]*@)?(localhost|127\.0\.0\.1)(:\d+)?\//.tes
   throw new Error('TEST_DATABASE_URL must point at a local throwaway database')
 }
 const run = url && migrations.length ? describe : describe.skip
+// The signals tables arrive in their own migration; until content-engine has it, a list without it skips that suite.
+const runSignals = url && migrations.some(m => m.endsWith('_taste_signals.sql')) ? describe : describe.skip
 
 // A fresh public schema with the real migrations, and a Db on it. Every suite here starts from one.
 async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
@@ -816,5 +820,99 @@ run('which piece each card became', () => {
       { card_id: named, piece_id: p3, basis: 'krish', state: 'drafting', published: false },
       { card_id: picked, piece_id: p1, basis: 'plan', state: 'published', published: true },
     ])
+  })
+})
+
+runSignals('his answers as countable taste signals', () => {
+  let client: pg.Client
+  let db: Db
+  const runId = '55555555-5555-5555-5555-555555555555'
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  // Synthetic answers only: a long one whose excerpt is cut, a short one, and a tap.
+  const tail = 'and the ending drags every single time'
+  const long: Evidence = {
+    source: 'learnings_json', sourceRef: 'synthetic-long', occurredAt: '2026-10-20T10:00:00.000Z', attribution: 'krish_words',
+    polarity: 'dislikes', lane: 'voice', layer: null, title: 'an invented rule', excerpt: `${'filler words here '.repeat(30)}${tail}`, meta: {},
+  }
+  const short: Evidence = {
+    source: 'title_verdicts', sourceRef: 'synthetic-short', occurredAt: '2026-10-21T10:00:00.000Z', attribution: 'krish_words',
+    polarity: 'dislikes', lane: 'voice', layer: null, title: 'an invented title', excerpt: 'the ending drags', meta: {},
+  }
+  const tap: Evidence = {
+    source: 'idea_triage', sourceRef: 'synthetic-tap', occurredAt: '2026-10-22T10:00:00.000Z', attribution: 'krish_action',
+    polarity: 'likes', lane: 'strategy', layer: null, title: 'an invented idea', excerpt: 'a strong hook', meta: {},
+  }
+  const sig = (over: Record<string, unknown>) => ({ dimension: 'close', attribute: 'surprise_last', label: null, polarity: 'dislikes',
+    strength: 2, span: null, reference: null, ...over })
+  // Refs follow the reading order, newest first: tap, short, long.
+  const llm: Llm = { model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { items: [
+    { ref: 0, signals: [sig({ dimension: 'opening', attribute: 'provocative_hook', polarity: 'likes' })] },
+    { ref: 1, signals: [sig({ span: 'the ending drags' })] },
+    { ref: 2, signals: [sig({ span: tail }), sig({ dimension: 'tone', attribute: 'whimsy', label: 'whimsy', span: 'not his words at all' })] },
+  ] } as never }) }
+
+  it('keeps the whole of a cut excerpt on a row written before it was kept, without a new version', async () => {
+    await writeEvidence(db, [{ ...long, excerpt: normalise(long).excerpt }], runId)
+    const w = await writeEvidence(db, [long, short, tap], runId)
+    expect(w).toMatchObject({ written: 2, fullText: 1 })
+    const [r] = await db.query<{ n: number; whole: string }>(
+      `select count(*)::int as n, max(meta->>'full_text') as whole from public.taste_evidence where source_ref = 'synthetic-long'`)
+    expect(r).toEqual({ n: 1, whole: normalise(long).meta.full_text })
+    expect((await writeEvidence(db, [long], runId))).toMatchObject({ written: 0, fullText: 0 })
+  })
+
+  it('writes each answer\'s signals, his phrase as his, a guess as a guess, and counts only his', async () => {
+    // A reading under an older revision, to be superseded.
+    const [ev] = await db.query<{ id: string }>(`select id::text from public.taste_evidence where source_ref = 'synthetic-short'`)
+    await client.query(`insert into taste_signals (evidence_id, dimension, kind, attribute, polarity, strength, origin, fingerprint, vocab_rev, prompt_rev, model)
+      values ($1, 'tone', 'form', 'tone.sincere', 'likes', 2, 'model_guess', 'aaaaaaaaaaaaaaaa', 'vocab-v0', 'signals-v0', 'stub')`, [ev!.id])
+    const r = await extractSignals(db, llm, runId, { write: true })
+    expect(r).toMatchObject({ items: 3, signals: 4, krish: 2, action: 1, guess: 1, other: 1, failed: 0, missing: false })
+    const rows = await db.query<{ ref: string; attribute: string; origin: string; span: string | null; superseded: boolean }>(
+      `select e.source_ref as ref, s.attribute, s.origin, s.span, s.superseded_at is not null as superseded
+       from taste_signals s join taste_evidence e on e.id = s.evidence_id order by 1, 2`)
+    expect(rows).toEqual([
+      { ref: 'synthetic-long', attribute: 'close.surprise_last', origin: 'krish', span: tail, superseded: false },
+      { ref: 'synthetic-long', attribute: 'tone.other', origin: 'model_guess', span: null, superseded: false },
+      { ref: 'synthetic-short', attribute: 'close.surprise_last', origin: 'krish', span: 'the ending drags', superseded: false },
+      { ref: 'synthetic-short', attribute: 'tone.sincere', origin: 'model_guess', span: null, superseded: true },
+      { ref: 'synthetic-tap', attribute: 'opening.provocative_hook', origin: 'krish_action', span: null, superseded: false },
+    ])
+    const patterns = await db.query<Record<string, unknown>>(
+      `select attribute, label, evidence_n, sources_n, grounded_n, guesses_n, opposite_n from taste_signal_patterns order by attribute`)
+    expect(patterns).toEqual([
+      { attribute: 'close.surprise_last', label: null, evidence_n: 2, sources_n: 2, grounded_n: 2, guesses_n: 0, opposite_n: 0 },
+      { attribute: 'opening.provocative_hook', label: null, evidence_n: 1, sources_n: 1, grounded_n: 0, guesses_n: 0, opposite_n: 0 },
+      { attribute: 'tone.other', label: 'whimsy', evidence_n: 0, sources_n: 0, grounded_n: 0, guesses_n: 1, opposite_n: 0 },
+    ])
+    const [ctx] = await db.query<{ lane: string; evidence_n: number }>(
+      `select lane, evidence_n from taste_signal_patterns_by_context where attribute = 'close.surprise_last'`)
+    expect(ctx).toEqual({ lane: 'voice', evidence_n: 2 })
+  })
+
+  it('reads an answer once per revision, and drops a withdrawn answer out of every count', async () => {
+    expect(await extractSignals(db, llm, runId, { write: true })).toMatchObject({ items: 0, signals: 0 })
+    const [read] = await db.query<{ n: number }>(`select count(*)::int as n from taste_signal_reads where prompt_rev = $1`, [SIGNAL_PROMPT_REV])
+    expect(read?.n).toBe(3)
+    await client.query(`update taste_evidence set withdrawn_at = now() where source_ref = 'synthetic-short'`)
+    const [p] = await db.query<{ evidence_n: number }>(`select evidence_n from taste_signal_patterns where attribute = 'close.surprise_last'`)
+    expect(p?.evidence_n).toBe(1)
+  })
+
+  it('refuses a phrase that is not his words, and a phrase on a tap', async () => {
+    const [long] = await db.query<{ id: string }>(`select id::text from taste_evidence where source_ref = 'synthetic-long'`)
+    const [tapRow] = await db.query<{ id: string }>(`select id::text from taste_evidence where source_ref = 'synthetic-tap'`)
+    const insert = (id: string, origin: string, span: string | null) => client.query(
+      `insert into taste_signals (evidence_id, dimension, kind, attribute, polarity, strength, span, origin, fingerprint, vocab_rev, prompt_rev, model)
+       values ($1, 'close', 'form', 'close.durable_rule', 'likes', 2, $3, $2, 'bbbbbbbbbbbbbbbb', 'vocab-v1', 'test', 'stub')`, [id, origin, span])
+    await expect(insert(long!.id, 'krish', 'words he never wrote')).rejects.toThrow(/verbatim phrase of his words/)
+    await expect(insert(tapRow!.id, 'krish', 'a strong hook')).rejects.toThrow(/krish_words evidence row/)
+    await expect(insert(long!.id, 'krish_action', null)).rejects.toThrow(/krish_action evidence row/)
+    await expect(client.query(
+      `insert into taste_signals (evidence_id, dimension, kind, attribute, polarity, strength, origin, fingerprint, vocab_rev, prompt_rev, model)
+       values ($1, 'vibes', 'form', 'vibes.good', 'likes', 2, 'model_guess', 'cccccccccccccccc', 'vocab-v1', 'test', 'stub')`, [long!.id]))
+      .rejects.toThrow(/not a craft layer/)
   })
 })

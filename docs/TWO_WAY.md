@@ -130,3 +130,8 @@ which piece a card became. Each proved by a test that fails without the change a
   and growth-makeyourmindup (PR 12) draft with them; AEO-Engine (PR 24) adds a wording-only voice step that runs
   only when at least one rule is approved, about $0.03 a subject, and keeps the rules out of its judging digest.
   Each engine's tests prove the rules reach drafting and never a score.
+- **After the two-way build: signals (2026-10-27).** Every report of his words is `krish_words` evidence, so the daily
+  `signals` stage (`src/signal/extract.ts`, content-engine `20261115090000_taste_signals.sql`) breaks it into countable
+  tags like any other answer of his, with where it was said kept in its context. A report never needs a new path to
+  count: filing it as evidence is enough. Proved by `test/pipeline.int.test.ts` ("his answers as countable taste
+  signals"), which runs once the migration is listed.

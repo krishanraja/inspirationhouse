@@ -66,12 +66,21 @@ export function isoOr(value: unknown, fallback: string): string {
  */
 export const PAGE_META_UNVERSIONED: readonly string[] = ['kind', 'kind_source', 'read_as', 'note_for_claude']
 
+/**
+ * The whole of an excerpt that was cut (meta.full_text), for any source. His words run longer than an excerpt holds
+ * (400 characters for most sources), and the cut part is still his: the signals stage reads all of it
+ * (src/signal/extract.ts). It is out of the version, as the excerpt's cut always was, so keeping it makes no row a new
+ * version, and a row written before it was kept gets it on the next run (writeEvidence).
+ */
+export const FULL_TEXT = 'full_text'
+/** The longest whole text kept, in characters. */
+export const FULL_TEXT_MAX = 20_000
+
 // The version is a hash of the entry's own content: an edited entry is a new
 // row, an unchanged one is never inserted twice.
 export function versionOf(e: Evidence): string {
-  const m = e.source === 'inspiration_page'
-    ? Object.fromEntries(Object.entries(e.meta).filter(([k]) => !PAGE_META_UNVERSIONED.includes(k)))
-    : e.meta
+  const m = Object.fromEntries(Object.entries(e.meta).filter(([k]) =>
+    k !== FULL_TEXT && !(e.source === 'inspiration_page' && PAGE_META_UNVERSIONED.includes(k))))
   return contentHash({
     a: e.attribution, p: e.polarity, l: e.lane, y: e.layer, t: e.title, x: e.excerpt, m,
   })
@@ -87,19 +96,26 @@ export function excerptMax(source: Source): number {
 }
 
 export function normalise(e: Evidence): Evidence {
+  const excerpt = clip(e.excerpt, excerptMax(e.source))
+  const whole = clip(e.excerpt, FULL_TEXT_MAX)
   return {
     ...e,
     sourceRef: e.sourceRef.slice(0, 300),
     layer: asLayer(e.layer),
     title: clip(e.title, 300),
-    excerpt: clip(e.excerpt, excerptMax(e.source)),
+    excerpt,
+    meta: whole !== null && whole !== excerpt ? { ...e.meta, [FULL_TEXT]: whole } : e.meta,
   }
 }
 
-export interface WriteResult { seen: number; written: number }
+export interface WriteResult {
+  seen: number; written: number
+  /** Rows already there that were given the whole of their cut excerpt (FULL_TEXT). */
+  fullText?: number
+}
 
 export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Promise<WriteResult> {
-  if (!rows.length) return { seen: 0, written: 0 }
+  if (!rows.length) return { seen: 0, written: 0, fullText: 0 }
   const payload = rows.map(normalise).map(e => ({
     source: e.source,
     source_ref: e.sourceRef,
@@ -115,9 +131,11 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
     collected_run: runId,
   }))
   let written = 0
+  let fullText = 0
   for (let i = 0; i < payload.length; i += 200) {
     const batch = payload.slice(i, i + 200)
-    const res = await db.query<{ n: number }>(
+    // A row already there gets only the whole of an excerpt that was cut (FULL_TEXT), when it lacks it.
+    const res = await db.query<{ n: number; kept: number }>(
       `with ins as (
          insert into public.taste_evidence
            (source, source_ref, source_version, occurred_at, attribution, polarity, lane, layer, title, excerpt, meta, collected_run)
@@ -125,15 +143,19 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
          from jsonb_to_recordset($1::jsonb) as x(
            source text, source_ref text, source_version text, occurred_at timestamptz, attribution text,
            polarity text, lane text, layer text, title text, excerpt text, meta jsonb, collected_run uuid)
-         on conflict (source, source_ref, source_version) do nothing
-         returning 1)
-       select count(*)::int as n from ins`,
+         on conflict (source, source_ref, source_version) do update
+           set meta = public.taste_evidence.meta || jsonb_build_object('full_text', excluded.meta->'full_text')
+           where excluded.meta ? 'full_text'
+             and public.taste_evidence.meta->'full_text' is distinct from excluded.meta->'full_text'
+         returning (xmax = 0) as inserted)
+       select count(*) filter (where inserted)::int as n, count(*) filter (where not inserted)::int as kept from ins`,
       [JSON.stringify(batch)],
       { write: true },
     )
     written += Number(res[0]?.n ?? 0)
+    fullText += Number(res[0]?.kept ?? 0)
   }
-  return { seen: rows.length, written }
+  return { seen: rows.length, written, fullText }
 }
 
 export interface WithdrawResult { withdrawn: number; restored: number; recounted: number }
