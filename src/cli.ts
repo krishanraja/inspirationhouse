@@ -17,6 +17,7 @@ import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag
 import { linkRequests } from './tag/links.ts'
 import type { DriveFile } from './google.ts'
 import { explainPending } from './explain/whys.ts'
+import { extractSignals, patternsOf } from './signal/extract.ts'
 import { distil } from './distil/claims.ts'
 import { propose, syncDecisions } from './publish/propose.ts'
 import { score } from './score/scoreboard.ts'
@@ -71,6 +72,7 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   }
   let seen = 0
   let written = 0
+  let fullText = 0
   for (const [name, fn] of groups) {
     let rows: Evidence[]
     try {
@@ -80,6 +82,7 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
       ctx.counts[`new_${name}`] = res.written
       seen += res.seen
       written += res.written
+      fullText += 'fullText' in res ? res.fullText ?? 0 : 0
       if (ctx.dry) ctx.preview[name] = rows.slice(0, 5)
       log({ stage: 'collect', source: name, seen: res.seen, written: res.written, dry_run: ctx.dry })
     } catch (err) {
@@ -118,6 +121,7 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   }
   ctx.counts.seen = seen
   ctx.counts.written = written
+  ctx.counts.evidence_full_text = fullText
 }
 
 /** Link the links he pasted to the cards their media became (src/tag/links.ts). A failure is recorded, never thrown. */
@@ -238,6 +242,7 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
     if (ex.failed) ctx.problems.push(`explain failed on ${ex.failed} item(s)`)
     const judged = judgeRun(ex.items, ex.whys)
     if (judged.status === 'failed') ctx.problems.push(judged.reason!)
+    await signals(ctx, ctx.llm)
   }
   const s = await syncDecisions(ctx.db, !ctx.dry)
   ctx.counts.retired = s.retired
@@ -259,6 +264,32 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   Object.assign(ctx.counts, { score_weeks: sc.weeks, metrics: sc.metrics })
   if (ctx.dry) ctx.preview.scoreboard = sc.rows
   return finish(ctx, 1)
+}
+
+/**
+ * Each answer of his as countable taste signals (src/signal/extract.ts). Until content-engine's taste_signals migration
+ * is applied, a real run writes nothing and asks no model, and says so in its counts (signals_table_missing); a dry run
+ * still reads, so its preview shows what the stage would keep. A failure is recorded, never thrown.
+ */
+async function signals(ctx: Ctx, llm: Llm): Promise<void> {
+  const r = await extractSignals(ctx.db, llm, ctx.runId, { write: !ctx.dry }).catch(err => {
+    ctx.problems.push(`signals: ${(err as Error).name}`)
+    log({ stage: 'signals', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!r) return
+  const counts = {
+    signals_items: r.items, signals_reread: r.reread, signals_written: r.signals, signals_krish: r.krish,
+    signals_action: r.action, signals_guess: r.guess, signals_other: r.other, signals_dropped: r.dropped,
+    signals_failed: r.failed, signals_repaired: r.repaired, signals_table_missing: r.missing ? 1 : 0,
+  }
+  Object.assign(ctx.counts, counts)
+  if (r.failed) ctx.problems.push(`signals failed on ${r.failed} item(s)`)
+  // Answers read and not one signal kept is a broken stage, never a quiet one.
+  const judged = judgeRun(r.items - r.failed, r.signals)
+  if (judged.status === 'failed') ctx.problems.push(`signals: ${judged.reason}`)
+  if (ctx.dry) ctx.preview.signals = { patterns: patternsOf(r.preview.signals), other_labels: r.preview.otherLabels, signals: r.preview.signals }
+  log({ stage: 'signals', dry_run: ctx.dry, ...counts })
 }
 
 /** The most cards one cards run tags, and when it stops starting them: the job is cancelled at 15 minutes. */
@@ -338,7 +369,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|cues|tagging|no words heard|explain|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|cues|tagging|no words heard|explain|signals|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
