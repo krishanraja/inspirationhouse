@@ -62,8 +62,6 @@ repository could do both. The state it found, corrected on 2026-10-26 for what h
   report tool is a different route with session attribution; it must never be able to write as Krish.
 - **Approved rules on 2026-10-26: none.** `taste_profile_current` had 0 rows (22 claims, 3 put to him and waiting). The read
   tool must return an empty, well-formed answer and say so, never invent a rule.
-- **The Anthropic API is at its usage limit until 2026-11-01.** Model calls fail. Nothing in this build should need one;
-  never verify by a paid call without Krish's yes.
 
 ## What to build, in order (the original plan; all six are done, see Progress)
 
