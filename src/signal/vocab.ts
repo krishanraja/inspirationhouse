@@ -160,7 +160,8 @@ export const isDimension = (v: unknown): v is Dimension => typeof v === 'string'
 export function slugOf(d: Dimension, attribute: string): string {
   if (d === 'subject') return 'subject.topic'
   const a = attribute.trim().toLowerCase().replace(/^[a-z_]+\./, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
-  return a in VOCAB[d] ? `${d}.${a}` : `${d}.other`
+  // Own keys only: `in` also finds what every object inherits, so "constructor" would pass as a tag.
+  return Object.hasOwn(VOCAB[d], a) ? `${d}.${a}` : `${d}.other`
 }
 
 /** The vocabulary as the prompt shows it. */

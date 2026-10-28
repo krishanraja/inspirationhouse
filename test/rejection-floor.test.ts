@@ -5,8 +5,7 @@ import {
 } from '../src/rejection/distil.ts'
 import {
   scrub, assertPublic, renderFloor, loadFloor, FLOOR_FILE,
-  type MediaViewRow, type QuoteViewRow, type RecordViewRow, type RenderInput, type StandardRow,
-} from '../src/rejection/render.ts'
+  type MediaViewRow, type QuoteViewRow, type RecordViewRow, type RenderInput, type StandardRow, productionOf } from '../src/rejection/render.ts'
 import { floorPullBody, publishFloor, FLOOR_BRANCH, FLOOR_CLOSEOUT_LINE } from '../src/rejection/publish.ts'
 import { fileCapture, fileReportDislike, type InboxRow, type ReportEvidence } from '../src/rejection/arrivals.ts'
 import { FORMATS, FORMAT_GROUPS, type FormatSlug } from '../src/rejection/vocab.ts'
@@ -545,6 +544,20 @@ const parse = (text: string) => JSON.parse(text) as FloorFile
 const keyOf = (doc: FloorFile, item: string) => Object.entries(doc.records).find(([, r]) => r.what === item)![0]
 
 describe('rendering the floor', () => {
+  it('weighs each standard by the productions it was raised about, patterns first', () => {
+    const input = floorInput()
+    // A second production for the approved standard's words: the record behind quote 2 moves to another piece.
+    input.records.push(vrec({ source_ref: 'synthetic-r3', piece: 'synthetic: another piece', quote_ids: [UUID(2)] }))
+    input.records[0] = { ...input.records[0]!, piece: 'synthetic: first piece', quote_ids: [UUID(1)] }
+    const doc = parse(renderFloor(input)) as unknown as { counts: Record<string, number>; standards: Record<string, { weight: string; productions: number }> }
+    const keys = Object.keys(doc.standards)
+    expect(doc.standards[keys[0]!]).toMatchObject({ weight: 'pattern', productions: 2 })
+    expect(Object.values(doc.standards).slice(1).every(s => s.weight === 'one_off' && s.productions <= 1)).toBe(true)
+    expect(doc.counts.patterns).toBe(1)
+    expect(productionOf({ piece: '  Synthetic   PIECE ', rejected_at: '2026-10-20 10:00:00+00' })).toBe('synthetic piece')
+    expect(productionOf({ piece: null, rejected_at: '2026-10-20 10:00:00+00' })).toBe('day:2026-10-20')
+  })
+
   it('renders the same bytes for the same floor, whatever order the quotes and media were read in', () => {
     const one = renderFloor(floorInput())
     expect(renderFloor(floorInput())).toBe(one)
