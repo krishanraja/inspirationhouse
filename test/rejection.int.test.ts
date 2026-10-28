@@ -11,6 +11,7 @@ import { FOLDER_MIME, type DriveFile, type Google } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
 import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts'
 import { INBOX_WAIT_DAYS, runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
+import { keepMedia } from '../src/rejection/keep.ts'
 import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
 
 // The Rejections floor against a real Postgres with content-engine's real migrations (supabase/migrations/), and
@@ -849,5 +850,45 @@ runJob('the rejections job, end to end, on a real database', () => {
     const r = await job(drive(dump({ rejected: 'synthetic: not a record\n{"synthetic": "nor this"}\n' })))
     expect(r.problems).toContain('rejections read: Error')
     expect(await tally()).toEqual(before)
+  })
+})
+
+runJob('the same image kept from two Drive files, on a real database', () => {
+  let client: pg.Client
+  let db: Db
+  let fx = ''
+  beforeAll(async () => {
+    ({ client, db } = await freshSchema())
+    fx = mkdtempSync(join(tmpdir(), 'rejection-alias-test-'))
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=green:s=64x36', '-frames:v', '1', join(fx, 'twice.png')])
+  }, 30_000)
+  afterAll(async () => {
+    await client?.end()
+    if (fx) rmSync(fx, { recursive: true, force: true })
+  })
+
+  it('keeps it once, notes the second file beside it, and fetches neither again', async () => {
+    const bytes = readFileSync(join(fx, 'twice.png'))
+    const file = (id: string, name: string): DriveFile => ({ id, name, mimeType: 'image/png', modifiedTime: '2026-10-28T09:00:00Z', createdTime: '2026-10-28T09:00:00Z' })
+    const first = file('1SYNTHETICfileid000000000101', 'twice one.png')
+    const second = file('1SYNTHETICfileid000000000102', 'twice two.png')
+    const files = new Map([['synthetic/twice one.png', first], ['synthetic/twice two.png', second]])
+    const fetched: string[] = []
+    const google = { download: async (id: string) => { fetched.push(id); return bytes }, file: async () => null, listFolder: async () => [] } as unknown as Google
+    const rec = (ref: string, path: string) => ({
+      source: 'drive_dump', sourceRef: `dump:${ref}`, version: md5(ref), kind: 'rejected', capture: 'still',
+      media: { stills: [path], strips: [], masters: [], texts: 0 }, moment: null,
+    }) as unknown as Parameters<typeof keepMedia>[2][number]
+    const records = [rec('synthetic-twice-1', 'synthetic/twice one.png'), rec('synthetic-twice-2', 'synthetic/twice two.png')]
+    const once = await keepMedia(db, google, records, files, true)
+    expect(once).toMatchObject({ stills: 2, reused: 0, failed: 0 })
+    const rows = (await client.query(`select derived_from, meta->'also_from' as also from taste_rejection_media`)).rows
+    expect(rows).toEqual([{ derived_from: first.id, also: [{ id: second.id, sha: null }] }])
+    const again = await keepMedia(db, google, records, files, true)
+    expect(again).toMatchObject({ stills: 0, reused: 2, failed: 0 })
+    expect(fetched).toEqual([first.id, second.id])
+    // Noted once, however often it is kept again.
+    await keepMedia(db, google, records, files, true)
+    expect((await client.query(`select jsonb_array_length(meta->'also_from')::int as n from taste_rejection_media`)).rows).toEqual([{ n: 1 }])
   })
 })
