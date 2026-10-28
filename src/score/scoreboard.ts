@@ -1,12 +1,15 @@
 import type { Db } from '../db.ts'
 import { mondayOf } from '../publish/propose.ts'
+import { MYMU } from '../venture.ts'
 
 // Is the output getting better? Computed from signals that are actually live,
 // by SQL anyone can re-run (query_rev pins the version). A week with nothing to
 // count is a no_reading, never a zero: silence is not feedback.
 
 // score-v2 (2026-10-24): the answered rate counts a card from when he first answered it (first_answered_at).
-export const QUERY_REV = 'score-v2'
+// score-v3 (2026-10-28): the scoreboard is Make Your Mind Up's, so the decided rate counts only its claims' proposals
+// (scope.venture publication, or none, which every proposal made before the ledger was split by venture is).
+export const QUERY_REV = 'score-v3'
 
 interface Metric { metric: string; sql: string }
 
@@ -59,7 +62,8 @@ export const METRICS: Metric[] = [
       select count(*) filter (where p.status <> 'proposed')::numeric as numerator,
              count(*)::numeric as denominator
       from public.mindmake_studio_learning_proposals p
-      where p.scope->>'source' = 'taste_ledger' and p.created_at < $2::date and $1::date < $2::date`,
+      where p.scope->>'source' = 'taste_ledger' and coalesce(p.scope->>'venture', '${MYMU}') = '${MYMU}'
+        and p.created_at < $2::date and $1::date < $2::date`,
   },
 ]
 

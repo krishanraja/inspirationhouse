@@ -1,6 +1,7 @@
 import type { Config } from '../config.ts'
 import type { Evidence } from '../evidence.ts'
 import { contentHash } from '../hash.ts'
+import { SOURCE_VENTURE } from '../venture.ts'
 
 // The taste files content-engine keeps in git. They are where Krish's live
 // feedback lands (written in Claude Code sessions with his words), so they are
@@ -52,6 +53,7 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
       source: 'learnings_json', sourceRef: String(l.id), occurredAt: isoDate(l.on, now),
       attribution: 'krish_words', polarity: 'dislikes', lane: 'voice', layer: null,
       title: str(l.means), excerpt: krish, meta: { why: str(l.why), means: str(l.means), status: str(l.status) },
+      venture: SOURCE_VENTURE.learnings_json,
     })
   }
 
@@ -67,6 +69,7 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
       attribution: krish ? 'krish_words' : 'krish_action',
       polarity: verdict === 'picked' ? 'likes' : 'dislikes', lane: 'voice', layer: 'packaging',
       title, excerpt: krish, meta: { why: str(v.why), surface: str(v.surface), piece: str(v.piece) },
+      venture: SOURCE_VENTURE.title_verdicts,
     })
   }
 
@@ -79,6 +82,7 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
       source: 'golden_examples', sourceRef: contentHash(text ?? said).slice(0, 16), occurredAt: isoDate(g.on, now),
       attribution: said ? 'krish_words' : 'krish_action', polarity: 'likes', lane: 'voice', layer: null,
       title: str(g.kind), excerpt: said ?? text, meta: { text, why: str(g.why) },
+      venture: SOURCE_VENTURE.golden_examples,
     })
   }
 
@@ -90,6 +94,7 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
       source: 'rejected_lines', sourceRef: contentHash(pattern).slice(0, 16), occurredAt: isoDate(r.on, now),
       attribution: str(r.said) ? 'krish_words' : 'krish_action', polarity: 'dislikes', lane: 'voice', layer: null,
       title: pattern, excerpt: str(r.said), meta: { instead: str(r.instead) },
+      venture: SOURCE_VENTURE.rejected_lines,
     })
   }
 
@@ -102,6 +107,7 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
       source: 'style_references', sourceRef: str(ref.drive_id) ?? contentHash(file).slice(0, 16), occurredAt: isoDate(ref.added, now),
       attribution: likes ? 'krish_words' : 'krish_action', polarity: 'likes', lane: 'production', layer: null,
       title: file, excerpt: likes, meta: { status: str(ref.status), modules: Array.isArray(ref.modules) ? ref.modules : [] },
+      venture: SOURCE_VENTURE.style_references,
     })
   }
 
@@ -113,6 +119,7 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
       source: 'style_bank', sourceRef: String(m.id), occurredAt: now,
       attribution: 'krish_action', polarity: verdict === 'liked' ? 'likes' : 'dislikes', lane: 'production',
       layer: str(m.layer), title: str(m.name), excerpt: null, meta: { how: str(m.how), fits: str(m.fits) },
+      venture: SOURCE_VENTURE.style_bank,
     })
   }
 

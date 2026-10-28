@@ -1,5 +1,6 @@
 import type { Db } from './db.ts'
 import { contentHash } from './hash.ts'
+import type { Venture } from './venture.ts'
 
 export type Lane = 'strategy' | 'production' | 'visibility' | 'voice'
 export type Polarity = 'likes' | 'dislikes' | 'neutral'
@@ -26,6 +27,8 @@ export interface Evidence {
   // recorded reason. Cut to excerptMax(source) characters (the column holds 2000).
   excerpt: string | null
   meta: Record<string, unknown>
+  /** Whose taste this is: set by src/venture.ts, never by a model, and kept out of the version (no row is re-versioned). */
+  venture: Venture
 }
 
 const LAYERS = new Set([
@@ -112,10 +115,35 @@ export interface WriteResult {
   seen: number; written: number
   /** Rows already there that were given the whole of their cut excerpt (FULL_TEXT). */
   fullText?: number
+  /** Rows already there, of the same identity, filed under another venture than src/venture.ts gives them now. */
+  ventureMismatch?: number
+}
+
+/**
+ * Of these rows, how many are already stored, with the same source, ref and version, under another venture than the
+ * one computed now. A stored row keeps its venture (the database refuses a change), so this is the proof that the code
+ * and the migration's backfill agree: anything above 0 is a run problem, never fixed by rewriting the row.
+ */
+export async function countVentureMismatch(db: Db, rows: Evidence[]): Promise<number> {
+  if (!rows.length) return 0
+  const keys = rows.map(normalise).map(e => ({ s: e.source, r: e.sourceRef, v: versionOf(e), w: e.venture }))
+  let n = 0
+  for (let i = 0; i < keys.length; i += 500) {
+    const [res] = await db.query<{ n: number }>(
+      `select count(*)::int as n from jsonb_to_recordset($1::jsonb) as k(s text, r text, v text, w text)
+       join public.taste_evidence e on e.source = k.s and e.source_ref = k.r and e.source_version = k.v
+       where e.venture is distinct from k.w`,
+      [JSON.stringify(keys.slice(i, i + 500))],
+    )
+    n += Number(res?.n ?? 0)
+  }
+  return n
 }
 
 export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Promise<WriteResult> {
-  if (!rows.length) return { seen: 0, written: 0, fullText: 0 }
+  if (!rows.length) return { seen: 0, written: 0, fullText: 0, ventureMismatch: 0 }
+  // Counted before writing: a row inserted now carries the venture computed now.
+  const ventureMismatch = await countVentureMismatch(db, rows)
   const payload = rows.map(normalise).map(e => ({
     source: e.source,
     source_ref: e.sourceRef,
@@ -128,6 +156,7 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
     title: e.title,
     excerpt: e.excerpt,
     meta: e.meta,
+    venture: e.venture,
     collected_run: runId,
   }))
   let written = 0
@@ -138,11 +167,11 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
     const res = await db.query<{ n: number; kept: number }>(
       `with ins as (
          insert into public.taste_evidence
-           (source, source_ref, source_version, occurred_at, attribution, polarity, lane, layer, title, excerpt, meta, collected_run)
-         select source, source_ref, source_version, occurred_at, attribution, polarity, lane, layer, title, excerpt, meta, collected_run
+           (source, source_ref, source_version, occurred_at, attribution, polarity, lane, layer, title, excerpt, meta, venture, collected_run)
+         select source, source_ref, source_version, occurred_at, attribution, polarity, lane, layer, title, excerpt, meta, venture, collected_run
          from jsonb_to_recordset($1::jsonb) as x(
            source text, source_ref text, source_version text, occurred_at timestamptz, attribution text,
-           polarity text, lane text, layer text, title text, excerpt text, meta jsonb, collected_run uuid)
+           polarity text, lane text, layer text, title text, excerpt text, meta jsonb, venture text, collected_run uuid)
          on conflict (source, source_ref, source_version) do update
            set meta = public.taste_evidence.meta || jsonb_build_object('full_text', excluded.meta->'full_text')
            where excluded.meta ? 'full_text'
@@ -155,7 +184,7 @@ export async function writeEvidence(db: Db, rows: Evidence[], runId: string): Pr
     written += Number(res[0]?.n ?? 0)
     fullText += Number(res[0]?.kept ?? 0)
   }
-  return { seen: rows.length, written, fullText }
+  return { seen: rows.length, written, fullText, ventureMismatch }
 }
 
 export interface WithdrawResult { withdrawn: number; restored: number; recounted: number }

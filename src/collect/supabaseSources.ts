@@ -1,6 +1,7 @@
 import type { Db } from '../db.ts'
 import type { Evidence } from '../evidence.ts'
 import { clip } from '../evidence.ts'
+import { SOURCE_VENTURE, ventureOf } from '../venture.ts'
 
 // Signals that live in the Mindmaker OS database. Each query reads only rows
 // that are Krish's own decisions, or labels the row as an observation.
@@ -22,17 +23,21 @@ export async function collectIdeaTriage(db: Db): Promise<Evidence[]> {
       // he likes it but would not run it. curious: he needs a reason. drop: no.
       polarity: ['story', 'angle', 'cute'].includes(verdict) ? 'likes' : verdict === 'drop' ? 'dislikes' : 'neutral',
       lane: 'strategy', layer: null, title: r.idea, excerpt: said ?? reason,
-      meta: { verdict, reason, angle: r.triage.angle ?? null },
+      meta: { verdict, reason, angle: r.triage.angle ?? null }, venture: SOURCE_VENTURE.idea_triage,
     } satisfies Evidence
   })
 }
 
 // Applied and dropped are his moves. The scorer's own `rejected` verdict is
-// not, so it is never read as his taste.
+// not, so it is never read as his taste. A target is its product's venture's
+// (src/venture.ts), so the product is read with it, and a product set is in
+// the version: a target moved to another product is a new row under its new
+// venture, never a stored row whose venture no longer matches. A target with
+// none keeps the meta it had, so no row stored before is versioned again.
 export async function collectVisibility(db: Db): Promise<Evidence[]> {
   const rows = await db.query<Record<string, string | number | null>>(
     `select id::text, title, status, type, format, pitch_type, audience_seniority, audience_size,
-            coalesce(applied_at, updated_at)::text as at
+            coalesce(applied_at, updated_at)::text as at, product_slug
      from public.visibility_targets
      where status in ('applied', 'dropped')`,
   )
@@ -40,7 +45,11 @@ export async function collectVisibility(db: Db): Promise<Evidence[]> {
     source: 'visibility_target', sourceRef: String(r.id), occurredAt: String(r.at),
     attribution: 'krish_action', polarity: r.status === 'applied' ? 'likes' : 'dislikes',
     lane: 'visibility', layer: 'stage_format', title: r.title === null ? null : String(r.title), excerpt: null,
-    meta: { type: r.type, format: r.format, pitch_type: r.pitch_type, audience_seniority: r.audience_seniority, audience_size: r.audience_size },
+    meta: {
+      type: r.type, format: r.format, pitch_type: r.pitch_type, audience_seniority: r.audience_seniority, audience_size: r.audience_size,
+      ...(r.product_slug !== null ? { product: String(r.product_slug) } : {}),
+    },
+    venture: ventureOf('visibility_target', { product: r.product_slug === null ? null : String(r.product_slug) }),
   }) satisfies Evidence)
 }
 
@@ -53,7 +62,7 @@ export async function collectCreatorMoves(db: Db): Promise<Evidence[]> {
   return rows.map(r => ({
     source: 'creator_move', sourceRef: r.id, occurredAt: r.at,
     attribution: 'observation', polarity: 'likes', lane: 'strategy', layer: null,
-    title: r.slug, excerpt: clip(r.why, 400), meta: { move: r.move },
+    title: r.slug, excerpt: clip(r.why, 400), meta: { move: r.move }, venture: SOURCE_VENTURE.creator_move,
   }) satisfies Evidence)
 }
 
@@ -69,7 +78,7 @@ export async function collectDriveArtifacts(db: Db): Promise<Evidence[]> {
     source: 'drive_artifact', sourceRef: r.file_id ?? r.id, occurredAt: r.at,
     attribution: 'machine_inference', polarity: 'likes', lane: 'strategy', layer: null,
     title: r.label, excerpt: clip(r.analysis?.why_saved, 400),
-    meta: { outcome: r.analysis?.outcome ?? null, idea: r.analysis?.the_idea ?? null },
+    meta: { outcome: r.analysis?.outcome ?? null, idea: r.analysis?.the_idea ?? null }, venture: SOURCE_VENTURE.drive_artifact,
   }) satisfies Evidence)
 }
 
@@ -104,6 +113,8 @@ export async function collectFeedbackHistory(db: Db): Promise<Evidence[]> {
       lane: r.agent === 'cleo' ? 'strategy' : 'visibility', layer: null,
       title: r.reason_code === null ? null : String(r.reason_code), excerpt: r.said === null ? null : String(r.said),
       meta: { agent: r.agent, reason_code: r.reason_code, bulk_day: bulk },
+      // Nova's and Nell's are Mindmake's, Cleo's Make Your Mind Up's (src/venture.ts).
+      venture: ventureOf('feedback_hist', { agent: r.agent }),
     } satisfies Evidence
   })
 }

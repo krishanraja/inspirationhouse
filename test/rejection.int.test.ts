@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import pg from 'pg'
 import { DRIVE, WEEKLY_PROPOSAL_CAP, loadConfig } from '../src/config.ts'
 import type { Db } from '../src/db.ts'
+import { VENTURE_STUBS } from './stubs.ts'
 import { FOLDER_MIME, type DriveFile, type Google } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
 import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts'
@@ -20,7 +21,7 @@ import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
 // takes (its header is the one list), and this file runs only once it holds 20261116090000_rejections.sql:
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-6]090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql | paste -sd, -)
 // It works in its own database beside the one given (<name>_rejections, made on first use): vitest runs test files at
 // the same time, and pipeline.int.test.ts drops schema public in the one given.
 const url = process.env.TEST_DATABASE_URL
@@ -91,7 +92,8 @@ async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
     create table public.content_engine_runs (id uuid primary key default gen_random_uuid(), job text, trigger text, status text, reason text, counts jsonb, started_at timestamptz, finished_at timestamptz);
     create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz, idea text, state text, created_at timestamptz default now(),
       meta jsonb not null default '{}', scheduled_for date, buried_at timestamptz);
-    create table public.content_edit_events (actor text, action text, occurred_at timestamptz);`)
+    create table public.content_edit_events (actor text, action text, occurred_at timestamptz);
+    ${VENTURE_STUBS}`)
   for (const file of migrations) await client.query(readFileSync(file, 'utf8'))
   const db: Db = {
     query: async <T,>(sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows as T[],
@@ -121,21 +123,21 @@ run('the floor\'s guarantees, on a real database', () => {
      values ($1, $2, '2026-10-20T12:00:00Z', 'day', 'a synthetic session', 'cloud', $3) returning id::text`,
     [md5(`quote ${n++}`), text, attribution],
   )).rows[0].id as string
-  const record = async (quoteIds: string[], over: { kind?: string; attribution?: string } = {}) => {
+  const record = async (quoteIds: string[], over: { kind?: string; attribution?: string; venture?: string } = {}) => {
     const i = n++
     return (await client.query(
       `insert into taste_rejections (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, item,
-         reason, strength, theme, formats, rule_kind, capture, rules_rev)
+         reason, strength, theme, formats, rule_kind, capture, rules_rev, venture)
        values ('drive_dump', $1, $2, $3, '2026-10-20T12:00:00Z', $4::uuid[], $5, 'synthetic: a title card crowds the edge',
-         'synthetic: no room around it', 'disliked', 'layout', '{short_video}', 'form', 'still', 'rules-v1') returning id::text`,
-      [`dump:synthetic-${i}`, md5(`record ${i}`), over.kind ?? 'rejected', quoteIds, over.attribution ?? 'krish_words'],
+         'synthetic: no room around it', 'disliked', 'layout', '{short_video}', 'form', 'still', 'rules-v1', $6) returning id::text`,
+      [`dump:synthetic-${i}`, md5(`record ${i}`), over.kind ?? 'rejected', quoteIds, over.attribution ?? 'krish_words', over.venture ?? 'publication'],
     )).rows[0].id as string
   }
   const standard = async (o: { quoteIds: string[]; statement?: string; krish?: string; krishQuoteId?: string; status?: string; proposalId?: string }) => (await client.query(
     `insert into taste_floor_standards (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, krish,
-       krish_quote_id, status, proposal_id, prompt_rev)
+       krish_quote_id, status, proposal_id, prompt_rev, venture)
      values ($1, $2, 'synthetic: scrub to each title card and look at its edges.', '{short_video}', 'layout', 'graphics', 'form',
-       $3::uuid[], $4, $5::uuid, $6, $7::uuid, 'floor-v1') returning id::text`,
+       $3::uuid[], $4, $5::uuid, $6, $7::uuid, 'floor-v1', 'publication') returning id::text`,
     [md5(`standard ${n++}`), o.statement ?? 'synthetic: always leave a title card room at the frame edge.', o.quoteIds,
       o.krish ?? null, o.krishQuoteId ?? null, o.status ?? 'candidate', o.proposalId ?? null],
   )).rows[0].id as string
@@ -229,9 +231,9 @@ run('the floor\'s guarantees, on a real database', () => {
     const said = await quote('synthetic: give the card room')
     const insert = () => client.query(
       `insert into taste_rejections (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, strength, theme,
-         formats, rule_kind, capture, rules_rev)
+         formats, rule_kind, capture, rules_rev, venture)
        values ('drive_dump', 'dump:synthetic-again', $1, 'rejected', '2026-10-20T12:00:00Z', array[$2::uuid], 'krish_words', 'disliked',
-         'layout', '{short_video}', 'form', 'words', 'rules-v1')
+         'layout', '{short_video}', 'form', 'words', 'rules-v1', 'publication')
        on conflict (source, source_ref, source_version) do nothing`,
       [md5('version again'), said])
     await insert()
@@ -266,7 +268,7 @@ run('the floor\'s guarantees, on a real database', () => {
     await standard({ quoteIds: [q, w], krish: 'chops the word', krishQuoteId: q })
     await client.query(`update taste_rejection_quotes set attribution = 'observation' where id = $1`, [q])
     await recountStandards(db, true)
-    const [eligible] = await db.query<{ krish: string | null; support_n: number }>(FLOOR_ELIGIBLE_SQL)
+    const [eligible] = await db.query<{ krish: string | null; support_n: number }>(FLOOR_ELIGIBLE_SQL, ['publication'])
     expect(eligible).toMatchObject({ krish: null, support_n: 1 })
     expect((await client.query(`select krish from taste_floor`)).rows).toEqual([{ krish: null }])
   })
@@ -358,7 +360,7 @@ run('the floor\'s guarantees, on a real database', () => {
     const capture = (said: string) => client.query(
       `insert into taste_rejection_inbox (said, said_where, said_at, formats, session_ref, repository, surface, emitter_id,
          client_report_id, reported_at)
-       values ($1, 'a synthetic session', '2026-10-27T10:00:00Z', '{short_video}', 'synthetic-session', 'synthetic/repo', 'cli',
+       values ($1, 'a synthetic session', '2026-10-27T10:00:00Z', '{short_video}', 'synthetic-session', 'krishanraja/content-engine', 'cli',
          'synthetic-emitter', 'synthetic-capture-000001', '2026-10-27T10:05:00Z') returning id::text`,
       [said])
     const id = (await capture('synthetic: the lower third covers his face')).rows[0].id as string
@@ -373,7 +375,7 @@ run('the floor\'s guarantees, on a real database', () => {
     const shot = (await client.query(
       `insert into taste_rejection_inbox (said, said_where, said_at, screenshot, screenshot_mime, session_ref, repository, surface, emitter_id,
          client_report_id, reported_at)
-       values ('synthetic: a shot', 'a synthetic session', '2026-10-27T10:00:00Z', $1, 'image/png', 'synthetic-session', 'synthetic/repo', 'cli',
+       values ('synthetic: a shot', 'a synthetic session', '2026-10-27T10:00:00Z', $1, 'image/png', 'synthetic-session', 'krishanraja/content-engine', 'cli',
          'synthetic-emitter', 'synthetic-capture-000099', '2026-10-27T10:05:00Z') returning id::text`,
       [labelled('image/png', randomBytes(100))])).rows[0].id as string
     await expect(client.query(`update taste_rejection_inbox set screenshot = null, screenshot_mime = null where id = $1`, [shot]))
@@ -391,7 +393,7 @@ run('the floor\'s guarantees, on a real database', () => {
       `insert into taste_rejection_inbox (said, said_where, said_at, screenshot, screenshot_mime, master_drive_id, master_sha256, at_ms,
          whole_cut, session_ref, repository, surface, emitter_id, client_report_id, reported_at)
        values ('synthetic: a capture', 'a synthetic session', '2026-10-27T10:00:00Z', $1, $2, $3, $4, $5, $6, 'synthetic-session',
-         'synthetic/repo', 'cli', 'synthetic-emitter', $7, '2026-10-27T10:05:00Z')`,
+         'krishanraja/content-engine', 'cli', 'synthetic-emitter', $7, '2026-10-27T10:05:00Z')`,
       [o.shot ?? null, o.shot ? (o.mime ?? 'image/png') : null, o.master ?? null, o.sha ?? null, o.atMs ?? null, o.wholeCut ?? false,
         `synthetic-shape-${String(k++).padStart(8, '0')}`])
     const master = '1SYNTHETICmasterid0000000009'
@@ -659,7 +661,7 @@ runJob('the rejections job, end to end, on a real database', () => {
       `insert into taste_rejection_inbox (kind, said, said_where, said_at, piece, formats, screenshot, screenshot_mime, session_ref,
          repository, surface, emitter_id, client_report_id, reported_at)
        values ('rejected', 'synthetic: the lower third covers his face', 'a synthetic session', '2026-10-27T10:00:00Z',
-         'synthetic piece three', '{short_video}', $1, 'image/png', 'synthetic-session', 'synthetic/repo', 'cli', 'synthetic-emitter',
+         'synthetic piece three', '{short_video}', $1, 'image/png', 'synthetic-session', 'krishanraja/content-engine', 'cli', 'synthetic-emitter',
          'synthetic-capture-000001', '2026-10-27T10:05:00Z') returning id::text`,
       [shot])
     const r = await job(drive(dump({ rejected: [A, C] })))
@@ -720,7 +722,7 @@ runJob('the rejections job, end to end, on a real database', () => {
       `insert into taste_rejection_inbox (kind, said, said_where, said_at, piece, formats, master_drive_id, at_ms, whole_cut,
          session_ref, repository, surface, emitter_id, client_report_id, reported_at)
        values ('rejected', $1, 'a synthetic session', '2026-10-27T11:00:00Z', 'synthetic piece four', '{long_video}', $2, $3, $4,
-         'synthetic-session', 'synthetic/repo', 'cli', 'synthetic-emitter', $5, '2026-10-27T11:05:00Z') returning id::text`,
+         'synthetic-session', 'krishanraja/content-engine', 'cli', 'synthetic-emitter', $5, '2026-10-27T11:05:00Z') returning id::text`,
       [o.said, o.master, o.atMs, o.wholeCut, o.key])
     const whole = await insert({ said: 'synthetic: the whole cut drags', key: 'synthetic-capture-000002', master, atMs: null, wholeCut: true })
     const moment = await insert({ said: 'synthetic: the word is chopped here', key: 'synthetic-capture-000003', master: unseen, atMs: 12_000, wholeCut: false })
@@ -803,9 +805,9 @@ runJob('the rejections job, end to end, on a real database', () => {
   it('cites his words through his words, when a session reports a quote the dump holds only as a paraphrase', async () => {
     // The same words on the same day: the dump's compiler marked them a paraphrase, and a session reported them as his.
     await client.query(
-      `insert into taste_evidence (source, source_ref, source_version, occurred_at, attribution, polarity, lane, title, excerpt, meta)
+      `insert into taste_evidence (source, source_ref, source_version, occurred_at, attribution, polarity, lane, title, excerpt, meta, venture)
        values ('session_report', 'report:synthetic-0001', '0123456789abcdef', '2026-10-21T15:00:00Z', 'krish_words', 'dislikes', 'production',
-               'synthetic: the close of piece two', $1, $2)`,
+               'synthetic: the close of piece two', $1, $2, 'publication')`,
       [C.quotes[0]!.text, JSON.stringify({ said_where: 'a synthetic session', repository: 'synthetic/repo' })])
     const r = await job(drive(dump({ rejected: [A, C] })))
     expect(r.problems).toEqual([])

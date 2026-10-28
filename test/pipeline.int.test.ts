@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import pg from 'pg'
 import type { Db } from '../src/db.ts'
+import { VENTURE_STUBS } from './stubs.ts'
 import type { Llm } from '../src/llm.ts'
 import { writeEvidence, withdrawUncollected, normalise, type Evidence } from '../src/evidence.ts'
 import { explainPending } from '../src/explain/whys.ts'
@@ -32,10 +33,11 @@ import type { DriveFile, Google } from '../src/google.ts'
 //   20261115090000_taste_signals.sql          (his answers as countable tags; its suite runs once the file is listed)
 //   20261116090000_rejections.sql             (the floor: his rejections, what is kept of each, the standards;
 //                                              its suite, test/rejection.int.test.ts, runs once the file is listed)
+//   20261117090000_taste_ventures.sql         (every row keyed by venture; its suite is test/venture.int.test.ts)
 // For example, from a content-engine checkout (CI runs the same, .github/workflows/ci.yml):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-6]090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql | paste -sd, -)
 // The database must be UTF8 (under SQL_ASCII char_length counts bytes, and the emoji excerpt test fails).
 const url = process.env.TEST_DATABASE_URL
 const migrations = (process.env.TASTE_MIGRATION ?? '').split(',').map(f => f.trim()).filter(Boolean)
@@ -73,7 +75,8 @@ async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
     create table public.content_engine_runs (id uuid primary key default gen_random_uuid(), job text, trigger text, status text, reason text, counts jsonb, started_at timestamptz, finished_at timestamptz);
     create table public.content_ideas (id uuid primary key default gen_random_uuid(), published_at timestamptz, idea text, state text, created_at timestamptz default now(),
       meta jsonb not null default '{}', scheduled_for date, buried_at timestamptz);
-    create table public.content_edit_events (actor text, action text, occurred_at timestamptz);`)
+    create table public.content_edit_events (actor text, action text, occurred_at timestamptz);
+    ${VENTURE_STUBS}`)
   for (const file of migrations) await client.query(readFileSync(file, 'utf8'))
   const db: Db = {
     query: async <T,>(sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows as T[],
@@ -94,7 +97,7 @@ run('the whole loop, on a real database', () => {
   const evidence: Evidence[] = [1, 2, 3, 4].map(n => ({
     source: 'title_verdicts', sourceRef: `t${n}`, occurredAt: day(n + 5), attribution: 'krish_words',
     polarity: n === 4 ? 'dislikes' : 'likes', lane: 'voice', layer: 'packaging',
-    title: `synthetic title ${n}`, excerpt: `synthetic: say what happens ${n}`, meta: {},
+    title: `synthetic title ${n}`, excerpt: `synthetic: say what happens ${n}`, meta: {}, venture: 'publication',
   }))
 
   it('collects idempotently', async () => {
@@ -179,9 +182,9 @@ run('the whole loop, on a real database', () => {
     (await client.query(`select id::text from taste_evidence where source = $1 and source_ref = $2 and withdrawn_at is null`, [source, ref])).rows[0].id as string
   const insertClaim = async (fingerprint: string, ids: string[], krish: string | null, krishSource: string | null) =>
     (await client.query(
-      `insert into taste_claims (fingerprint, lane, layer, kind, statement, krish, krish_source_id, why, means, evidence_ids, flip_rule)
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, krish, krish_source_id, why, means, evidence_ids, flip_rule, venture)
        values ($1, 'voice', 'packaging', 'form', 'A synthetic claim for this test.', $2, $3::uuid, 'Because the test says so.',
-               'Do what the test says.', $4::uuid[], 'If the test says otherwise.') returning id::text`,
+               'Do what the test says.', $4::uuid[], 'If the test says otherwise.', 'publication') returning id::text`,
       [fingerprint, krish, krishSource, ids],
     )).rows[0].id as string
 
@@ -200,7 +203,7 @@ run('the whole loop, on a real database', () => {
   it('counts no day from withdrawn evidence and carries no quote whose row was withdrawn', async () => {
     const rows: Evidence[] = [['w1', 1], ['w2', 3], ['w3', 3]].map(([ref, d]) => ({
       source: 'what_i_like_sheet', sourceRef: String(ref), occurredAt: `2026-09-0${d}T12:00:00.000Z`, attribution: 'krish_words',
-      polarity: 'likes', lane: 'voice', layer: 'packaging', title: null, excerpt: `synthetic: a plain opening ${ref}`, meta: {},
+      polarity: 'likes', lane: 'voice', layer: 'packaging', title: null, excerpt: `synthetic: a plain opening ${ref}`, meta: {}, venture: 'publication',
     }))
     await writeEvidence(db, rows, runId)
     const [w1, w2, w3] = await Promise.all(['w1', 'w2', 'w3'].map(r => evidenceId('what_i_like_sheet', r)))
@@ -215,7 +218,7 @@ run('the whole loop, on a real database', () => {
   it('recounts a claim a failed run left counting withdrawn support, on the next run', async () => {
     const page: Evidence[] = ['card-x', 'card-y', 'card-z'].map((ref, i) => ({
       source: 'inspiration_page', sourceRef: ref, occurredAt: day(10 + i), attribution: 'krish_words', polarity: 'likes',
-      lane: 'production', layer: null, title: 'clip.mp4', excerpt: `synthetic: the cut on the beat ${i}`, meta: { picked_likes: [] },
+      lane: 'production', layer: null, title: 'clip.mp4', excerpt: `synthetic: the cut on the beat ${i}`, meta: { picked_likes: [] }, venture: 'publication',
     }))
     await writeEvidence(db, page, runId)
     const ids = await Promise.all(page.map(e => evidenceId('inspiration_page', e.sourceRef)))
@@ -306,7 +309,7 @@ run('the review of the link box, on a real database', () => {
 
   const answer = (ref: string, at: string, picks: string[]): Evidence => ({
     source: 'inspiration_page', sourceRef: ref, occurredAt: at, attribution: 'krish_words', polarity: 'likes',
-    lane: 'production', layer: null, title: 'synthetic.mp4', excerpt: `synthetic: the cut on the beat ${ref}`, meta: { picked_likes: picks },
+    lane: 'production', layer: null, title: 'synthetic.mp4', excerpt: `synthetic: the cut on the beat ${ref}`, meta: { picked_likes: picks }, venture: 'publication',
   })
 
   it('counts the day of an answer he added a pick to, as support does, so its claim can still be proposed', async () => {
@@ -315,9 +318,9 @@ run('the review of the link box, on a real database', () => {
     await withdrawUncollected(db, 'inspiration_page', v1, true)
     const ids = (await client.query(`select id::text from taste_evidence where source = 'inspiration_page' order by source_ref`)).rows.map(r => r.id as string)
     const [{ id }] = (await client.query(
-      `insert into taste_claims (fingerprint, lane, layer, kind, statement, why, means, evidence_ids, flip_rule)
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, why, means, evidence_ids, flip_rule, venture)
        values ('b1b1b1b1b1b1b1b1', 'production', 'editing', 'form', 'A synthetic claim.', 'A synthetic why.', 'Do the synthetic thing.',
-               $1::uuid[], 'If the test says otherwise.') returning id::text`, [ids])).rows
+               $1::uuid[], 'If the test says otherwise.', 'publication') returning id::text`, [ids])).rows
     // He adds a pick to two of them: each gets a new version, and the version the claim cites is withdrawn.
     const v2 = [answer('card-p', v1[0]!.occurredAt, ['tight pacing']), answer('card-q', v1[1]!.occurredAt, ['tight pacing']), v1[2]!, v1[3]!]
     await writeEvidence(db, v2, runId)
@@ -342,9 +345,9 @@ run('the review of the link box, on a real database', () => {
        returning id::text`)).rows
     const [{ id }] = (await client.query(
       `insert into taste_claims (fingerprint, lane, layer, kind, statement, krish, krish_source_id, why, means, evidence_ids, flip_rule,
-         status, proposal_id)
+         status, proposal_id, venture)
        values ('b2b2b2b2b2b2b2b2', 'production', 'editing', 'form', 'A synthetic claim.', 'the cut on the beat', $2::uuid,
-               'A synthetic why.', 'Do the synthetic thing.', $1::uuid[], 'If the test says otherwise.', 'proposed', $3::uuid)
+               'A synthetic why.', 'Do the synthetic thing.', $1::uuid[], 'If the test says otherwise.', 'proposed', $3::uuid, 'publication')
        returning id::text`,
       [rows.map(r => r.id), quoted, proposal])).rows
     const quote = async () => ({
@@ -594,11 +597,11 @@ run('the Instagram feed after its workbook is re-uploaded', () => {
   const post = (id: string, file: string): Evidence => ({
     source: 'drive_cold', sourceRef: `instagram:${id}`, occurredAt: '2026-10-24T10:00:00.000Z', attribution: 'observation',
     polarity: 'neutral', lane: 'strategy', layer: null, title: `post ${id}`, excerpt: 'an invented summary',
-    meta: { kind: 'instagram_post', file },
+    meta: { kind: 'instagram_post', file }, venture: 'publication',
   })
   const driveFile: Evidence = {
     source: 'drive_cold', sourceRef: '1anInventedDriveFileId', occurredAt: '2026-10-20T10:00:00.000Z', attribution: 'krish_action',
-    polarity: 'likes', lane: 'strategy', layer: null, title: 'a dropped file', excerpt: null, meta: { kind: 'drive_file' },
+    polarity: 'likes', lane: 'strategy', layer: null, title: 'a dropped file', excerpt: null, meta: { kind: 'drive_file' }, venture: 'publication',
   }
   const standing = async () => (await db.query<{ ref: string; file: string | null }>(
     `select source_ref as ref, meta->>'file' as file from public.taste_evidence where withdrawn_at is null order by 1, 2`))
@@ -689,7 +692,7 @@ run('a claim he has been shown', () => {
     const rows: Evidence[] = [1, 2, 3, 4, 5, 6].map(n => ({
       source: 'title_verdicts', sourceRef: `d${n}`, occurredAt: `2026-10-0${n}T12:00:00.000Z`,
       attribution: n <= 4 ? 'krish_words' : 'observation', polarity: 'likes', lane: 'voice', layer: 'packaging',
-      title: null, excerpt: `synthetic: words ${n} here`, meta: {},
+      title: null, excerpt: `synthetic: words ${n} here`, meta: {}, venture: 'publication',
     }))
     await writeEvidence(db, rows, runId)
     await client.query(`insert into taste_whys (evidence_id, statement, lane, layer, kind, origin, model, prompt_rev, fingerprint)
@@ -727,19 +730,20 @@ run('what sessions in other repositories report', () => {
   beforeAll(async () => { ({ client, db } = await freshSchema()) })
   afterAll(async () => { await client?.end() })
 
-  // Synthetic words and references only. Every report carries its session, repository and when it was reported.
+  // Synthetic words and references only. Every report carries its session, repository and when it was reported. The
+  // repository is one the venture map holds (content-engine's, Make Your Mind Up's), so the database fills its venture.
   const report = (over: Record<string, unknown>) => ({
     kind: 'observation', body: 'synthetic: the session noticed short titles did better', said_where: null, said_at: null,
     lane: 'voice', polarity: 'neutral', subject_ref: null, subject: null, session_ref: 'session_synthetic_0001',
-    repository: 'krishanraja/synthetic-repo', surface: 'claude-code-web', emitter_id: 'emitter-synthetic',
-    client_report_id: `synthetic-report-${Math.random().toString(36).slice(2, 12)}`, ...over,
+    repository: 'krishanraja/content-engine', surface: 'claude-code-web', emitter_id: 'emitter-synthetic',
+    client_report_id: `synthetic-report-${Math.random().toString(36).slice(2, 12)}`, venture: null, ...over,
   })
   const insert = (r: Record<string, unknown>) => client.query(
     `insert into taste_reports (kind, body, said_where, said_at, lane, polarity, subject_ref, subject, session_ref,
-       repository, surface, emitter_id, client_report_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id::text`,
+       repository, surface, emitter_id, client_report_id, venture)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id::text`,
     [r.kind, r.body, r.said_where, r.said_at, r.lane, r.polarity, r.subject_ref, r.subject, r.session_ref,
-      r.repository, r.surface, r.emitter_id, r.client_report_id])
+      r.repository, r.surface, r.emitter_id, r.client_report_id, r.venture])
 
   it('keeps his words only with where and when he typed them, and never lets an observation pass for them', async () => {
     await expect(insert(report({ kind: 'krish_words', said_where: 'a synthetic chat', said_at: null }))).rejects.toThrow(/words_say_where_and_when/)
@@ -763,15 +767,15 @@ run('what sessions in other repositories report', () => {
 
     expect(await syncReports(db, runId, { write: true })).toMatchObject({ read: 2, words: 1, observations: 1, cues: 1, evidenceWritten: 2 })
     const ev = (await client.query(`select attribution, excerpt, meta->>'said_where' as said_where, meta->>'repository' as repository,
-      meta->>'session_ref' as session_ref, occurred_at from taste_evidence where source = 'session_report' order by attribution`)).rows
-    expect(ev.map(e => [e.attribution, e.said_where, e.repository, e.session_ref])).toEqual([
-      ['krish_words', 'a synthetic chat in a synthetic repo', 'krishanraja/synthetic-repo', 'session_synthetic_0001'],
-      ['observation', null, 'krishanraja/synthetic-repo', 'session_synthetic_0001'],
+      meta->>'session_ref' as session_ref, occurred_at, venture from taste_evidence where source = 'session_report' order by attribution`)).rows
+    expect(ev.map(e => [e.attribution, e.said_where, e.repository, e.session_ref, e.venture])).toEqual([
+      ['krish_words', 'a synthetic chat in a synthetic repo', 'krishanraja/content-engine', 'session_synthetic_0001', 'publication'],
+      ['observation', null, 'krishanraja/content-engine', 'session_synthetic_0001', 'publication'],
     ])
     expect(new Date(ev[0].occurred_at).toISOString()).toBe('2026-10-26T09:00:00.000Z')
-    const cues = (await client.query(`select source, subject_ref, said, use, use_origin from feedback_cues`)).rows
+    const cues = (await client.query(`select source, subject_ref, said, use, use_origin, venture from feedback_cues`)).rows
     expect(cues).toEqual([{ source: 'session_report', subject_ref: '00000000-0000-0000-0000-0000000000aa',
-      said: 'synthetic: keep an eye on this one', use: 'track_over_time', use_origin: 'krish' }])
+      said: 'synthetic: keep an eye on this one', use: 'track_over_time', use_origin: 'krish', venture: 'publication' }])
     // Filed once: a second run reads nothing, and a filed report is never edited.
     expect((await syncReports(db, runId, { write: true })).read).toBe(0)
     await expect(client.query(`update taste_reports set body = 'synthetic: changed'`)).rejects.toThrow(/kept as it was reported/)
@@ -780,13 +784,35 @@ run('what sessions in other repositories report', () => {
     await expect(insert(report({ kind: 'krish_words', said_where: 'a synthetic chat', said_at: '1999-12-31T00:00:00Z' }))).rejects.toThrow(/said_since_2020/)
   })
 
+  it('holds a report from a repository the map does not hold, until its session names the venture, and refuses one that contradicts the map', async () => {
+    const held = report({ repository: 'krishanraja/synthetic-repo', body: 'synthetic: a report nobody placed' })
+    await insert(held)
+    const named = report({ repository: 'krishanraja/synthetic-repo', venture: 'heartside', body: 'synthetic: a report for heartside' })
+    await insert(named)
+    await expect(insert(report({ venture: 'heartside' }))).rejects.toThrow(/serves publication, not heartside/)
+    await expect(insert(report({ repository: 'krishanraja/synthetic-repo', venture: 'mindmaker' }))).rejects.toThrow(/not an active venture/)
+    const r = await syncReports(db, runId, { write: true })
+    expect(r).toMatchObject({ read: 1, unassigned: 1, ventureMismatch: 0 })
+    const rows = (await client.query(`select body, venture, meta->>'venture_from' as venture_from, collected_at is not null as filed
+      from taste_reports where repository = 'krishanraja/synthetic-repo' order by body`)).rows
+    expect(rows).toEqual([
+      { body: 'synthetic: a report for heartside', venture: 'heartside', venture_from: 'session', filed: true },
+      { body: 'synthetic: a report nobody placed', venture: null, venture_from: null, filed: false },
+    ])
+    // Its evidence is the venture its session named; the held one became nothing.
+    const ev = (await client.query(`select excerpt, venture from taste_evidence where meta->>'repository' = 'krishanraja/synthetic-repo'`)).rows
+    expect(ev).toEqual([{ excerpt: 'synthetic: a report for heartside', venture: 'heartside' }])
+    // Still held on the next run, and still counted: never filed under a guess.
+    expect(await syncReports(db, runId, { write: true })).toMatchObject({ read: 0, unassigned: 1 })
+  })
+
   it('never lets an observation change a claim\'s support, and never explains it', async () => {
-    const ids = Object.fromEntries((await client.query(`select attribution, id::text from taste_evidence where source = 'session_report'`)).rows
+    const ids = Object.fromEntries((await client.query(`select attribution, id::text from taste_evidence where source = 'session_report' and venture = 'publication'`)).rows
       .map(r => [r.attribution, r.id]))
     const claim = async (evidence: string[]) => (await client.query(
-      `insert into taste_claims (fingerprint, lane, layer, kind, statement, why, means, evidence_ids, flip_rule)
+      `insert into taste_claims (fingerprint, lane, layer, kind, statement, why, means, evidence_ids, flip_rule, venture)
        values (substr(md5(random()::text), 1, 16), 'voice', null, 'subject', 'A synthetic claim on reports.', 'A synthetic why for it.',
-         'A synthetic meaning for it.', $1::uuid[], 'A synthetic flip rule for it.') returning support_n`, [evidence])).rows[0].support_n
+         'A synthetic meaning for it.', $1::uuid[], 'A synthetic flip rule for it.', 'publication') returning support_n`, [evidence])).rows[0].support_n
     expect(await claim([ids.krish_words])).toBe(1)
     expect(await claim([ids.krish_words, ids.observation])).toBe(1)
     expect(await claim([ids.observation])).toBe(0)
@@ -835,15 +861,15 @@ runSignals('his answers as countable taste signals', () => {
   const tail = 'and the ending drags every single time'
   const long: Evidence = {
     source: 'learnings_json', sourceRef: 'synthetic-long', occurredAt: '2026-10-20T10:00:00.000Z', attribution: 'krish_words',
-    polarity: 'dislikes', lane: 'voice', layer: null, title: 'an invented rule', excerpt: `${'filler words here '.repeat(30)}${tail}`, meta: {},
+    polarity: 'dislikes', lane: 'voice', layer: null, title: 'an invented rule', excerpt: `${'filler words here '.repeat(30)}${tail}`, meta: {}, venture: 'publication',
   }
   const short: Evidence = {
     source: 'title_verdicts', sourceRef: 'synthetic-short', occurredAt: '2026-10-21T10:00:00.000Z', attribution: 'krish_words',
-    polarity: 'dislikes', lane: 'voice', layer: null, title: 'an invented title', excerpt: 'the ending drags', meta: {},
+    polarity: 'dislikes', lane: 'voice', layer: null, title: 'an invented title', excerpt: 'the ending drags', meta: {}, venture: 'publication',
   }
   const tap: Evidence = {
     source: 'idea_triage', sourceRef: 'synthetic-tap', occurredAt: '2026-10-22T10:00:00.000Z', attribution: 'krish_action',
-    polarity: 'likes', lane: 'strategy', layer: null, title: 'an invented idea', excerpt: 'a strong hook', meta: {},
+    polarity: 'likes', lane: 'strategy', layer: null, title: 'an invented idea', excerpt: 'a strong hook', meta: {}, venture: 'publication',
   }
   const sig = (over: Record<string, unknown>) => ({ dimension: 'close', attribute: 'surprise_last', label: null, polarity: 'dislikes',
     strength: 2, span: null, reference: null, ...over })

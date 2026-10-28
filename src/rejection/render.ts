@@ -1,5 +1,6 @@
 import type { Db } from '../db.ts'
 import { contentHash, stableJson } from '../hash.ts'
+import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { FORMATS, THEMES, type FormatSlug } from './vocab.ts'
 
 // The floor as one file, config/rejection-floor.json in content-engine, where every production session reads it
@@ -29,28 +30,33 @@ export interface RecordViewRow {
 export interface QuoteViewRow { id: string; text: string; attribution: string; said_at: string }
 export interface MediaViewRow { sha256: string; role: string; mime: string; bytes: number; at_ms: number | null; derived_from: string | null }
 
-export async function loadFloor(db: Db): Promise<{ standards: StandardRow[]; records: RecordViewRow[]; quotes: QuoteViewRow[]; media: MediaViewRow[] }> {
+/** One venture's floor (FLOOR_VENTURE): its standards, its records, and only the quotes and media its records hold. */
+export async function loadFloor(db: Db, venture: Venture = FLOOR_VENTURE): Promise<{ standards: StandardRow[]; records: RecordViewRow[]; quotes: QuoteViewRow[]; media: MediaViewRow[] }> {
   const standards = await db.query<StandardRow>(
     `select id::text, fingerprint, formats, theme, layer, kind, standing, statement, how_to_check, krish, support_n, action_n,
             quote_ids::text[] as quote_ids, record_refs, boundary_quote_ids::text[] as boundary_quote_ids, decided_at::text
-     from public.taste_floor order by fingerprint`,
+     from public.taste_floor where venture = $1 order by fingerprint`,
+    [venture],
   )
   const records = await db.query<RecordViewRow>(
     `select source, source_ref, kind, rejected_at::text, theme, formats, rule_kind, capture, piece, item, wanted_instead, strength,
             quote_ids::text[] as quote_ids, near, media_sha256, (master_drive_id is not null) as pointed, moment_ms
      from public.taste_rejections
-     where withdrawn_at is null and rule_kind in ('form', 'workflow')
+     where venture = $1 and withdrawn_at is null and rule_kind in ('form', 'workflow')
      order by rejected_at, source, source_ref`,
+    [venture],
   )
   const quotes = await db.query<QuoteViewRow>(
     `select q.id::text, q.text, q.attribution, q.said_at::text from public.taste_rejection_quotes q
-     where exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and r.rule_kind in ('form', 'workflow')
+     where exists (select 1 from public.taste_rejections r where r.venture = $1 and r.withdrawn_at is null and r.rule_kind in ('form', 'workflow')
                    and (q.id = any(r.quote_ids) or r.near @> jsonb_build_array(jsonb_build_object('quote_id', q.id::text))))`,
+    [venture],
   )
   const media = await db.query<MediaViewRow>(
     `select m.sha256, m.role, m.mime, octet_length(m.bytes)::int as bytes, m.at_ms, m.derived_from
      from public.taste_rejection_media m
-     where exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and m.sha256 = any(r.media_sha256))`,
+     where exists (select 1 from public.taste_rejections r where r.venture = $1 and r.withdrawn_at is null and m.sha256 = any(r.media_sha256))`,
+    [venture],
   )
   return { standards, records, quotes, media }
 }

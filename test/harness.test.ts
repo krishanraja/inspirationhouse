@@ -1,17 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { renderApproved, syncHarness, githubApi, hashLine, pullBody, CLOSEOUT_LINE, HARNESS_FILES, SYNC_BRANCH, APPROVED_SQL, type ApprovedRule, type GitHubApi } from '../src/publish/harness.ts'
+import { renderApproved, syncHarness, githubApi, hashLine, pullBody, CLOSEOUT_LINE, HARNESS_FILES, SYNC_BRANCH, APPROVED_SQL, REPOSITORIES_SQL, VENTURE_RULE, type ApprovedRule, type GitHubApi } from '../src/publish/harness.ts'
 import { contentHash } from '../src/hash.ts'
 import type { Db } from '../src/db.ts'
 
 // Synthetic rules only. No real taste data is ever committed here.
 const rules: ApprovedRule[] = [
-  { id: 'a', lane: 'voice', layer: 'opening', statement: 'Open on the concrete thing.', means: 'no preamble', decided_at: '2026-10-25T09:00:00Z', reworded: false },
-  { id: 'b', lane: 'production', layer: null, statement: 'One idea per shot.', means: null, decided_at: '2026-10-26T09:00:00Z', reworded: false },
-  { id: 'c', lane: 'strategy', layer: null, statement: 'Name the trade-off.', means: 'say what it costs', decided_at: '2026-10-27T09:00:00Z', reworded: false },
+  { id: 'a', lane: 'voice', layer: 'opening', statement: 'Open on the concrete thing.', means: 'no preamble', decided_at: '2026-10-25T09:00:00Z', reworded: false, venture: 'publication' },
+  { id: 'b', lane: 'production', layer: null, statement: 'One idea per shot.', means: null, decided_at: '2026-10-26T09:00:00Z', reworded: false, venture: 'publication' },
+  { id: 'c', lane: 'strategy', layer: null, statement: 'Name the trade-off.', means: 'say what it costs', decided_at: '2026-10-27T09:00:00Z', reworded: false, venture: 'publication' },
 ]
-const db = (rows: ApprovedRule[]): Db => ({ query: async () => rows as never, close: async () => {} }) as unknown as Db
-const rendered = (rs: ApprovedRule[]) => Object.fromEntries(HARNESS_FILES.map(f => [f.path, renderApproved(rs, f.skill, f.lanes)]))
-const setHash = (rs: ApprovedRule[]) => contentHash(HARNESS_FILES.map(f => ({ path: f.path, text: renderApproved(rs, f.skill, f.lanes) })))
+// The repository map as the database holds it (taste_venture_repositories), and as syncHarness hands it on.
+const map = [
+  { repository: 'krishanraja/content-engine', venture: 'publication' }, { repository: 'krishanraja/heartside', venture: 'heartside' },
+  { repository: 'krishanraja/content-watcher', venture: 'publication' },
+]
+const repos = { publication: ['krishanraja/content-engine', 'krishanraja/content-watcher'], heartside: ['krishanraja/heartside'] }
+const db = (rows: ApprovedRule[]): Db => ({ query: async (sql: string) => (sql === REPOSITORIES_SQL ? map : rows) as never, close: async () => {} }) as unknown as Db
+const rendered = (rs: ApprovedRule[]) => Object.fromEntries(HARNESS_FILES.map(f => [f.path, renderApproved(rs, f.skill, f.lanes, repos)]))
+const setHash = (rs: ApprovedRule[]) => contentHash(HARNESS_FILES.map(f => ({ path: f.path, text: renderApproved(rs, f.skill, f.lanes, repos) })))
 
 type Closed = Array<{ number: number; merged: boolean; body: string }>
 function fakeGitHub(files: Record<string, string>, open: number | null = null, opts: { branch?: Record<string, string>; closed?: Closed } = {}) {
@@ -54,6 +60,34 @@ describe('renderApproved', () => {
     expect(renderApproved(rules, 'krish-voice', ['voice', 'strategy'])).toBe(renderApproved([...rules], 'krish-voice', ['voice', 'strategy']))
     expect(renderApproved(rules, 'krish-voice', ['voice', 'strategy'])).toContain('Latest approval: 2026-10-27')
     expect(renderApproved([], 'krish-voice', ['voice'])).toContain('No rules approved yet.')
+  })
+  it('gives each venture its own section, Make Your Mind Up first, headed by its name and repositories, and none to a venture with no rule there', () => {
+    const mixed: ApprovedRule[] = [
+      { ...rules[0]!, id: 'h', statement: 'Lead with the person.', venture: 'heartside' },
+      { ...rules[0]!, id: 'f', statement: 'Say the score first.', venture: 'full_time' },
+      ...rules,
+    ]
+    const voice = renderApproved(mixed, 'krish-voice', ['voice', 'strategy'], repos)
+    expect(voice).toContain(VENTURE_RULE)
+    const at = (text: string) => voice.indexOf(text)
+    expect(at('## Make Your Mind Up')).toBeGreaterThan(0)
+    expect(at('## Make Your Mind Up')).toBeLessThan(at('## Full Time'))
+    expect(at('## Full Time')).toBeLessThan(at('## Heartside'))
+    expect(voice).toContain('## Make Your Mind Up\n\nRepositories: krishanraja/content-engine, krishanraja/content-watcher.')
+    expect(voice).toContain('## Full Time\n\nRepositories: none listed yet.')
+    // Each rule sits in its own venture's section only.
+    expect(at('Lead with the person.')).toBeGreaterThan(at('## Heartside'))
+    expect(at('Open on the concrete thing.')).toBeLessThan(at('## Full Time'))
+    // A venture whose rules are all in the other skill's lanes has no section here.
+    const design = renderApproved([{ ...rules[1]!, venture: 'heartside' }], 'krish-design', ['production', 'visibility'], repos)
+    expect(design).toContain('## Heartside')
+    expect(renderApproved(mixed, 'krish-design', ['production', 'visibility'], repos)).not.toContain('## Heartside')
+    // The same approvals in another order render the same bytes.
+    expect(renderApproved([...mixed].reverse(), 'krish-voice', ['voice', 'strategy'], repos)).toBe(voice)
+  })
+  it('speaks of no one venture\'s board or page in its header', () => {
+    const head = renderApproved([], 'krish-voice', ['voice'])
+    expect(head).not.toMatch(/publish board|Inspiration page/)
   })
 })
 

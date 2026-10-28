@@ -1,6 +1,7 @@
 import type { Db } from '../db.ts'
 import { clip } from '../evidence.ts'
 import { contentHash } from '../hash.ts'
+import { ventureOf, type Venture } from '../venture.ts'
 import { quoteKey, type Capture, type QuoteRow, type RecordRow } from './file.ts'
 import { FORMATS, RULES_REV, craftNamed, formatsOf, type FormatSlug } from './vocab.ts'
 
@@ -20,12 +21,17 @@ export interface ReportEvidence {
   title: string | null
   excerpt: string | null
   meta: Record<string, unknown>
+  /** The venture the report's evidence was filed under: its record is that venture's. */
+  venture: Venture
 }
 
-/** Every standing report of his words that dislikes something. Read whole: a report withdrawn is a record withdrawn. */
+/**
+ * Every standing report of his words that dislikes something, of every venture. Read whole: a report withdrawn is a
+ * record withdrawn, and a read of one venture would withdraw every other venture's records.
+ */
 export async function reportedDislikes(db: Db): Promise<ReportEvidence[]> {
   return db.query<ReportEvidence>(
-    `select source_ref, occurred_at::text, lane, title, excerpt, meta
+    `select source_ref, occurred_at::text, lane, title, excerpt, meta, venture
      from public.taste_evidence
      where source = 'session_report' and attribution = 'krish_words' and polarity = 'dislikes' and withdrawn_at is null
      order by occurred_at, source_ref`,
@@ -65,6 +71,7 @@ export function fileReportDislike(e: ReportEvidence): { quote: QuoteRow; record:
       reason: null, wantedInstead: null, strength: 'unstated', theme: 'other', formats, ruleKind, capture: 'words',
       piece: null, media: { stills: [], strips: [], masters: [], texts: 0 }, moment: null,
       meta: { lane: e.lane, repository: e.meta.repository ?? null, report_id: e.meta.report_id ?? null, subject_ref: e.meta.subject_ref ?? null },
+      venture: ventureOf('session_report', { report: e.venture })!,
     },
   }
 }
@@ -87,23 +94,33 @@ export interface InboxRow {
   repository: string
   session_ref: string
   reported_at: string
+  /** taste_rejection_inbox.venture: its repository's, or the one its session named. Null is a capture held unassigned. */
+  venture: Venture | null
 }
 
-export async function uncollectedInbox(db: Db, limit = 200): Promise<InboxRow[]> {
-  return db.query<InboxRow>(
+/**
+ * The captures not yet collected that have a venture, and how many wait with none. A capture with none (an unmapped
+ * repository whose session named no venture) is held as a report is: never filed, never stamped, and counted.
+ */
+export async function uncollectedInbox(db: Db, limit = 200): Promise<{ rows: Array<InboxRow & { venture: Venture }>; unassigned: number }> {
+  const rows = await db.query<InboxRow & { venture: Venture }>(
     `select id::text, kind, said, said_where, said_at::text, piece, formats, note,
             case when screenshot is null then null else encode(screenshot, 'base64') end as screenshot_b64,
-            screenshot_mime, master_drive_id, master_sha256, at_ms, whole_cut, repository, session_ref, reported_at::text
-     from public.taste_rejection_inbox where collected_at is null order by reported_at limit $1`,
+            screenshot_mime, master_drive_id, master_sha256, at_ms, whole_cut, repository, session_ref, reported_at::text, venture
+     from public.taste_rejection_inbox where collected_at is null and venture is not null order by reported_at limit $1`,
     [limit],
   )
+  const [held] = await db.query<{ n: number }>(
+    `select count(*)::int as n from public.taste_rejection_inbox where collected_at is null and venture is null`,
+  )
+  return { rows, unassigned: Number(held?.n ?? 0) }
 }
 
 /**
  * One capture as a quote and a record. Pure. The formats the capture named are kept where they are the engine's
  * vocabulary; anything else is read from the piece and the session's note.
  */
-export function fileCapture(row: InboxRow): { quote: QuoteRow; record: RecordRow } {
+export function fileCapture(row: InboxRow & { venture: Venture }): { quote: QuoteRow; record: RecordRow } {
   const at = new Date(row.said_at)
   const quote: QuoteRow = {
     key: quoteKey(row.said, at.toISOString().slice(0, 10)), text: row.said.trim(), saidAt: at.toISOString(), precision: 'second',
@@ -125,6 +142,7 @@ export function fileCapture(row: InboxRow): { quote: QuoteRow; record: RecordRow
       media: { stills: [], strips: [], masters, texts: 0 },
       moment: row.at_ms !== null ? { ms: row.at_ms, anchor: null, origin: 'krish' } : null,
       meta: { repository: row.repository, inbox_id: row.id },
+      venture: row.venture,
     },
   }
 }

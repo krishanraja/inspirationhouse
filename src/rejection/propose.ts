@@ -1,5 +1,6 @@
 import type { Db } from '../db.ts'
 import { mondayOf } from '../publish/propose.ts'
+import { FLOOR_VENTURE } from '../venture.ts'
 
 // Putting the floor's standards to Krish, through the learning proposals door that already exists
 // (mindmake_studio_learning_proposals, class taste), where Control Center's waiting list shows every proposed row. He
@@ -8,6 +9,9 @@ import { mondayOf } from '../publish/propose.ts'
 // Ruling (Krish, 2026-10-28): his rejections bind now, as his words, and the engine's standards are put to him once,
 // in one batch. So the first batch holds every standard that rests on his words, and later standards are batched at
 // most once a week, never under the ceiling's three-a-week cap. A standard he rejects is retired and never put again.
+//
+// One venture's floor (FLOOR_VENTURE, Make Your Mind Up's): its standards, its week's batch, and the fingerprints it
+// has put to him. Each proposal names its venture (scope.venture).
 
 export interface FloorEligible {
   id: string; fingerprint: string; statement: string; how_to_check: string; formats: string[]; theme: string
@@ -16,16 +20,18 @@ export interface FloorEligible {
 
 export const FLOOR_ELIGIBLE_SQL = `
   select s.id::text, s.fingerprint, s.statement, s.how_to_check, s.formats, s.theme, s.kind,
-         -- His quote goes to him only while a standing record cites it and it is still his words, as the taste_floor view.
-         case when exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and s.krish_quote_id = any(r.quote_ids))
+         -- His quote goes to him only while a standing record of the standard's venture cites it and it is still his
+         -- words, as the taste_floor view.
+         case when exists (select 1 from public.taste_rejections r
+                           where r.withdrawn_at is null and r.venture = s.venture and s.krish_quote_id = any(r.quote_ids))
                and exists (select 1 from public.taste_rejection_quotes q where q.id = s.krish_quote_id and q.attribution = 'krish_words')
               then s.krish end as krish,
          s.quote_ids::text[] as quote_ids, s.support_n,
          (select count(distinct q.said_at::date)::int from public.taste_rejection_quotes q where q.id = any(s.quote_ids)) as days
   from public.taste_floor_standards s
-  where s.status = 'candidate' and s.support_n >= 1
+  where s.venture = $1 and s.status = 'candidate' and s.support_n >= 1
     and not exists (select 1 from public.taste_floor_standards o
-                    where o.fingerprint = s.fingerprint and o.proposal_id is not null)
+                    where o.venture = s.venture and o.fingerprint = s.fingerprint and o.proposal_id is not null)
   order by s.support_n desc, s.fingerprint`
 
 export interface FloorProposeResult { eligible: number; proposed: number; batch: string; waiting: boolean }
@@ -33,10 +39,12 @@ export interface FloorProposeResult { eligible: number; proposed: number; batch:
 /** Put the eligible standards to him as one batch, at most one batch a week. A dry run counts and writes nothing. */
 export async function proposeFloor(db: Db, now: Date, write: boolean): Promise<FloorProposeResult> {
   const batch = `floor-${mondayOf(now)}`
-  const eligible = await db.query<FloorEligible>(FLOOR_ELIGIBLE_SQL)
+  const eligible = await db.query<FloorEligible>(FLOOR_ELIGIBLE_SQL, [FLOOR_VENTURE])
+  // A proposal from before the ledger was split by venture names none, and every one of those was this venture's.
   const [held] = await db.query<{ n: number }>(
-    `select count(*)::int as n from public.mindmake_studio_learning_proposals where weekly_batch_id = $1 and scope->>'source' = 'rejections'`,
-    [batch],
+    `select count(*)::int as n from public.mindmake_studio_learning_proposals
+     where weekly_batch_id = $1 and scope->>'source' = 'rejections' and coalesce(scope->>'venture', $2) = $2`,
+    [batch, FLOOR_VENTURE],
   )
   // This week's batch has gone to him already: new standards wait for next week's.
   const waiting = Number(held?.n ?? 0) > 0
@@ -61,7 +69,8 @@ export async function proposeFloor(db: Db, now: Date, write: boolean): Promise<F
       [
         batch,
         assertion.slice(0, 1600),
-        JSON.stringify({ key: `floor:${s.formats[0] ?? 'all'}`, level: 'global', source: 'rejections', standard_id: s.id, formats: s.formats, theme: s.theme, kind: s.kind }),
+        JSON.stringify({ key: `floor:${s.formats[0] ?? 'all'}`, level: 'global', source: 'rejections', standard_id: s.id, formats: s.formats,
+          theme: s.theme, kind: s.kind, venture: FLOOR_VENTURE }),
         s.quote_ids.slice(0, 100),
         Math.max(1, s.days),
         JSON.stringify([{ how_to_check: s.how_to_check }]),

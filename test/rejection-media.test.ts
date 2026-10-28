@@ -227,7 +227,7 @@ const record = (ref: string, over: Partial<RecordRow> = {}): RecordRow => ({
   source: 'drive_dump', sourceRef: `dump:synthetic-${ref}`, version: `synthetic-version-${ref}`, kind: 'rejected',
   rejectedAt: '2026-10-24T12:00:00.000Z', quoteKeys: [], attribution: 'observation', item: `synthetic: rejected thing ${ref}`,
   reason: null, wantedInstead: null, strength: 'rejected', theme: 'edit_av', formats: ['short_video'], ruleKind: 'form',
-  capture: 'still', piece: 'synthetic: a piece', media: { stills: [], strips: [], masters: [], texts: 0 }, moment: null, meta: {},
+  capture: 'still', piece: 'synthetic: a piece', media: { stills: [], strips: [], masters: [], texts: 0 }, moment: null, meta: {}, venture: 'publication',
   ...over,
 })
 const plan = (over: Partial<RecordRow['media']>): RecordRow['media'] => ({ stills: [], strips: [], masters: [], texts: 0, ...over })

@@ -66,6 +66,8 @@ export interface EvidenceRow {
   id: string; source: string; polarity: string; lane: string; layer: string | null
   title: string | null; excerpt: string | null; meta: Record<string, unknown>; attribution: string
   card_facets: Record<string, unknown> | null; card_kind: string | null; card_kind_source: string | null
+  /** The row's venture (src/venture.ts): a dry run's preview counts within it, as the patterns view does. */
+  venture: string
 }
 
 export interface Signal {
@@ -138,7 +140,7 @@ export function renderEvidence(ref: number, r: EvidenceRow): string {
 }
 
 export interface Pattern {
-  attribute: string; label: string | null; polarity: string
+  venture: string; attribute: string; label: string | null; polarity: string
   /** Distinct evidence rows and sources behind it, counting only his (krish and krish_action). */
   evidence: number; sources: number
   /** Of those, how many rest on a phrase of his own words. */
@@ -147,14 +149,17 @@ export interface Pattern {
   guesses: number
 }
 
-/** Counts by code, never by a model: the same grouping the taste_signal_patterns view makes, for a dry run's preview. */
-export function patternsOf(signals: Array<Signal & { source?: string }>): Pattern[] {
+/**
+ * Counts by code, never by a model: the same grouping the taste_signal_patterns view makes, for a dry run's preview.
+ * Like the view, it counts within one venture: the same tag in two ventures is two patterns.
+ */
+export function patternsOf(signals: PreviewSignal[]): Pattern[] {
   const by = new Map<string, { p: Pattern; ev: Set<string>; src: Set<string>; grounded: Set<string> }>()
   for (const s of signals) {
-    const key = `${s.attribute}\u0000${s.label ?? ''}\u0000${s.polarity}`
+    const key = `${s.venture}\u0000${s.attribute}\u0000${s.label ?? ''}\u0000${s.polarity}`
     let g = by.get(key)
     if (!g) {
-      g = { p: { attribute: s.attribute, label: s.label, polarity: s.polarity, evidence: 0, sources: 0, grounded: 0, guesses: 0 }, ev: new Set(), src: new Set(), grounded: new Set() }
+      g = { p: { venture: s.venture, attribute: s.attribute, label: s.label, polarity: s.polarity, evidence: 0, sources: 0, grounded: 0, guesses: 0 }, ev: new Set(), src: new Set(), grounded: new Set() }
       by.set(key, g)
     }
     if (s.origin === 'model_guess') { g.p.guesses++; continue }
@@ -164,8 +169,11 @@ export function patternsOf(signals: Array<Signal & { source?: string }>): Patter
   }
   return [...by.values()]
     .map(g => ({ ...g.p, evidence: g.ev.size, sources: g.src.size, grounded: g.grounded.size }))
-    .sort((a, b) => b.evidence - a.evidence || b.sources - a.sources || a.attribute.localeCompare(b.attribute))
+    .sort((a, b) => a.venture.localeCompare(b.venture) || b.evidence - a.evidence || b.sources - a.sources || a.attribute.localeCompare(b.attribute))
 }
+
+/** A signal as a dry run's preview keeps it, with the venture of the row it was read from. */
+export type PreviewSignal = Signal & { venture: string }
 
 export interface SignalResult {
   /** Evidence rows read this run, and how many were read before under an older revision. */
@@ -177,7 +185,7 @@ export interface SignalResult {
   /** The taste_signals table is not there yet: a real run writes nothing and asks no model. */
   missing: boolean
   /** For a dry run's preview only (local, gitignored): the signals, and the `other` labels to grow the vocabulary by. */
-  preview: { signals: Signal[]; otherLabels: Record<string, number> }
+  preview: { signals: PreviewSignal[]; otherLabels: Record<string, number> }
 }
 
 export async function extractSignals(db: Db, llm: Llm, runId: string, opts: { write: boolean; limit?: number }): Promise<SignalResult> {
@@ -191,7 +199,7 @@ export async function extractSignals(db: Db, llm: Llm, runId: string, opts: { wr
   if (missing && opts.write) return result
   const unread = missing ? '' : `and not exists (select 1 from public.taste_signal_reads r where r.evidence_id = e.id and r.prompt_rev = $2)`
   const pending = await db.query<EvidenceRow & { read_before: boolean }>(
-    `select e.id::text, e.source, e.polarity, e.lane, e.layer, e.title, e.excerpt, e.meta, e.attribution,
+    `select e.id::text, e.source, e.polarity, e.lane, e.layer, e.title, e.excerpt, e.meta, e.attribution, e.venture,
             i.facets as card_facets, i.kind as card_kind, i.kind_source as card_kind_source,
             ${missing ? 'false' : `exists (select 1 from public.taste_signal_reads r where r.evidence_id = e.id)`} as read_before
      from public.taste_evidence e
@@ -239,7 +247,11 @@ export async function extractSignals(db: Db, llm: Llm, runId: string, opts: { wr
         result.preview.otherLabels[`${s.attribute}: ${s.label}`] = (result.preview.otherLabels[`${s.attribute}: ${s.label}`] ?? 0) + 1
       }
     }
-    if (!opts.write) { result.preview.signals.push(...rows); continue }
+    if (!opts.write) {
+      const venture = new Map(chunk.map(r => [r.id, r.venture]))
+      result.preview.signals.push(...rows.map(s => ({ ...s, venture: venture.get(s.evidence_id)! })))
+      continue
+    }
     const ids = JSON.stringify(chunk.map(r => r.id))
     if (rows.length) {
       await db.query(

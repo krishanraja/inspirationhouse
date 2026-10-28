@@ -5,7 +5,7 @@ import type { Db } from '../src/db.ts'
 // Synthetic answers only; nothing here is anything Krish said.
 const answer = (ref: string, excerpt: string): Evidence => ({
   source: 'inspiration_page', sourceRef: ref, occurredAt: '2026-10-24T10:00:00Z', attribution: 'krish_words',
-  polarity: 'likes', lane: 'production', layer: null, title: 'clip.mp4', excerpt, meta: { picked_likes: [] },
+  polarity: 'likes', lane: 'production', layer: null, title: 'clip.mp4', excerpt, meta: { picked_likes: [] }, venture: 'publication',
 })
 
 function fakeDb(opts: { gone?: string[]; back?: string[]; counts?: { withdrawn: number; restored: number; recounted: number } } = {}) {
@@ -98,7 +98,7 @@ describe('withdrawUncollected on the Instagram feed', () => {
   const post = (id: string, file: string): Evidence => ({
     source: 'drive_cold', sourceRef: `instagram:${id}`, occurredAt: '2026-10-24T10:00:00Z', attribution: 'observation',
     polarity: 'neutral', lane: 'strategy', layer: null, title: `post ${id}`, excerpt: 'an invented summary',
-    meta: { kind: 'instagram_post', file },
+    meta: { kind: 'instagram_post', file }, venture: 'publication',
   })
 
   it('withdraws only within the feed\'s own refs, never a Drive file\'s row in the same source', async () => {

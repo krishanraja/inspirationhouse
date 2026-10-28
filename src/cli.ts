@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { loadConfig, DRIVE } from './config.ts'
 import { connect, readOnly, type Db } from './db.ts'
-import { writeEvidence, normalise, versionOf, withdrawUncollected, type Evidence } from './evidence.ts'
+import { writeEvidence, normalise, versionOf, withdrawUncollected, countVentureMismatch, type Evidence } from './evidence.ts'
 import { collectGitTaste, githubFetcher } from './collect/gitTaste.ts'
 import {
   collectIdeaTriage, collectVisibility, collectCreatorMoves, collectDriveArtifacts, collectFeedbackHistory,
@@ -42,9 +42,12 @@ interface Ctx {
   preview: Record<string, unknown>
 }
 
-async function countNew(db: Db, rows: Evidence[], ledger: boolean): Promise<number> {
-  if (!rows.length) return 0
-  if (!ledger) return rows.length
+// What a real run would write, and how many rows already stored under the same identity carry another venture than
+// src/venture.ts gives them now: "0 new rows" proves only that nothing is new, while 0 mismatched proves the code and
+// the migration's backfill agree.
+async function countNew(db: Db, rows: Evidence[], ledger: boolean): Promise<{ written: number; ventureMismatch: number }> {
+  if (!rows.length) return { written: 0, ventureMismatch: 0 }
+  if (!ledger) return { written: rows.length, ventureMismatch: 0 }
   const keys = rows.map(normalise).map(e => ({ s: e.source, r: e.sourceRef, v: versionOf(e) }))
   const [res] = await db.query<{ n: number }>(
     `select count(*)::int as n from jsonb_to_recordset($1::jsonb) as k(s text, r text, v text)
@@ -52,7 +55,7 @@ async function countNew(db: Db, rows: Evidence[], ledger: boolean): Promise<numb
                        where e.source = k.s and e.source_ref = k.r and e.source_version = k.v)`,
     [JSON.stringify(keys)],
   )
-  return Number(res?.n ?? 0)
+  return { written: Number(res?.n ?? 0), ventureMismatch: await countVentureMismatch(db, rows) }
 }
 
 async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<void> {
@@ -74,16 +77,18 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   let seen = 0
   let written = 0
   let fullText = 0
+  let mismatch = 0
   for (const [name, fn] of groups) {
     let rows: Evidence[]
     try {
       rows = await fn()
-      const res = ctx.dry ? { seen: rows.length, written: await countNew(ctx.db, rows, ctx.ledger) } : await writeEvidence(ctx.db, rows, ctx.runId)
+      const res = ctx.dry ? { seen: rows.length, ...await countNew(ctx.db, rows, ctx.ledger) } : await writeEvidence(ctx.db, rows, ctx.runId)
       ctx.counts[`seen_${name}`] = res.seen
       ctx.counts[`new_${name}`] = res.written
       seen += res.seen
       written += res.written
       fullText += 'fullText' in res ? res.fullText ?? 0 : 0
+      mismatch += res.ventureMismatch ?? 0
       if (ctx.dry) ctx.preview[name] = rows.slice(0, 5)
       log({ stage: 'collect', source: name, seen: res.seen, written: res.written, dry_run: ctx.dry })
     } catch (err) {
@@ -123,6 +128,10 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   ctx.counts.seen = seen
   ctx.counts.written = written
   ctx.counts.evidence_full_text = fullText
+  // A row keeps its venture, so a mismatch is never mended by a rewrite: the code or the backfill is wrong, and the run
+  // says so.
+  ctx.counts.venture_mismatch = mismatch
+  if (mismatch) ctx.problems.push(`collect venture: ${mismatch} stored row(s) carry another venture than src/venture.ts gives them`)
 }
 
 /** Link the links he pasted to the cards their media became (src/tag/links.ts). A failure is recorded, never thrown. */
@@ -209,9 +218,14 @@ async function reports(ctx: Ctx): Promise<void> {
   if (!r) return
   const counts = {
     reports_read: r.read, reports_words: r.words, reports_observations: r.observations, reports_cues: r.cues,
-    reports_refused: r.refused, reports_evidence_written: r.evidenceWritten, reports_table_missing: r.missing ? 1 : 0,
+    reports_refused: r.refused, reports_unassigned: r.unassigned, reports_venture_mismatch: r.ventureMismatch,
+    reports_evidence_written: r.evidenceWritten, reports_table_missing: r.missing ? 1 : 0,
   }
   Object.assign(ctx.counts, counts)
+  // A report held with no venture is never filed under a guess, and never quietly left: the run fails until the session's
+  // repository is mapped (taste_venture_repositories) or the report names its venture.
+  if (r.unassigned) ctx.problems.push(`reports venture: ${r.unassigned} report(s) held with no venture`)
+  if (r.ventureMismatch) ctx.problems.push(`reports venture: ${r.ventureMismatch} filed report(s) whose evidence carries another venture`)
   log({ stage: 'reports', dry_run: ctx.dry, ...counts })
 }
 
@@ -256,7 +270,8 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   ctx.counts.retired = s.retired
   if (ctx.llm) {
     const d = await distil(ctx.db, ctx.llm, ctx.runId, !ctx.dry)
-    Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written, distil_repaired: d.repaired })
+    Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written, distil_repaired: d.repaired,
+      distil_ventures: d.ventures, distil_ventures_skipped: d.skipped })
     if (d.failed) ctx.problems.push('distil: the model answer was refused, cut off or unparsed')
   }
   const p = await propose(ctx.db, now, !ctx.dry)
@@ -386,7 +401,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })

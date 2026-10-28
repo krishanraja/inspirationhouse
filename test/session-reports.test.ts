@@ -2,19 +2,26 @@ import { describe, it, expect } from 'vitest'
 import { fileReport, type ReportRow } from '../src/collect/sessionReports.ts'
 
 // Synthetic reports only.
-const base: ReportRow = {
+const base: ReportRow & { venture: string } = {
   id: '00000000-0000-0000-0000-000000000001', kind: 'observation', body: 'synthetic: keep an eye on this one',
   said_where: null, said_at: null, lane: 'strategy', polarity: 'neutral', subject_ref: 'idea:abc-1', subject: 'A synthetic idea',
   session_ref: 'session_synthetic_0001', repository: 'krishanraja/synthetic-repo', surface: 'claude-code-web',
-  reported_at: '2026-10-26T10:00:00.000Z',
+  reported_at: '2026-10-26T10:00:00.000Z', venture: 'heartside',
 }
-const words: ReportRow = { ...base, kind: 'krish_words', said_where: 'a synthetic chat', said_at: '2026-10-26T09:00:00.000Z' }
+const words: ReportRow & { venture: string } = { ...base, kind: 'krish_words', said_where: 'a synthetic chat', said_at: '2026-10-26T09:00:00.000Z' }
 
 describe('a session report', () => {
   it('files his words as his, dated when he typed them, with where', () => {
     const f = fileReport(words)
     expect(f.evidence).toMatchObject({ attribution: 'krish_words', occurredAt: '2026-10-26T09:00:00.000Z', source: 'session_report' })
     expect(f.evidence!.meta).toMatchObject({ said_where: 'a synthetic chat', session_ref: 'session_synthetic_0001', repository: 'krishanraja/synthetic-repo' })
+  })
+
+  it('files everything a report becomes under the report\'s own venture', () => {
+    const f = fileReport(words)
+    expect(f.evidence!.venture).toBe('heartside')
+    expect(f.cue!.venture).toBe('heartside')
+    expect(fileReport({ ...words, venture: 'publication' }).evidence!.venture).toBe('publication')
   })
 
   it('refuses his words without where or when, and never files them as anything', () => {

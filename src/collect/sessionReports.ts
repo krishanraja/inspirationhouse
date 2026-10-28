@@ -1,5 +1,6 @@
 import type { Db } from '../db.ts'
 import { writeEvidence, type Evidence, type Lane, type Polarity } from '../evidence.ts'
+import { ventureOf, type Venture } from '../venture.ts'
 import { classify, type Reading } from './feedbackCues.ts'
 
 /**
@@ -20,6 +21,11 @@ import { classify, type Reading } from './feedbackCues.ts'
  * here, and a verdict or route is never inferred for a report.
  *
  * Each report is filed once: the engine stamps collected_at and what it became, and a report is never edited.
+ *
+ * A report is its venture's (content-engine 20261117090000_taste_ventures.sql): its repository's, from
+ * taste_venture_repositories, or the one its session named from a repository that serves several. Everything it
+ * becomes carries that venture. A report with none (an unmapped repository whose session named no venture) is held:
+ * never filed, never stamped, and counted as unassigned, which fails the run until it has one.
  */
 
 export interface ReportRow {
@@ -36,6 +42,8 @@ export interface ReportRow {
   repository: string
   surface: string
   reported_at: string
+  /** taste_reports.venture: null is a report held unassigned. */
+  venture: Venture | null
 }
 
 export interface CueInsert {
@@ -50,6 +58,7 @@ export interface CueInsert {
   use_origin: 'krish'
   status: 'open'
   meta: Record<string, unknown>
+  venture: Venture
 }
 
 export interface Filed {
@@ -68,8 +77,8 @@ function cueSubject(ref: string | null): { kind: 'idea' | 'card'; id: string } |
   return m ? { kind: m[1] as 'idea' | 'card', id: m[2]! } : null
 }
 
-/** What one report becomes. Pure: the same report always files the same way. */
-export function fileReport(r: ReportRow): Filed {
+/** What one report with a venture becomes. Pure: the same report always files the same way. */
+export function fileReport(r: ReportRow & { venture: Venture }): Filed {
   const words = r.kind === 'krish_words'
   if (words && (!r.said_where?.trim() || !r.said_at)) {
     return { id: r.id, evidence: null, cue: null, refused: 'words_without_where_or_when' }
@@ -91,6 +100,7 @@ export function fileReport(r: ReportRow): Filed {
     title: r.subject,
     excerpt: r.body,
     meta,
+    venture: ventureOf('session_report', { report: r.venture })!,
   }
   let cue: CueInsert | null = null
   const subject = cueSubject(r.subject_ref)
@@ -107,6 +117,7 @@ export function fileReport(r: ReportRow): Filed {
         said: r.body, said_at: new Date(r.said_at!).toISOString(), use: reading.use, theme: reading.theme,
         use_origin: 'krish', status: 'open',
         meta: { rule: reading.rule, report_id: r.id, session_ref: r.session_ref, repository: r.repository, said_where: r.said_where },
+        venture: evidence.venture,
       }
     }
   }
@@ -119,6 +130,10 @@ export interface ReportResult {
   observations: number
   cues: number
   refused: number
+  /** Reports held with no venture: not filed, and a run problem until each has one. */
+  unassigned: number
+  /** Filed reports whose evidence carries another venture than the report: 0 unless the backfill and the code disagree. */
+  ventureMismatch: number
   evidenceWritten: number
   /** content-engine's taste_reports migration is not applied yet: nothing is read or written. */
   missing: boolean
@@ -128,13 +143,23 @@ const BATCH = 500
 
 /** The daily `reports` stage: file every report not yet filed. With write false it reports what it would do. */
 export async function syncReports(db: Db, runId: string, opts: { write: boolean }): Promise<ReportResult> {
-  const result: ReportResult = { read: 0, words: 0, observations: 0, cues: 0, refused: 0, evidenceWritten: 0, missing: false }
+  const result: ReportResult = {
+    read: 0, words: 0, observations: 0, cues: 0, refused: 0, unassigned: 0, ventureMismatch: 0, evidenceWritten: 0, missing: false,
+  }
   const [reg] = await db.query<{ ok: boolean }>(`select to_regclass('public.taste_reports') is not null as ok`)
   if (!reg?.ok) return { ...result, missing: true }
-  const rows = await db.query<ReportRow>(
+  // Held reports are counted, never read into the batch, so they can never keep a filed one waiting.
+  const [held] = await db.query<{ n: number; mismatch: number }>(
+    `select (select count(*)::int from public.taste_reports where collected_at is null and venture is null) as n,
+            (select count(*)::int from public.taste_evidence e join public.taste_reports r on e.source_ref = 'report:' || r.id::text
+             where e.source = 'session_report' and e.venture is distinct from r.venture) as mismatch`,
+  )
+  result.unassigned = Number(held?.n ?? 0)
+  result.ventureMismatch = Number(held?.mismatch ?? 0)
+  const rows = await db.query<ReportRow & { venture: Venture }>(
     `select id::text, kind, body, said_where, said_at::text, lane, polarity, subject_ref, subject, session_ref,
-            repository, surface, reported_at::text
-     from public.taste_reports where collected_at is null order by reported_at, id limit ${BATCH}`,
+            repository, surface, reported_at::text, venture
+     from public.taste_reports where collected_at is null and venture is not null order by reported_at, id limit ${BATCH}`,
   )
   const filed = rows.map(fileReport)
   result.read = rows.length
@@ -151,10 +176,10 @@ export async function syncReports(db: Db, runId: string, opts: { write: boolean 
   const cues = filed.flatMap(f => f.cue ? [f.cue] : [])
   if (cues.length) {
     await db.query(
-      `insert into public.feedback_cues (source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta)
-       select source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta
+      `insert into public.feedback_cues (source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta, venture)
+       select source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta, venture
        from jsonb_to_recordset($1::jsonb) as x(source text, source_ref text, subject_ref text, subject text, said text,
-         said_at timestamptz, use text, theme text, use_origin text, status text, meta jsonb)
+         said_at timestamptz, use text, theme text, use_origin text, status text, meta jsonb, venture text)
        on conflict (source, source_ref, subject_ref) do nothing`,
       [JSON.stringify(cues)], { write: true },
     )

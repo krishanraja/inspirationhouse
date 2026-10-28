@@ -1,5 +1,6 @@
 import type { Db } from '../db.ts'
 import { contentHash } from '../hash.ts'
+import { byVenture, ventureName, type Venture } from '../venture.ts'
 
 // Krish's approved taste rules reach the ai-harness voice and design skills by
 // pull request, never by a live read (Ruling, Krish, 2026-10-24: "Rules arrive
@@ -10,6 +11,12 @@ import { contentHash } from '../hash.ts'
 // merges it. Each skill reads only its own file, since a packaged skill cannot
 // read outside its directory, and the two files hold different lanes, so no
 // rule lives in both.
+//
+// Each venture's rules are its own (AGENTS.md rule 10): a file holds one
+// section per venture, headed by the repositories that venture's taste is for
+// (content-engine's taste_venture_repositories), and a session applies only
+// its own venture's section. There is no shared section and no fallback to
+// another venture's rules.
 
 export const HARNESS_FILES: ReadonlyArray<{ path: string; skill: string; lanes: readonly string[] }> = [
   { path: 'skills/krish-voice/references/approved-taste.md', skill: 'krish-voice', lanes: ['voice', 'strategy'] },
@@ -20,6 +27,7 @@ export const SYNC_BRANCH = 'taste/approved-rules'
 
 export interface ApprovedRule {
   id: string; lane: string; layer: string | null; statement: string; means: string | null; decided_at: string
+  venture: Venture
   /** He reworded it ('corrected'): the statement is his own words, and the engine's means no longer goes with it. */
   reworded: boolean
 }
@@ -27,33 +35,57 @@ export interface ApprovedRule {
 // Form rules only: the view already excludes subject claims (the anti-echo rule). A reword's statement is his
 // decision_note (taste_profile_current), and its decision is 'corrected'.
 export const APPROVED_SQL = `
-  select id::text, lane, layer, statement, means, decided_at::text, (decision = 'corrected') as reworded
+  select id::text, lane, layer, statement, means, decided_at::text, (decision = 'corrected') as reworded, venture
   from public.taste_profile_form
   order by decided_at asc, id asc`
 
-/** The file one skill reads. Deterministic: the same approvals always render the same bytes. */
-export function renderApproved(rules: ApprovedRule[], skill: string, lanes: readonly string[]): string {
+/** Which repositories each venture's taste is for: the map the database fills reports from. */
+export const REPOSITORIES_SQL = `select repository, venture from public.taste_venture_repositories order by repository`
+
+/** The one rule a session follows to find its section. */
+export const VENTURE_RULE = 'Apply only the section for the venture your repository serves; a repository not listed reads none of these.'
+
+/**
+ * The file one skill reads: a section per venture with an approved rule in the skill's lanes, Make Your Mind Up first
+ * and then by slug, each headed by its name and its repositories. Pure and deterministic: the same approvals and the
+ * same map always render the same bytes.
+ */
+export function renderApproved(rules: ApprovedRule[], skill: string, lanes: readonly string[], repositories: Readonly<Record<Venture, readonly string[]>> = {}): string {
+  // In the order APPROVED_SQL reads them, whatever order they arrive in.
   const mine = rules.filter(r => lanes.includes(r.lane))
+    .sort((a, b) => a.decided_at.localeCompare(b.decided_at) || a.id.localeCompare(b.id))
   const last = mine.reduce<string | null>((m, r) => (m === null || r.decided_at > m ? r.decided_at : m), null)
   const head = [
     `# Approved taste rules for ${skill}`,
     '',
-    'Krish approved or reworded each of these on the publish board, from what he saved and answered on the Inspiration page',
-    '(the taste ledger, `krishanraja/inspirationhouse`). They arrive here only by a pull request he merges.',
+    'Krish approved or reworded each of these himself, from what the taste ledger (`krishanraja/inspirationhouse`) read of',
+    'his taste. They arrive here only by a pull request he merges.',
     'They are about how a piece is made, never what it is about: apply them to form, never to choose a topic.',
     "The skill's own truth, privacy and safety rules rank above them; when one conflicts, follow the skill and name the conflict.",
+    `Each venture's rules are its own. ${VENTURE_RULE}`,
     '',
     `Lanes: ${lanes.join(', ')}. Latest approval: ${last ? last.slice(0, 10) : 'none yet'}.`,
     '',
   ]
   if (!mine.length) return [...head, 'No rules approved yet.', ''].join('\n')
-  const body = mine.map(r => {
-    const layer = r.layer ? ` (${r.layer})` : ''
-    // A rule he reworded is his words alone: the engine's own "So:" line was written for the wording he replaced.
-    const means = !r.reworded && r.means?.trim() ? ` So: ${r.means.trim()}` : ''
-    return `- [${r.lane}${layer}, approved ${r.decided_at.slice(0, 10)}] ${r.statement.trim()}${means}`
+  const ventures = [...new Set(mine.map(r => r.venture))].sort(byVenture)
+  const body = ventures.flatMap(v => {
+    const repos = [...(repositories[v] ?? [])].sort()
+    return [
+      `## ${ventureName(v)}`,
+      '',
+      `Repositories: ${repos.length ? repos.join(', ') : 'none listed yet'}.`,
+      '',
+      ...mine.filter(r => r.venture === v).map(r => {
+        const layer = r.layer ? ` (${r.layer})` : ''
+        // A rule he reworded is his words alone: the engine's own "So:" line was written for the wording he replaced.
+        const means = !r.reworded && r.means?.trim() ? ` So: ${r.means.trim()}` : ''
+        return `- [${r.lane}${layer}, approved ${r.decided_at.slice(0, 10)}] ${r.statement.trim()}${means}`
+      }),
+      '',
+    ]
   })
-  return [...head, ...body, ''].join('\n')
+  return [...head, ...body].join('\n')
 }
 
 export interface GitHubApi {
@@ -92,7 +124,7 @@ export const CLOSEOUT_LINE = 'Closeout: not needed, the approved taste rules are
 
 export function pullBody(hash: string): string {
   return [
-    'The taste rules Krish approved on the publish board, rendered for the `krish-voice` and `krish-design` skills by the taste ledger (`krishanraja/inspirationhouse`, `engine harness`).',
+    'The taste rules Krish approved, rendered per venture for the `krish-voice` and `krish-design` skills by the taste ledger (`krishanraja/inspirationhouse`, `engine harness`).',
     '',
     "Nothing reaches a skill until this is merged. This repository is public: each rule's wording, including any rewording in his own words, becomes public on merge.",
     '',
@@ -106,7 +138,11 @@ export function pullBody(hash: string): string {
 
 export async function syncHarness(db: Db, gh: GitHubApi, write: boolean, base = 'main'): Promise<HarnessSyncResult> {
   const rules = await db.query<ApprovedRule>(APPROVED_SQL)
-  const wanted = HARNESS_FILES.map(f => ({ path: f.path, text: renderApproved(rules, f.skill, f.lanes), message: `Approved taste rules for ${f.skill}` }))
+  const repositories: Record<Venture, string[]> = {}
+  for (const m of await db.query<{ repository: string; venture: Venture }>(REPOSITORIES_SQL)) {
+    (repositories[m.venture] ??= []).push(m.repository)
+  }
+  const wanted = HARNESS_FILES.map(f => ({ path: f.path, text: renderApproved(rules, f.skill, f.lanes, repositories), message: `Approved taste rules for ${f.skill}` }))
   const r = await syncPull(gh, {
     files: wanted, branch: SYNC_BRANCH, base, write,
     title: 'Approved taste rules for the voice and design skills', body: pullBody,

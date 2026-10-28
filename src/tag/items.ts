@@ -10,6 +10,7 @@ import { WATCH_FRAMES, watchVideo, type Watched } from './watch.ts'
 import { DOC_KINDS, KIND_MEANS, VIDEO_REASONS, ruleKind, type Kind } from './kinds.ts'
 import { driveSha } from './links.ts'
 import { cutAt } from '../repair.ts'
+import { MYMU, SOURCE_VENTURE } from '../venture.ts'
 
 // One card per thing Krish dropped in Drive, for Control Center's Inspiration
 // page: a thumbnail, the engine's guessed tags, and its guessed answers as
@@ -398,8 +399,10 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
       for (const r of rows) readings.set(r.sha256, r)
     }
   }
+  // The Inspiration page is Make Your Mind Up's, so its tagger reads that venture's approved rules and no other's.
   const profile = (await db.query<{ statement: string }>(
-    `select statement from public.taste_profile_form order by confidence desc limit 12`,
+    `select statement from public.taste_profile_form where venture = $1 order by confidence desc limit 12`,
+    [MYMU],
   )).map(r => r.statement)
   const recent = (await db.query<{ why_like: string }>(
     `select why_like from public.inspiration_items
@@ -644,6 +647,7 @@ export function answerEvidence(r: AnsweredRow): Evidence {
       // Who settled the kind rides with it, so the explainer states only a kind the file proves or he set as fact.
       ...(r.kind ? { kind: r.kind, kind_source: r.kind_source } : {}), ...(r.piece_id ? { piece_id: r.piece_id } : {}),
     },
+    venture: SOURCE_VENTURE.inspiration_page,
   }
 }
 

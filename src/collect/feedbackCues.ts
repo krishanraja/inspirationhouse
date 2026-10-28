@@ -3,6 +3,7 @@ import type { Db } from '../db.ts'
 import { clip, isoOr } from '../evidence.ts'
 import { contentHash, stableJson } from '../hash.ts'
 import type { Llm } from '../llm.ts'
+import { CUE_VENTURE, type Venture } from '../venture.ts'
 
 // Feedback cues: everything Krish has said about a subject or an idea, kept as a cue the Sunday session draws on
 // (content-engine's feedback_cues table, read into sources.json by its Sunday gather).
@@ -85,6 +86,7 @@ export interface Cue {
   useOrigin: UseOrigin
   superseded: boolean
   meta: Record<string, unknown>
+  venture: Venture
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -272,6 +274,7 @@ function cueOf(s: Said, r: Reading, sourceRef: string): Cue {
   return {
     source: s.source, sourceRef, subjectRef: s.subjectRef, subject: s.subject, said: s.said, saidAt: s.saidAt,
     use: r.use, theme: r.use === 'wider_piece_context' ? r.theme : null, useOrigin: r.origin, superseded: false,
+    venture: CUE_VENTURE[s.source],
     meta: {
       field: s.field, rule: r.rule, said_hash: saidHash(s.said),
       ...(s.verdict ? { verdict: s.verdict } : {}),
@@ -343,6 +346,8 @@ export interface ExistingCue {
 export interface CueRow {
   source: string; source_ref: string; subject_ref: string; subject: string; said: string; said_at: string
   use: string; theme: string | null; use_origin: string; status: 'open' | 'retired'; meta: Record<string, unknown>
+  /** Written on insert only: a cue keeps the venture it was filed under. */
+  venture: Venture
 }
 
 export interface CuePlan { insert: CueRow[]; update: Array<CueRow & { id: string }>; withdraw: string[]; superseded: number }
@@ -372,7 +377,7 @@ export function planCues(existing: ExistingCue[], cues: Cue[], whole: CueSource[
     else { status = 'retired'; if (e.meta?.retired_by) meta.retired_by = e.meta.retired_by }
     const row: CueRow = {
       source: c.source, source_ref: c.sourceRef, subject_ref: c.subjectRef, subject: c.subject, said: c.said,
-      said_at: c.saidAt, use: c.use, theme: c.theme, use_origin: c.useOrigin, status, meta,
+      said_at: c.saidAt, use: c.use, theme: c.theme, use_origin: c.useOrigin, status, meta, venture: c.venture,
     }
     if (!e) { plan.insert.push(row); continue }
     const same = e.subject === row.subject && e.said === row.said && Date.parse(e.said_at) === Date.parse(row.said_at)
@@ -387,7 +392,7 @@ export function planCues(existing: ExistingCue[], cues: Cue[], whole: CueSource[
   return plan
 }
 
-const COLS = 'source text, source_ref text, subject_ref text, subject text, said text, said_at timestamptz, use text, theme text, use_origin text, status text, meta jsonb'
+const COLS = 'source text, source_ref text, subject_ref text, subject text, said text, said_at timestamptz, use text, theme text, use_origin text, status text, meta jsonb, venture text'
 
 async function applyPlan(db: Db, plan: CuePlan): Promise<{ inserted: number; updated: number; withdrawn: number }> {
   let inserted = 0
@@ -396,8 +401,8 @@ async function applyPlan(db: Db, plan: CuePlan): Promise<{ inserted: number; upd
   if (plan.insert.length) {
     const [r] = await db.query<{ n: number }>(
       `with ins as (
-         insert into public.feedback_cues (source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta)
-         select source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta
+         insert into public.feedback_cues (source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta, venture)
+         select source, source_ref, subject_ref, subject, said, said_at, use, theme, use_origin, status, meta, venture
          from jsonb_to_recordset($1::jsonb) as x(${COLS})
          on conflict (source, source_ref, subject_ref) do nothing
          returning 1)

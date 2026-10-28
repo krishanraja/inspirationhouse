@@ -4,6 +4,9 @@ import type { Db } from '../db.ts'
 // Put at most three claims a week in front of Krish, through the learning
 // proposals door that already exists (mindmake_studio_learning_proposals,
 // class taste). He decides there; this engine never sets a decision.
+// One ranked list and one cap across every venture: the cap limits his
+// attention, not any venture's share. Each proposal names its claim's venture
+// (scope.venture), so every door can label it and every reader filter by it.
 
 export function mondayOf(d: Date): string {
   const day = (d.getUTCDay() + 6) % 7
@@ -12,7 +15,7 @@ export function mondayOf(d: Date): string {
 }
 
 export interface Eligible {
-  id: string; fingerprint: string; lane: string; layer: string | null; kind: string
+  id: string; venture: string; fingerprint: string; lane: string; layer: string | null; kind: string
   statement: string; krish: string | null; means: string; flip_rule: string
   evidence_ids: string[]; counterexample_ids: string[]; support_n: number; counter_n: number
   confidence: number; days: number
@@ -24,9 +27,10 @@ export interface Eligible {
 // still stands, the rule support uses (content-engine 20261110): an answer he
 // changed keeps its day, and only his Undo, which withdraws every version, takes
 // it away. His quote goes with the claim only while the very row it quotes still
-// stands.
+// stands. The eight weeks are counted within the claim's venture: the same
+// statement in another venture is another claim.
 export const ELIGIBLE_SQL = `
-  select c.id::text, c.fingerprint, c.lane, c.layer, c.kind, c.statement,
+  select c.id::text, c.venture, c.fingerprint, c.lane, c.layer, c.kind, c.statement,
          case when exists (select 1 from public.taste_evidence k where k.id = c.krish_source_id and k.withdrawn_at is null)
               then c.krish end as krish,
          c.means, c.flip_rule,
@@ -40,7 +44,7 @@ export const ELIGIBLE_SQL = `
   where c.status = 'candidate' and c.support_n >= 3
     and not exists (
       select 1 from public.taste_claims o
-      where o.fingerprint = c.fingerprint and o.proposal_id is not null
+      where o.venture = c.venture and o.fingerprint = c.fingerprint and o.proposal_id is not null
         and o.updated_at > now() - interval '56 days')
   order by (c.kind = 'form') desc, c.confidence * c.support_n desc, (c.lane = 'production') desc
   limit 20`
@@ -75,7 +79,8 @@ export async function propose(db: Db, now: Date, write = true): Promise<ProposeR
       [
         batch,
         assertion.slice(0, 1600),
-        JSON.stringify({ key: `taste:${c.layer ?? c.lane}`, level: 'global', source: 'taste_ledger', claim_id: c.id, lane: c.lane, layer: c.layer, kind: c.kind }),
+        JSON.stringify({ key: `taste:${c.layer ?? c.lane}`, level: 'global', source: 'taste_ledger', claim_id: c.id, lane: c.lane, layer: c.layer,
+          kind: c.kind, venture: c.venture }),
         JSON.stringify(c.evidence_ids.slice(0, 100)),
         Math.max(1, c.days),
         JSON.stringify(c.counterexample_ids.map(id => ({ evidence_id: id }))),

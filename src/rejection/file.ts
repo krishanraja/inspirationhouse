@@ -1,5 +1,7 @@
+import { DRIVE } from '../config.ts'
 import { contentHash } from '../hash.ts'
 import { clip } from '../evidence.ts'
+import { folderVenture, type Venture } from '../venture.ts'
 import type { DumpRecord } from './dump.ts'
 import {
   RULES_REV, THEMES, formatsOf, strengthOf, themeOf, type FormatSlug, type RuleKind, type Strength, type ThemeSlug,
@@ -66,6 +68,9 @@ export interface RecordRow {
   media: MediaPlan
   moment: Moment | null
   meta: Record<string, unknown>
+  /** Whose floor this record is for (src/venture.ts), kept out of its version: a dump record is its folder's, a capture
+   *  its inbox row's, a report its report's. */
+  venture: Venture
 }
 
 /** The text a quote is keyed and matched by: the same words, whatever their quote marks, spacing or case. */
@@ -333,6 +338,7 @@ export function fileRecord(r: DumpRecord, kind: Kind, manifestFiles: string[], c
         sources: r.sources, evidence: r.evidence.slice(0, 40), screenshot_files: r.screenshot_files.length,
         asset_paths: r.asset_paths.length,
       },
+      venture: folderVenture(DRIVE.rejections),
     },
   }
 }
