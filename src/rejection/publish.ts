@@ -14,9 +14,9 @@ export function floorPullBody(hash: string): string {
   return [
     "The rejection floor, rendered from Krish's rejections by the Rejections engine (`krishanraja/inspirationhouse`, `engine rejections`): what he rejected, his words, and the standards no finished piece may fall beneath, by format.",
     '',
-    'Sessions read it with `python3 scripts/floor.py --format <format>`. Nothing changes until this is merged. This repository is public: his words in the file become public on merge, as config/learnings.json already holds them. The file holds no PC path, Drive id, session id or email (the engine refuses to render one that does).',
+    'Sessions read it with `python3 scripts/floor.py --format <format>`, and no session reads it until this is merged. This repository is public, so the file, with his words, is public from the moment this pull request opens (as config/learnings.json already holds them), and it stays in the pull request\'s history if the pull request is closed. The file holds no PC path, Drive path or id, session id or email (the engine refuses to render one that does).',
     '',
-    'Closing this without merging declines this version of the file: it is never proposed again, and a pull request opens only once the floor changes.',
+    'Closing this without merging declines this version of the file, though it stays readable here: it is never proposed again, and a pull request opens only once the floor changes.',
     '',
     FLOOR_CLOSEOUT_LINE,
     '',

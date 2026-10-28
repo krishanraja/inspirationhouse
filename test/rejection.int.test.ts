@@ -481,6 +481,10 @@ runJob('the rejections job, end to end, on a real database', () => {
       expect(s).toMatchObject({ status: 'proposed', support_n: 1, krish: 'give it room', formats: ['short_video'], boundary: [liked],
         batch: 'floor-2026-10-26', source: 'rejections', standard_id: s.id, decision: 'proposed', decided_by: null })
     }
+    // He decides on the check with the statement, so the check that binds once he approves is one he saw.
+    const assertions = (await client.query(`select assertion from mindmake_studio_learning_proposals order by assertion collate "C"`)).rows.map(r => r.assertion)
+    expect(assertions[0]).toBe('Floor for short_video: synthetic: always leave a title card room at the caption band. (In his words: "give it room") '
+      + 'Check before delivery: synthetic: scrub to each title card and look at the caption band.')
     // Written as candidates first: every standard went in before any proposal did, and the database refuses a proposed
     // standard with no proposal, so each one stood as a candidate until its proposal was made.
     const lastStandard = firstWrites.findLastIndex(s => /insert into public\.taste_floor_standards/.test(s))
@@ -582,7 +586,7 @@ runJob('the rejections job, end to end, on a real database', () => {
     expect(noLiked.counts.rejections_near).toBeUndefined()
     // A rejections file with a line that will not parse: C, missing from what parsed, is not withdrawn.
     const half = await job(drive(dump({ rejected: `${JSON.stringify(A)}\nsynthetic: not a record\n` })))
-    expect(half.problems).toEqual([])
+    expect(half.problems).toEqual(['rejections read: 1 line(s) did not parse; nothing of their kind was withdrawn'])
     expect(half.counts).toMatchObject({
       rejections_read_rejected: 1, rejections_bad_rejected_json: 1, rejections_read_whole: 2, rejections_records_withdrawn: 0,
     })
@@ -670,6 +674,24 @@ runJob('the rejections job, end to end, on a real database', () => {
     expect(last.problems).toEqual([])
     expect(await status()).toBe('superseded')
     expect(await one(`select attribution from taste_rejection_quotes where text = $1`, [P.quotes[0]!.text])).toEqual({ attribution: 'krish_words' })
+  })
+
+  it('cites his words through his words, when a session reports a quote the dump holds only as a paraphrase', async () => {
+    // The same words on the same day: the dump's compiler marked them a paraphrase, and a session reported them as his.
+    await client.query(
+      `insert into taste_evidence (source, source_ref, source_version, occurred_at, attribution, polarity, lane, title, excerpt, meta)
+       values ('session_report', 'report:synthetic-0001', '0123456789abcdef', '2026-10-21T15:00:00Z', 'krish_words', 'dislikes', 'production',
+               'synthetic: the close of piece two', $1, $2)`,
+      [C.quotes[0]!.text, JSON.stringify({ said_where: 'a synthetic session', repository: 'synthetic/repo' })])
+    const r = await job(drive(dump({ rejected: [A, C] })))
+    expect(r.problems).toEqual([])
+    expect(r.counts).toMatchObject({ rejections_reports: 1, rejections_records_new: 1, rejections_quotes_reclassed: 1 })
+    expect(await one(`select attribution, source from taste_rejection_quotes where text = $1`, [C.quotes[0]!.text]))
+      .toEqual({ attribution: 'krish_words', source: 'session_report' })
+    expect(await one(`select attribution, item, withdrawn_at is null as standing from taste_rejections where source = 'session_report'`))
+      .toEqual({ attribution: 'krish_words', item: null, standing: true })
+    // The dump's record keeps its own label: the compiler's paraphrase.
+    expect(await one(`select attribution from taste_rejections where item = $1 and withdrawn_at is null`, [C.item])).toEqual({ attribution: 'observation' })
   })
 
   it('keeps every count of every run under a rejections_ key', () => {

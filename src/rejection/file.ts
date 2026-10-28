@@ -274,9 +274,27 @@ function secondsIn(text: string): number | null {
   return null
 }
 
-function kindOfRecord(kind: Kind, theme: ThemeSlug): RuleKind {
+function kindOfRecord(kind: Kind, theme: ThemeSlug, category: string | null | undefined): RuleKind {
   if (kind === 'process') return 'workflow'
+  // What he liked in copy or a script is what a piece says (its landing, its takeaway, its angle), so it is kept and
+  // never served: the floor is form and workflow, never subject (anti-echo). What he liked in a frame, a motion or a
+  // sound is form.
+  if (kind === 'liked' && /copy|script/i.test(category ?? '')) return 'subject'
   return THEMES[theme].kind
+}
+
+const RANK: Record<Attribution, number> = { krish_words: 3, krish_action: 2, observation: 1 }
+
+/**
+ * Hold one quote in a read's set, keyed by his words and the day. Where the same quote is classed two ways (by two
+ * records, or by the dump and a session's report or capture), his words win over his action, and either over an
+ * observation; at the same rank, the one that knows the second wins. So no record of his words ever cites his words
+ * through a paraphrase.
+ */
+export function holdQuote(quotes: Map<string, QuoteRow>, q: QuoteRow): void {
+  const held = quotes.get(q.key)
+  if (!held || RANK[q.attribution] > RANK[held.attribution]
+    || (held.precision === 'day' && q.precision === 'second' && RANK[q.attribution] === RANK[held.attribution])) quotes.set(q.key, q)
 }
 
 /**
@@ -308,7 +326,7 @@ export function fileRecord(r: DumpRecord, kind: Kind, manifestFiles: string[], c
     record: {
       source: 'drive_dump', sourceRef, version: contentHash(content), kind, rejectedAt, quoteKeys,
       attribution, item, reason: content.r, wantedInstead: content.w, strength: content.s,
-      theme, formats, ruleKind: kindOfRecord(kind, theme), capture, piece, media,
+      theme, formats, ruleKind: kindOfRecord(kind, theme, r.category), capture, piece, media,
       moment: capture === 'moment' ? momentOf(r, quotes) : null,
       meta: {
         dump_id: r.id, category: r.category ?? null, format_text: r.format ?? null, confidence: r.confidence ?? null,
@@ -353,13 +371,9 @@ export function fileDump(dump: { rejected: DumpRecord[]; liked: DumpRecord[]; pr
   const records: RecordRow[] = []
   const refs = new Map<string, number>()
   let collisions = 0
-  const rank: Record<Attribution, number> = { krish_words: 3, krish_action: 2, observation: 1 }
   for (const x of all) {
     const filed = fileRecord(x.r, x.kind, dump.manifest.get(x.r.id) ?? [], (counts.get(baseOf(x)) ?? 0) > 1)
-    for (const q of filed.quotes) {
-      const held = quotes.get(q.key)
-      if (!held || rank[q.attribution] > rank[held.attribution] || (held.precision === 'day' && q.precision === 'second' && rank[q.attribution] === rank[held.attribution])) quotes.set(q.key, q)
-    }
+    for (const q of filed.quotes) holdQuote(quotes, q)
     let ref = filed.record.sourceRef
     const n = refs.get(ref) ?? 0
     if (n > 0) {
@@ -377,7 +391,8 @@ export function fileDump(dump: { rejected: DumpRecord[]; liked: DumpRecord[]; pr
  * (the same moment, to the second, from the same source), else one about the same piece on the same day.
  */
 export function nearOf(records: RecordRow[], quotes: Map<string, QuoteRow>): Map<string, Array<{ key: string; basis: 'same_message' | 'same_piece' }>> {
-  const liked = records.filter(r => r.kind === 'liked')
+  // A liked record about what a piece says is never anyone's boundary.
+  const liked = records.filter(r => r.kind === 'liked' && r.ruleKind !== 'subject')
   const out = new Map<string, Array<{ key: string; basis: 'same_message' | 'same_piece' }>>()
   for (const r of records) {
     if (r.kind === 'liked') continue

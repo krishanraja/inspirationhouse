@@ -3,7 +3,7 @@ import { THEMES, FORMATS, FORMAT_GROUPS, themeOf, formatsOf, strengthOf, type Th
 import { parseJsonl, parseManifest, type DumpRecord } from '../src/rejection/dump.ts'
 import {
   normaliseWords, quoteKey, saidAtOf, quoteAttribution, quotesOf, mediaOf, captureOf, momentOf, fileRecord, fileDump, nearOf,
-  type Kind, type MediaPlan,
+  holdQuote, type Kind, type MediaPlan, type QuoteRow,
 } from '../src/rejection/file.ts'
 
 // Synthetic records only; nothing here is anything Krish said or any file in his Drive.
@@ -354,6 +354,14 @@ describe('a record version', () => {
     expect(fileRecord(base(), 'process', []).record).toMatchObject({ theme: 'process', ruleKind: 'workflow', capture: 'words' })
   })
 
+  it('keeps what he liked in copy or a script as subject, never served, and what he liked in a frame as form', () => {
+    expect(fileRecord(base({ category: 'copy/script' }), 'liked', []).record.ruleKind).toBe('subject')
+    expect(fileRecord(base({ category: 'Copy' }), 'liked', []).record.ruleKind).toBe('subject')
+    expect(fileRecord(base({ category: 'visual asset' }), 'liked', []).record.ruleKind).toBe('form')
+    // A rejection in copy is form: how a line reads is craft (his story-angle theme is what makes a rejection subject).
+    expect(fileRecord(base({ category: 'copy/script', theme: "Copy a stranger can't follow" }), 'rejected', []).record.ruleKind).toBe('form')
+  })
+
   it('keeps its identity and version when the dump renumbers it', () => {
     const a = fileRecord(base(), 'rejected', ['what he was looking at/R001 synthetic - frames.jpg']).record
     const b = fileRecord(base({ id: 'R077' }), 'rejected', ['what he was looking at/R077 synthetic - frames.jpg']).record
@@ -469,10 +477,45 @@ describe('what he liked nearby', () => {
     expect(near.size).toBe(1)
   })
 
+  it('never makes what he liked in copy anyone\'s boundary: it is what a piece says', () => {
+    const rejected = rec({ id: 'R001', date: '2026-10-03', quotes: [said('synthetic: the outro drags', '2026-10-03T09:00:00Z', 'cloud')] })
+    const copy = rec({ id: 'L001', date: '2026-10-03', category: 'copy/script', quotes: [said('synthetic: the landing is right', '2026-10-03T09:00:00Z', 'cloud')] })
+    const filed = fileDump(dumpOf([rejected], [copy]))
+    expect(nearOf(filed.records, filed.quotes).size).toBe(0)
+  })
+
   it('never calls a quote known only to the day the same message', () => {
     const rejected = rec({ id: 'R001', date: '2026-10-03', quotes: [said('synthetic: the outro drags', '2026-10-03', 'cloud')] })
     const liked = rec({ id: 'L001', date: '2026-10-03', piece: 'synthetic: another piece', quotes: [said('synthetic: the hook is great', '2026-10-03', 'cloud')] })
     const filed = fileDump(dumpOf([rejected], [liked]))
     expect(nearOf(filed.records, filed.quotes).size).toBe(0)
+  })
+})
+
+describe('one quote classed two ways', () => {
+  const q = (attribution: QuoteRow['attribution'], precision: QuoteRow['precision'] = 'day', source: QuoteRow['source'] = 'cloud'): QuoteRow => ({
+    key: quoteKey('synthetic: the join chops a word', '2026-10-03'), text: 'synthetic: the join chops a word',
+    saidAt: precision === 'day' ? '2026-10-03T12:00:00.000Z' : '2026-10-03T09:00:00.000Z', precision, saidWhere: 'synthetic', source, attribution,
+  })
+
+  it('holds his words over his action, and either over a paraphrase, whichever is read first', () => {
+    for (const order of [['observation', 'krish_words'], ['krish_words', 'observation'], ['krish_action', 'krish_words', 'observation']] as const) {
+      const held = new Map<string, QuoteRow>()
+      for (const a of order) holdQuote(held, q(a))
+      expect(held.get(q('krish_words').key)!.attribution).toBe('krish_words')
+    }
+    const held = new Map<string, QuoteRow>()
+    holdQuote(held, q('observation'))
+    holdQuote(held, q('krish_action'))
+    expect(held.get(q('krish_action').key)!.attribution).toBe('krish_action')
+  })
+
+  it('holds the one that knows the second, at the same rank, and never trades his words for it', () => {
+    const held = new Map<string, QuoteRow>()
+    holdQuote(held, q('krish_words', 'day'))
+    holdQuote(held, q('krish_words', 'second', 'session_report'))
+    expect(held.get(q('krish_words').key)).toMatchObject({ precision: 'second', source: 'session_report' })
+    holdQuote(held, q('observation', 'second', 'capture'))
+    expect(held.get(q('krish_words').key)).toMatchObject({ attribution: 'krish_words', source: 'session_report' })
   })
 })

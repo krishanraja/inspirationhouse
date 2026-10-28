@@ -146,7 +146,8 @@ export async function floorRecords(db: Db): Promise<{ records: FloorRecord[]; li
   )
   const likedRows = await db.query<FloorQuote>(
     `select q.id::text, q.text, q.attribution, q.said_at::text from public.taste_rejection_quotes q
-     where exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and r.kind = 'liked' and q.id = any(r.quote_ids))`,
+     where exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and r.kind = 'liked' and r.rule_kind = 'form'
+                   and q.id = any(r.quote_ids))`,
   )
   return { records, liked: new Map(likedRows.map(q => [q.id, q])) }
 }

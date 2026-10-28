@@ -340,7 +340,31 @@ describe('scrubbing text for the public floor file', () => {
 
   it('leaves ordinary words alone, and null as null', () => {
     expect(scrub('synthetic: the 9:16 cut at 0:42 drags, see example.org')).toBe('synthetic: the 9:16 cut at 0:42 drags, see example.org')
+    expect(scrub('synthetic: 10:30/11:00, 16:9/9:16 and https://example.org/home/x stay')).toBe('synthetic: 10:30/11:00, 16:9/9:16 and https://example.org/home/x stay')
     expect(scrub(null)).toBeNull()
+  })
+
+  it('takes out a path with either slash and either case, in Drive for desktop, on a Mac or Linux, and an older Drive id', () => {
+    expect(scrub('synthetic: c:\\Users\\synthetic\\cut.mp4 is wrong')).toBe('synthetic: [path] is wrong')
+    expect(scrub('synthetic: play H:/My Drive/synthetic/cut.mp4 at 3 s.')).toBe('synthetic: play [path] at 3 s.')
+    expect(scrub('synthetic: My Drive/synthetic/cut.mp4, then')).toBe('synthetic: [path], then')
+    expect(scrub('synthetic: /Users/synthetic/Movies/cut.mp4 and /home/synthetic/cut.mp4')).toBe('synthetic: [path] and [path]')
+    expect(scrub('synthetic: /users/synthetic/cut.mp4')).toBe('synthetic: [path]')
+    expect(scrub('synthetic: 0B1syntheticSYNTHETICsynth and 0AsyntheticSYNTHETIC1')).toBe('synthetic: [id] and [id]')
+  })
+
+  it('ends a path at a line break, a pipe or the space after its extension, so the rest of what he said stays', () => {
+    expect(scrub('synthetic: H:\\My Drive\\synthetic\\cut.mp4\nthe join chops a word')).toBe('synthetic: [path]\nthe join chops a word')
+    expect(scrub('synthetic: C:\\synthetic|then')).toBe('synthetic: [path]|then')
+    expect(scrub('synthetic: before H:\\clip.mp4 and after')).toBe('synthetic: before [path] and after')
+  })
+
+  it('leaves nothing the last check refuses, so an unchangeable quote can never block the render', () => {
+    const nasty = [
+      'synthetic: H:\\My Drive\\a b\\c.mp4\nnext line C:/x/y', 'synthetic: c:/x|y<z>', 'synthetic: /Volumes/synthetic/x.mov;',
+      'synthetic: My Drive\\x\\y and /mnt/x', `synthetic: ${DRIVE_ID} 0B1syntheticSYNTHETICsynth`, 'synthetic: (D:\\x\\y)',
+    ]
+    for (const t of nasty) expect(() => assertPublic(scrub(t)!), t).not.toThrow()
   })
 })
 
@@ -353,6 +377,12 @@ describe('refusing a floor file that is not public', () => {
     expect(() => assertPublic(`synthetic: ${UUID(1)}`)).toThrow(/id/)
     expect(() => assertPublic('synthetic: cse_SYNTHETIC0001')).toThrow(/session/)
     expect(() => assertPublic('synthetic: synthetic.person@example.org')).toThrow(/email/)
+  })
+
+  it('throws on a path with a forward slash, a lowercase drive, Drive for desktop, a Mac or Linux home, and an older Drive id', () => {
+    for (const t of ['synthetic: C:/Users/synthetic', 'synthetic: c:\\users\\synthetic', 'synthetic: My Drive/synthetic',
+      'synthetic: /Users/synthetic/x', 'synthetic: /home/synthetic/x']) expect(() => assertPublic(t), t).toThrow(/path/)
+    expect(() => assertPublic('synthetic: 0B1syntheticSYNTHETICsynth')).toThrow(/drive id/)
   })
 
   it('lets through what the file holds by design: hex hashes, short refs and dates', () => {
@@ -452,6 +482,14 @@ describe('rendering the floor', () => {
     expect(doc.formats.card!.draft).toEqual([drafted])
     expect(doc.counts).toMatchObject({ standards: 3, approved: 2 })
     expect(doc.as_of).toBe('2026-10-06')
+  })
+
+  it('says the engine wrote every check, and whether he approved it with the statement or has not seen it', () => {
+    const doc = parse(renderFloor(floorInput())) as unknown as { standards: Record<string, { check_by: string }> }
+    const [approved, reworded, drafted] = ['a', 'b', 'c'].map(c => `s${c.repeat(10)}`) as [string, string, string]
+    expect(doc.standards[approved]!.check_by).toBe('the engine, approved by him with the statement')
+    expect(doc.standards[reworded]!.check_by).toBe('the engine, a draft: he reworded the statement, not this check')
+    expect(doc.standards[drafted]!.check_by).toBe('the engine, a draft he has not seen')
   })
 
   it("puts an 'all' record and standard under every production format, never under session, pipeline, board or other", () => {
@@ -655,7 +693,25 @@ describe('a session report of his words that dislikes something', () => {
 
   it('keeps a strategy-lane dislike as a subject record, never a standard', () => {
     expect(fileReportDislike(report({ lane: 'strategy' }))!.record.ruleKind).toBe('subject')
+    expect(fileReportDislike(report({ lane: 'visibility' }))!.record.ruleKind).toBe('subject')
     expect(fileReportDislike(report({ lane: 'voice' }))!.record.ruleKind).toBe('form')
+  })
+
+  it('keeps a dislike about an idea or a card as subject, unless his words name the craft they fault', () => {
+    const about = (ref: string, words: string) => fileReportDislike(report({
+      title: 'synthetic idea: why a synthetic tariff reshapes a synthetic supply chain',
+      meta: { said_where: 'synthetic: a session', full_text: words, subject_ref: ref },
+    }))!.record
+    expect(about('idea:synthetic-1', 'synthetic: nobody wants this').ruleKind).toBe('subject')
+    expect(about('card:synthetic-2', 'synthetic: not this one').ruleKind).toBe('subject')
+    expect(about('idea:synthetic-1', 'synthetic: the captions cover his mouth').ruleKind).toBe('form')
+    expect(about('piece:synthetic-3', 'synthetic: nobody wants this').ruleKind).toBe('form')
+  })
+
+  it('never shows the session\'s subject line as what was rejected: only his words', () => {
+    const r = fileReportDislike(report())!.record
+    expect(r.item).toBeNull()
+    expect(r.formats).toEqual(['thumbnail'])
   })
 })
 

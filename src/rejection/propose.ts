@@ -43,7 +43,10 @@ export async function proposeFloor(db: Db, now: Date, write: boolean): Promise<F
   if (!write) return { ...result, proposed: eligible.length }
   for (const s of eligible) {
     const makers = s.formats.join(', ')
-    const assertion = `Floor for ${makers}: ${s.statement}${s.krish ? ` (In his words: "${s.krish}")` : ''}`
+    // The check goes to him with the statement, so a check that binds once he approves is one he saw. It comes after his
+    // words, so that if the whole runs past the field, the engine's check is what is cut, never his words (AGENTS.md
+    // rule 9); the whole check is kept in proposed_change.
+    const assertion = `Floor for ${makers}: ${s.statement}${s.krish ? ` (In his words: "${s.krish}")` : ''} Check before delivery: ${s.how_to_check}`
     await db.query(
       `with p as (
          insert into public.mindmake_studio_learning_proposals

@@ -7,7 +7,7 @@ import { judgeRun } from '../runs.ts'
 import { fileCapture, fileReportDislike, markCollected, reportedDislikes, uncollectedInbox, type InboxRow } from './arrivals.ts'
 import { distilFloor, recountStandards } from './distil.ts'
 import { readDump, type Dump } from './dump.ts'
-import { fileDump, nearOf, type QuoteRow, type RecordRow } from './file.ts'
+import { fileDump, holdQuote, nearOf, type QuoteRow, type RecordRow } from './file.ts'
 import { attachMedia, insertMedia, keepMedia } from './keep.ts'
 import { keepStill } from './media.ts'
 import { proposeFloor, syncFloorDecisions } from './propose.ts'
@@ -73,6 +73,10 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     counts.rejections_read_process = dump.process.length
     counts.rejections_ambiguous_paths = dump.ambiguous
     for (const [k, n] of Object.entries(dump.bad)) counts[`rejections_bad_${k}`] = n
+    // A line of his dump that will not parse is a record never filed: nothing of its kind is withdrawn (dump.whole),
+    // and the run says so, since the engine cannot mend his folder.
+    const bad = Object.values(dump.bad).reduce((a, n) => a + n, 0)
+    if (bad) problems.push(`rejections read: ${bad} line(s) did not parse; nothing of their kind was withdrawn`)
   } catch (err) { problem('read', err) }
   const filed = dump ? fileDump(dump) : null
   const records: RecordRow[] = filed ? [...filed.records] : []
@@ -92,7 +96,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     for (const e of await reportedDislikes(d.db)) {
       const f = fileReportDislike(e)
       if (!f) continue
-      if (!quotes.has(f.quote.key)) quotes.set(f.quote.key, f.quote)
+      holdQuote(quotes, f.quote)
       reported.push(f.record)
     }
     counts.rejections_reports = reported.length
@@ -102,7 +106,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       inbox = await uncollectedInbox(d.db)
       for (const row of inbox) {
         const f = fileCapture(row)
-        if (!quotes.has(f.quote.key)) quotes.set(f.quote.key, f.quote)
+        holdQuote(quotes, f.quote)
         captured.push(f.record)
       }
       counts.rejections_inbox = inbox.length

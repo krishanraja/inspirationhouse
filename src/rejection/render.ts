@@ -55,27 +55,39 @@ export async function loadFloor(db: Db): Promise<{ standards: StandardRow[]; rec
   return { standards, records, quotes, media }
 }
 
-// Windows and Drive-for-desktop paths, Drive and Docs links, Drive-id-shaped tokens, session ids and emails.
-const PATH = /\b[A-Z]:\\[^\n"<>|]*?(?=[,;)\]"']|\s{2}|$|\s\(|\s-\s)/g
+// Paths on his machines and in Drive for desktop, Drive and Docs links, Drive-id-shaped tokens, session ids and emails.
+// A path may hold spaces ("H:\My Drive\..."), so it runs to the end of its line, a quote or bracket, a comma or
+// semicolon, two spaces, " (" or " - ", or the space after a file extension; whichever comes first. Either slash, any
+// drive letter's case. Overreach is safe: only what is shown is cut (AGENTS.md rule 9), never what is stored.
+const PATH_END = String.raw`(?=[,;)\]"'\n<>|]|\s{2}|$|\s\(|\s-\s|(?<=\.[A-Za-z0-9]{2,5})\s)`
+const WIN_PATH = new RegExp(String.raw`(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\n"<>|]*?${PATH_END}`, 'gm')
+const DRIVE_PATH = new RegExp(String.raw`\bMy Drive[\\/][^\n"<>|]*?${PATH_END}`, 'gmi')
+const HOME_PATH = /(?<![\w.:/~-])\/(?:Users|home|Volumes|mnt|media)\/[^\s"'<>|),;]+/gi
 const LINK = /https?:\/\/(?:drive|docs)\.google\.com\/[^\s"')]+|https?:\/\/claude\.ai\/[^\s"')]+/g
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
 const SESSION = /\b(?:cse|session)_[A-Za-z0-9]{8,}\b/g
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g
-const DRIVE_ID = /\b1[A-Za-z0-9_-]{24,43}\b/g
+// Drive ids: today's start with 1; a file from before 2015 with 0B, a shared drive with 0A.
+const DRIVE_ID = /\b(?:1[A-Za-z0-9_-]{24,43}|0[AB][A-Za-z0-9_-]{15,42})\b/g
 
-/** The compiler's text, with anything that is not for a public file taken out. Pure. */
+/**
+ * The compiler's text, with anything that is not for a public file taken out. Pure. It takes out at least everything
+ * assertPublic refuses, since a quote and a proposed standard never change: a miss here would block every render.
+ */
 export function scrub(text: string | null): string | null {
   if (text === null) return null
-  return text.replace(LINK, '[link]').replace(PATH, '[path]').replace(UUID, '[id]').replace(SESSION, '[session]')
-    .replace(EMAIL, '[email]').replace(DRIVE_ID, '[id]')
+  return text.replace(LINK, '[link]').replace(WIN_PATH, '[path]').replace(DRIVE_PATH, '[path]').replace(HOME_PATH, '[path]')
+    .replace(UUID, '[id]').replace(SESSION, '[session]').replace(EMAIL, '[email]').replace(DRIVE_ID, '[id]')
 }
 
 /** Throws when the rendered file still holds a path, a Drive link, an id or an email. Never publish past this. */
 export function assertPublic(text: string): void {
-  for (const [name, re] of [['path', /\b[A-Z]:\\/], ['link', /(?:drive|docs)\.google\.com|\bclaude\.ai\//], ['id', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+  for (const [name, re] of [
+    ['path', /(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\bMy Drive[\\/]|(?<![\w.:/~-])\/(?:Users|home|Volumes|mnt|media)\//i],
+    ['link', /(?:drive|docs)\.google\.com|\bclaude\.ai\//], ['id', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
     ['session', /\b(?:cse|session)_[A-Za-z0-9]{8,}/],
     // A Drive id is mixed case with - or _; the floor's own lowercase hex (its version) is not one.
-    ['drive id', /\b1(?=[A-Za-z0-9_-]*[A-Z_-])[A-Za-z0-9_-]{24,43}\b/],
+    ['drive id', /\b(?:1(?=[A-Za-z0-9_-]*[A-Z_-])[A-Za-z0-9_-]{24,43}|0[AB][A-Za-z0-9_-]{15,42})\b/],
     ['email', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/]] as const) {
     if (re.test(text)) throw new Error(`floor render: the file would hold a ${name}`)
   }
@@ -83,6 +95,11 @@ export function assertPublic(text: string): void {
 
 const day = (iso: string) => iso.slice(0, 10)
 const shortRef = (source: string, ref: string) => `r${contentHash(`${source}:${ref}`).slice(0, 10)}`
+const CHECK_BY: Record<string, string> = {
+  approved: 'the engine, approved by him with the statement',
+  reworded: 'the engine, a draft: he reworded the statement, not this check',
+  draft: 'the engine, a draft he has not seen',
+}
 const WORDS_LABEL: Record<string, string> = { krish_words: 'his words', krish_action: 'his approval', observation: 'a paraphrase, not his words' }
 
 export interface RenderInput {
@@ -125,6 +142,9 @@ export function renderFloor(input: RenderInput): string {
       // The model wrote these (or he reworded them) from records it read unscrubbed, so they are scrubbed too.
       never_beneath: scrub(s.statement),
       check_before_delivery: scrub(s.how_to_check),
+      // The engine wrote every check. He approved it with the statement, or he reworded the statement and not the check,
+      // or he has not seen it yet (AGENTS.md rule 3: model output is always labelled).
+      check_by: CHECK_BY[s.standing] ?? CHECK_BY.draft,
       formats: s.formats, theme: s.theme, layer: s.layer, kind: s.kind,
       support: s.support_n,
       ...(s.krish ? { in_his_words: scrub(s.krish) } : {}),
@@ -161,6 +181,7 @@ export function renderFloor(input: RenderInput): string {
       'Read it for the format you are making (python3 scripts/floor.py --format <format>) before the brief, and check the finished file against it before delivery.',
       "his_words are his, verbatim, except that a link, path, id or email inside them is shown as [link], [path], [id] or [email]; the floor database keeps them whole. what, piece and wanted_instead are a session's description, never his words.",
       'A standard is approved or reworded by him, or a draft the engine read into his rejections. Reviewers and pre-delivery checks may test work against approved and reworded standards and his words, for craft and process only, never subject (Ruling, Krish, 2026-10-28).',
+      'The engine wrote every check_before_delivery; check_by says whether he approved it with the statement, or it is still a draft.',
       'Media are kept in the floor database (content-engine taste_rejection_media) by sha256: a still, a six-frame strip or a 4 s clip, never a master.',
     ],
     version: contentHash(stableJson(body)),

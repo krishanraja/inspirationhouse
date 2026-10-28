@@ -47,19 +47,24 @@ export function fileReportDislike(e: ReportEvidence): { quote: QuoteRow; record:
     key: quoteKey(text, at.toISOString().slice(0, 10)), text, saidAt: at.toISOString(), precision: 'second',
     saidWhere: clip(where, 300) ?? where, source: 'session_report', attribution: 'krish_words',
   }
-  // What a report is about is the session's line (its subject); his words say which maker it is for, if anything does.
+  // The session's line and his words say which maker a report is for; his words alone say whether he named a craft.
   const formats = formatsOf(e.title, { item: text })
-  // A strategy-lane dislike is about what to make, never how: it is kept, and never a standard (anti-echo).
-  const ruleKind = e.lane === 'strategy' ? 'subject' : 'form'
-  const content = { k: 'rejected', q: [quote.key], t: e.title, f: formats, l: e.lane, rules: RULES_REV }
+  const craft = formatsOf(text, { item: text }).filter(f => f !== 'other' && f !== 'all')
+  // A dislike in the strategy or visibility lane is about what to make or where it goes, never how it is made; one about
+  // an idea or a card (its subject line names the idea) is too, unless his words name the craft they fault. Either is
+  // kept and never served or made a standard (anti-echo).
+  const aboutSubject = typeof e.meta.subject_ref === 'string' && /^(idea|card):/.test(e.meta.subject_ref)
+  const ruleKind = e.lane === 'strategy' || e.lane === 'visibility' || (aboutSubject && !craft.length) ? 'subject' : 'form'
+  const content = { k: 'rejected', q: [quote.key], t: e.title, f: formats, l: e.lane, rk: ruleKind, rules: RULES_REV }
   return {
     quote,
     record: {
       source: 'session_report', sourceRef: e.source_ref, version: contentHash(content), kind: 'rejected',
-      rejectedAt: at.toISOString(), quoteKeys: [quote.key], attribution: 'krish_words', item: clip(e.title, 4000),
+      // The session's subject line names the idea, so it is never shown as what was rejected: only his words are.
+      rejectedAt: at.toISOString(), quoteKeys: [quote.key], attribution: 'krish_words', item: null,
       reason: null, wantedInstead: null, strength: 'unstated', theme: 'other', formats, ruleKind, capture: 'words',
       piece: null, media: { stills: [], strips: [], masters: [], texts: 0 }, moment: null,
-      meta: { lane: e.lane, repository: e.meta.repository ?? null, report_id: e.meta.report_id ?? null },
+      meta: { lane: e.lane, repository: e.meta.repository ?? null, report_id: e.meta.report_id ?? null, subject_ref: e.meta.subject_ref ?? null },
     },
   }
 }
