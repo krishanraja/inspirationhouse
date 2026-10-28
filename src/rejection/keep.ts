@@ -28,7 +28,7 @@ export interface KeepResult {
   stills: number; strips: number; clips: number; reused: number
   missing: number; unreachableLocal: number; gone: number; unresolved: number; noMoment: number
   masters: number; tooBig: number; deferred: number; pointed: number; failed: number
-  /** A cut that failed in a way another try cannot mend (no picture, over the cap), skipped since. */
+  /** A cut that failed on bytes the engine fetched, skipped since: the same bytes fail the same way. */
   failedBefore: number
   /** Master paths not found, and how many of the folders they sit under are not shared with the engine. */
   unresolvedPaths: number; rootsUnseen: number
@@ -147,35 +147,53 @@ async function pointAt(db: Db, r: RecordRow, driveId: string): Promise<boolean> 
   return done.length > 0
 }
 
-/** Failures another try of the same master and recipe cannot mend. */
-const LASTING = new Set(['no_picture', 'cap'])
+/**
+ * What this record's last cut from a master came to, kept on the record (its meta) so no run fetches a master again for
+ * a cut it already holds or could not make. A cut made is held by its record, whatever master it came from (a copy and
+ * its original, the same bytes, cut to the same clip). A cut that failed on bytes the engine fetched fails again on the
+ * same bytes, so it is tried again only once the master changes; a fetch that broke, or a step that ran out of time,
+ * is tried again next run.
+ */
+interface CutNote { ok: boolean; master: string; sha: string | null; modified: string | null; rev: string; class?: string }
 
-interface CutFailed { master: string; sha: string | null; rev: string; class: string }
-
-/** Whether this record's cut from this master, by this recipe, already failed in a lasting way. */
-async function cutFailedBefore(db: Db, r: RecordRow, master: DriveFile): Promise<boolean> {
-  const [row] = await db.query<{ failed: CutFailed | null }>(
-    `select meta->'cut_failed' as failed from public.taste_rejections where source = $1 and source_ref = $2 and source_version = $3`,
+async function lastCut(db: Db, r: RecordRow): Promise<CutNote | null> {
+  const [row] = await db.query<{ cut: CutNote | null; media: number }>(
+    `select meta->'cut' as cut, cardinality(media_sha256)::int as media
+     from public.taste_rejections where source = $1 and source_ref = $2 and source_version = $3`,
     [r.source, r.sourceRef, r.version],
   )
-  const f = row?.failed
-  const sha = master.sha256Checksum?.toLowerCase() ?? null
-  return Boolean(f && f.master === master.id && f.rev === CUT_REV && (f.sha === null || sha === null || f.sha === sha))
+  const c = row?.cut ?? null
+  if (!c || c.rev !== CUT_REV) return null
+  // A cut made counts only while the record holds what it made.
+  return c.ok && !Number(row?.media ?? 0) ? null : c
 }
 
-async function noteCutFailed(db: Db, r: RecordRow, master: string, sha: string | null, cls: string): Promise<void> {
+/** Whether a master is the bytes a note was made from: by Drive's sha256 where both are known, else by when it changed. */
+function sameBytes(note: CutNote, master: DriveFile): boolean {
+  const sha = master.sha256Checksum?.toLowerCase() ?? null
+  if (note.master !== master.id) return false
+  if (note.sha && sha) return note.sha === sha
+  return note.modified !== null && note.modified === master.modifiedTime
+}
+
+async function noteCut(db: Db, r: RecordRow, note: Omit<CutNote, 'rev'>): Promise<void> {
   await db.query(
-    `update public.taste_rejections set meta = meta || jsonb_build_object('cut_failed', $4::jsonb)
+    `update public.taste_rejections set meta = meta || jsonb_build_object('cut', $4::jsonb)
      where source = $1 and source_ref = $2 and source_version = $3`,
-    [r.source, r.sourceRef, r.version, JSON.stringify({ master, sha, rev: CUT_REV, class: cls })],
+    [r.source, r.sourceRef, r.version, JSON.stringify({ ...note, rev: CUT_REV })],
     { write: true },
   )
 }
 
+/** Failures the next run may mend by itself: the fetch, the network, a step that ran out of time. */
+const PASSING = new Set(['no_access', 'fetch', 'timeout'])
+
 const failClass = (err: unknown): string => {
   const m = String((err as Error)?.message ?? '')
+  if ((err as { killed?: boolean })?.killed || /ETIMEDOUT|timed out/i.test(m)) return 'timeout'
   if (/size cap/.test(m)) return 'too_big'
   if (/HTTP 40[34]/.test(m)) return 'no_access'
+  if (/google download failed|ECONNRESET|socket hang up|fetch failed/i.test(m)) return 'fetch'
   if (/does not fit/.test(m)) return 'cap'
   if (/no picture|states no length/.test(m)) return 'no_picture'
   return (err as Error)?.name === 'Error' ? 'cut' : String((err as Error)?.name ?? 'cut').slice(0, 20).toLowerCase()
@@ -205,6 +223,8 @@ export async function keepMedia(
         if (!f) { out.missing++; continue }
         const held = await heldFrom(db, f, role).catch(() => [])
         if (held.length) { hashes.push(...held.map(h => h.sha256)); out.reused++; continue }
+        // Drive says how big it is: one too large to hold is skipped before it is fetched, not after.
+        if (Number(f.size ?? 0) > STILL_MAX_BYTES) { out.tooBig++; continue }
         if (!write) { role === 'strip' ? out.strips++ : out.stills++; continue }
         try {
           const bytes = await google.download(f.id, STILL_MAX_BYTES)
@@ -245,10 +265,12 @@ export async function keepMedia(
         const endUnmeasured = wantsCut && moment!.ms === null && moment!.anchor === 'end' && !duration
         const at = wantsCut ? (moment!.ms ?? (moment!.anchor === 'end' ? (duration ? Math.max(0, duration - 2000) : null) : 2000)) : null
         const held = await (endUnmeasured ? heldAtEnd(db, master.file.id) : heldMedia(db, master.file.id, wantsCut ? ['clip', 'strip'] : ['strip'], at)).catch(() => [])
+        let note: CutNote | null = null
         if (held.length) { hashes.push(...held.map(h => h.sha256)); out.reused++ }
         else if (Number(master.file.size ?? 0) > MASTER_MAX_BYTES) out.tooBig++
-        // A cut that could not be made from these bytes by this recipe is not fetched again until one of them changes.
-        else if (write && await cutFailedBefore(db, r, master.file).catch(() => false)) out.failedBefore++
+        // A cut this record already holds, or could not make from these bytes, is not fetched for again.
+        else if (write && (note = await lastCut(db, r).catch(() => null)) && note.ok) out.reused++
+        else if (write && note && !note.ok && sameBytes(note, master.file)) out.failedBefore++
         else if (out.masters >= MASTERS_PER_RUN || now() - started > KEEP_BUDGET_MS) out.deferred++
         else if (!write) { out.masters++; if (wantsCut) out.clips++; out.strips++ }
         else {
@@ -266,9 +288,14 @@ export async function keepMedia(
               hashes.push(k.sha256)
               if (k.role === 'clip') out.clips++; else out.strips++
             }
+            await noteCut(db, r, { ok: true, master: master.file.id, sha, modified: master.file.modifiedTime ?? null }).catch(() => {})
           } catch (err) {
             fail(err)
-            if (LASTING.has(failClass(err))) await noteCutFailed(db, r, master.file.id, sha, failClass(err)).catch(() => {})
+            const cls = failClass(err)
+            // Only a failure on bytes it holds is remembered: the same bytes fail the same way.
+            if (sha && !PASSING.has(cls)) {
+              await noteCut(db, r, { ok: false, master: master.file.id, sha, modified: master.file.modifiedTime ?? null, class: cls }).catch(() => {})
+            }
           } finally {
             // Let the master go.
             await rm(dir, { recursive: true, force: true }).catch(() => {})

@@ -361,33 +361,82 @@ describe('keepMedia on a real run', () => {
     expect(r).toMatchObject({ tooBig: 1, stills: 0, failed: 0, failures: {} })
   })
 
-  it('remembers a cut that cannot be made from a master, and never fetches that master for it again', async () => {
-    const dead = drive(id(60), 'synthetic-sound-only.mp4')
-    const h = harness({ byId: { [dead.id]: dead } })
-    // The record's meta, as the database keeps it between runs.
-    let note: unknown = null
+  // The record's meta and media, as the database keeps them between runs.
+  function remembering(h: ReturnType<typeof harness>) {
+    const state: { note: Record<string, unknown> | null; media: number } = { note: null, media: 0 }
     const db: Db = {
       async query<T>(sql: string, params: unknown[] = [], o?: { write?: boolean }) {
-        if (/jsonb_build_object\('cut_failed'/.test(sql)) { note = JSON.parse(params[3] as string); return [] as T[] }
-        if (/meta->'cut_failed'/.test(sql)) return [{ failed: note }] as T[]
+        if (/jsonb_build_object\('cut'/.test(sql)) { state.note = JSON.parse(params[3] as string); return [] as T[] }
+        if (/meta->'cut'/.test(sql)) return [{ cut: state.note, media: state.media }] as T[]
+        if (/set media_sha256/.test(sql)) state.media = (params[3] as string[]).length
         return h.db.query<T>(sql, params, o)
       },
       async close() {},
     }
+    return { db, state }
+  }
+
+  it('remembers a cut that failed on the bytes it fetched, and fetches that master for it again only once it changes', async () => {
+    const dead = drive(id(60), 'synthetic-sound-only.mp4')
+    const h = harness({ byId: { [dead.id]: dead } })
+    const { db, state } = remembering(h)
     const rec = record('dead', { capture: 'moment', moment: at(3500), media: plan({ masters: [{ where: 'drive_id', ref: dead.id }] }) })
-    const cut: NonNullable<KeepDeps['cut']> = async () => { throw new Error('media: no picture in the file') }
-    const first = await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut })
-    expect(first).toMatchObject({ masters: 1, failed: 1, failures: { no_picture: 1 }, failedBefore: 0 })
-    expect(note).toMatchObject({ master: dead.id, rev: CUT_REV, class: 'no_picture' })
-    const second = await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut })
-    expect(second).toMatchObject({ masters: 0, failed: 0, failedBefore: 1 })
-    expect(h.streamed.map(s => s.fileId)).toEqual([dead.id])
-    // A failure another try could mend (the download broke) is tried again next run.
-    note = null
-    const flaky = harness({ byId: { [dead.id]: dead }, downloadTo: async () => { throw new Error('google download failed: HTTP 500') } })
-    const once = await keepMedia(db, flaky.google, [rec], FOLDER_FILES, true, { cut })
-    expect(once).toMatchObject({ failed: 1, failedBefore: 0 })
-    expect(note).toBeNull()
+    // A master with no picture, and one cut off mid-sync: either fails the same way on the same bytes.
+    for (const message of ['media: no picture in the file', 'Command failed: ffprobe: moov atom not found']) {
+      state.note = null
+      const cut: NonNullable<KeepDeps['cut']> = async () => { throw new Error(message) }
+      const first = await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut })
+      expect(first).toMatchObject({ masters: 1, failed: 1, failedBefore: 0 })
+      expect(state.note).toMatchObject({ ok: false, master: dead.id, rev: CUT_REV })
+      const second = await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut })
+      expect(second).toMatchObject({ masters: 0, failed: 0, failedBefore: 1 })
+    }
+    expect(h.streamed.map(s => s.fileId)).toEqual([dead.id, dead.id])
+    // Re-exported: new bytes are tried again.
+    const changed = { ...dead, modifiedTime: '2026-10-29T00:00:00Z' }
+    const again = harness({ byId: { [dead.id]: changed } })
+    const retry = await keepMedia(db, again.google, [rec], FOLDER_FILES, true, { cut: stubCut() })
+    expect(retry).toMatchObject({ masters: 1, clips: 1, failed: 0, failedBefore: 0 })
+    expect(state.note).toMatchObject({ ok: true })
+  })
+
+  it('tries a master again next run when the fetch broke or a step ran out of time', async () => {
+    const m = drive(id(61), 'synthetic-master.mp4')
+    for (const [over, cut] of [
+      [{ downloadTo: async () => { throw new Error('google download failed: HTTP 500') } }, stubCut()],
+      [{}, async () => { throw Object.assign(new Error('Command failed: ffmpeg'), { killed: true }) }],
+    ] as const) {
+      const h = harness({ byId: { [m.id]: m }, ...over })
+      const { db, state } = remembering(h)
+      const rec = record('flaky', { capture: 'moment', moment: at(3500), media: plan({ masters: [{ where: 'drive_id', ref: m.id }] }) })
+      expect(await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut: cut as NonNullable<KeepDeps['cut']> })).toMatchObject({ failed: 1 })
+      expect(state.note).toBeNull()
+      expect(await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut: cut as NonNullable<KeepDeps['cut']> })).toMatchObject({ masters: 1, failedBefore: 0 })
+    }
+  })
+
+  it('never cuts again a moment its record already holds, even from a master with the same bytes under another id', async () => {
+    const m = drive(id(62), 'synthetic-master.mp4')
+    const h = harness({ byId: { [m.id]: m } })
+    const { db, state } = remembering(h)
+    const rec = record('held', { capture: 'moment', moment: at(3500), media: plan({ masters: [{ where: 'drive_id', ref: m.id }] }) })
+    expect(await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut: stubCut() })).toMatchObject({ masters: 1, clips: 1 })
+    expect(state).toMatchObject({ note: { ok: true, master: m.id }, media: 2 })
+    // The media table found nothing by this master (the same clip was kept first from another): the record's note does.
+    expect(await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut: stubCut() })).toMatchObject({ masters: 0, clips: 0, reused: 1 })
+    expect(h.streamed).toHaveLength(1)
+    // A note of a cut whose media the record no longer holds is no reason to skip.
+    state.media = 0
+    expect(await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut: stubCut() })).toMatchObject({ masters: 1, clips: 1 })
+  })
+
+  it('skips a still Drive says is too large to hold, without fetching it', async () => {
+    const huge = drive(id(63), 'synthetic huge.png', { mimeType: 'image/png', size: '30000000' })
+    const h = harness()
+    const files = new Map([...FOLDER_FILES, ['assets/synthetic-h/synthetic huge.png', huge]])
+    const r = await keepMedia(h.db, h.google, [record('huge', { capture: 'still', media: plan({ stills: ['assets/synthetic-h/synthetic huge.png'] }) })], files, true)
+    expect(r).toMatchObject({ tooBig: 1, stills: 0, failed: 0 })
+    expect(h.downloads).toEqual([])
   })
 
   it('says when a master path is not found because 3 Posts or Archive is not shared with the engine', async () => {
