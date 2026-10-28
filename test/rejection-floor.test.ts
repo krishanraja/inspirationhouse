@@ -763,6 +763,7 @@ describe('a session report of his words that dislikes something', () => {
     source_ref: 'synthetic-report-1', occurred_at: '2026-10-03T14:05:06Z', lane: 'production', title: 'synthetic: the thumbnail draft',
     excerpt: 'synthetic: the face is too small and the...',
     meta: { said_where: 'synthetic: a session on a thumbnail', full_text: 'synthetic: the face is too small and the title fights it', repository: 'synthetic/repo' },
+    venture: 'publication',
     ...over,
   })
 
@@ -830,11 +831,11 @@ describe('a session report of his words that dislikes something', () => {
 })
 
 describe('a capture from the inbox', () => {
-  const capture = (over: Partial<InboxRow> = {}): InboxRow => ({
+  const capture = (over: Partial<InboxRow & { venture: string }> = {}): InboxRow & { venture: string } => ({
     id: UUID(700), kind: 'rejected', said: 'synthetic: that join clips the word', said_where: 'synthetic: a capture in a session',
     said_at: '2026-10-04T08:00:00Z', piece: 'synthetic: short cut one', formats: [], note: null, screenshot_b64: null, screenshot_mime: null,
     master_drive_id: null, master_sha256: null, at_ms: null, whole_cut: false, repository: 'synthetic/repo', session_ref: 'synthetic-session',
-    reported_at: '2026-10-04T08:05:00Z',
+    reported_at: '2026-10-04T08:05:00Z', venture: 'publication',
     ...over,
   })
 

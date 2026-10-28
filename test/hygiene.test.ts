@@ -23,6 +23,10 @@ describe('public logs', () => {
     expect(safeFields({ seen_git_taste: 5, new_drive: 'leak' })).toEqual({ seen_git_taste: 5 })
   })
 
+  it('keeps the venture counts a dry run proves the split by, and never a venture named in text', () => {
+    expect(safeFields({ venture_mismatch: 0, reports_unassigned: 2, venture_name: 'leak' })).toEqual({ venture_mismatch: 0, reports_unassigned: 2 })
+  })
+
   it('keeps the linking counts, and never a link or his note', () => {
     expect(safeFields({ requests_linked: 2, slides_folded: 4, notes_kept: 1, waiting_for_reading: 1, url: 'https://example.org/p/1', note: 'his words' }))
       .toEqual({ requests_linked: 2, slides_folded: 4, notes_kept: 1, waiting_for_reading: 1 })

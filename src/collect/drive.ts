@@ -1,16 +1,19 @@
 import { DRIVE } from '../config.ts'
 import type { Evidence } from '../evidence.ts'
 import type { DriveFile, Google } from '../google.ts'
+import { SOURCE_VENTURE, folderVenture, type Venture } from '../venture.ts'
 
 // Dropping a file in a folder is his action: he liked it enough to keep it.
 // What he liked about it comes later, in his own words, from Control Center's
 // Inspiration page or the What I like sheet.
-function fileEvidence(f: DriveFile, source: 'drive_cold' | 'drive_video', lane: 'strategy' | 'production'): Evidence {
+// A file is the venture of the folder it was dropped in (src/venture.ts).
+function fileEvidence(f: DriveFile, source: 'drive_cold' | 'drive_video', lane: 'strategy' | 'production', venture: Venture): Evidence {
   return {
     source, sourceRef: f.id, occurredAt: f.createdTime || f.modifiedTime,
     attribution: 'krish_action', polarity: 'likes', lane, layer: null,
     title: f.name, excerpt: null,
     meta: { mime: f.mimeType, modified: f.modifiedTime, bytes: f.size ? Number(f.size) : null },
+    venture,
   }
 }
 
@@ -20,10 +23,11 @@ export async function collectDrive(google: Google): Promise<Evidence[]> {
     google.listFolder(DRIVE.videoInspiration),
   ])
   const isFolder = (f: DriveFile) => f.mimeType === 'application/vnd.google-apps.folder'
+  const [coldVenture, videoVenture] = [folderVenture(DRIVE.coldIdeas), folderVenture(DRIVE.videoInspiration)]
   return [
-    ...cold.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => fileEvidence(f, 'drive_cold', 'strategy')),
+    ...cold.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => fileEvidence(f, 'drive_cold', 'strategy', coldVenture)),
     // The What I like sheet is not itself a reference, in either folder (it moved to Content Inspo on 2026-10-24).
-    ...video.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => fileEvidence(f, 'drive_video', 'production')),
+    ...video.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => fileEvidence(f, 'drive_video', 'production', videoVenture)),
   ]
 }
 
@@ -56,7 +60,7 @@ export function sheetEvidence(rows: string[][], now: string): Evidence[] {
       out.push({
         source: 'what_i_like_sheet', sourceRef: `${video}#${h}`.slice(0, 300), occurredAt: at,
         attribution: 'krish_words', polarity: i === notCopy ? 'dislikes' : 'likes', lane: 'production',
-        layer: craft?.layer ?? null, title: video, excerpt: said, meta: { column: h },
+        layer: craft?.layer ?? null, title: video, excerpt: said, meta: { column: h }, venture: SOURCE_VENTURE.what_i_like_sheet,
       })
     })
   }

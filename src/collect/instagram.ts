@@ -1,6 +1,7 @@
 import { DRIVE } from '../config.ts'
 import { clip, type Evidence } from '../evidence.ts'
 import type { Google } from '../google.ts'
+import { SOURCE_VENTURE } from '../venture.ts'
 import { readXlsx } from '../xlsx.ts'
 
 // The Instagram workbook in Cold Ideas ("Instagram inspo.xlsx"): the posts of
@@ -62,6 +63,7 @@ export function postEvidence(rows: Sheet, fileAt: string): Evidence[] {
         capture: clip(get(r, 'capture status'), 120),
         file: DRIVE.instagramInspo,
       },
+      venture: SOURCE_VENTURE.drive_cold,
     })
   }
   return out
@@ -85,6 +87,7 @@ export function themeEvidence(rows: Sheet, fileAt: string): Evidence[] {
       title: clip(theme, 300),
       excerpt: clip(get(r, 'direction') || get(r, 'what they are saying'), 400),
       meta: { kind: 'instagram_theme', caveat: clip(get(r, 'evidence caveat'), 300), file: DRIVE.instagramInspo },
+      venture: SOURCE_VENTURE.drive_cold,
     })
   }
   return out

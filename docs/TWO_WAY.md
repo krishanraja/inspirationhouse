@@ -1,6 +1,9 @@
 # Two-way: every repository reads Krish's taste and reports back
 
 Status: Built. All six steps landed on 2026-10-26; Progress, at the end, says what each one is and how it was proved. This file is kept as the design record. Everything before Progress is the original brief: it is in the future tense and describes the world on 2026-10-26, not now.
+
+Changed on 2026-10-28: the read is per venture, no longer shared. Every repository still reads and reports through the same two tools, but it reads only its own venture's approved rules, and what it reports is filed under its own venture. The last entry in Progress says how, and which part is still to land in Control Center.
+
 Last verified: 2026-10-27 against this repository's code and the Control Center and ai-harness checkouts (the files cited exist). content-engine, and the pull requests cited in other repositories, were not re-read.
 
 Handover for the build, written 2026-10-26 by the session that ran the audit. Krish, 2026-10-26: "start the two-way
@@ -133,3 +136,17 @@ which piece a card became. Each proved by a test that fails without the change a
   tags like any other answer of his, with where it was said kept in its context. A report never needs a new path to
   count: filing it as evidence is enough. Proved by `test/pipeline.int.test.ts` ("his answers as countable taste
   signals"), which runs once the migration is listed.
+- **The ledger keyed by venture (2026-10-28).** Krish, 2026-10-28: "each repository builds its own taste ledger and
+  reads from its own taste ledger, and not the central makeyourmindup one", and "The ledger is keyed by venture not
+  repository. Makeyourmindup as a separate venture to mindmake". Until then every reader read the whole ledger, so a
+  Heartside session's report counted in Make Your Mind Up's patterns and floor. Now the read is per venture, not
+  shared: content-engine `20261117090000_taste_ventures.sql` puts a venture (a `venture_registry` slug; Make Your Mind
+  Up is `publication`) on every row and freezes it, and fills a report's venture from its repository
+  (`taste_venture_repositories`), or takes the one the session named from a repository that serves several. This
+  repository decides every other row's venture in code (`src/venture.ts`), distils claims per venture, renders the
+  harness files with one section per venture, and reads only Make Your Mind Up's rules for the tagger and only its
+  floor. A report with no venture is held and fails the run until it has one. Still to land in Control Center, and
+  not built yet: `get_approved_taste` returning only the caller's venture's rules, with no fallback to another's, and
+  `report_to_taste_engine` naming the venture. This repository's part is proved by `test/venture.int.test.ts`,
+  which applies the migration over synthetic rows of every class it moves and then runs the engine's own stages on
+  the migrated schema.

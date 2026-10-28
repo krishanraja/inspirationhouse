@@ -63,6 +63,7 @@ describe('distil against the database', () => {
     const db: Db = {
       async query<T>(sql: string, params: unknown[] = []) {
         calls.push({ sql, params })
+        if (/select distinct e\.venture/.test(sql)) return [{ venture: 'publication' }] as T[]
         if (/from public\.taste_whys/.test(sql)) return whys as T[]
         if (/with prior as/.test(sql)) return [{ n: 1 }] as T[]
         return [] as T[]
@@ -73,17 +74,20 @@ describe('distil against the database', () => {
   }
   const llm = (claim: DraftClaim): Llm => ({ model: 'stub', structured: async () => ({ data: { claims: [claim] } as never, failure: null, model: 'stub' }) })
 
-  it('reads only evidence still standing', async () => {
+  it('reads only evidence still standing, one venture at a time', async () => {
     const { db, calls } = fake()
     await distil(db, llm(draft()), 'run', false)
     expect(calls[0]!.sql).toMatch(/e\.withdrawn_at is null/)
+    const read = calls.find(c => /select w\.id::text/.test(c.sql))!
+    expect(read.sql).toMatch(/e\.venture = \$1 and [\s\S]*e\.withdrawn_at is null/)
+    expect(read.params).toEqual(['publication'])
   })
 
   it('writes the quote this draft resolved on an update, so a claim re-cited without its old quote never keeps it', async () => {
     const { db, calls } = fake()
     await distil(db, llm(draft({ krish_quote: null, krish_quote_ref: null })), 'run', true)
     const write = calls.find(c => /with prior as/.test(c.sql))!
-    expect(write.sql).toMatch(/set evidence_ids = [\s\S]*krish = \$8, krish_source_id = \$9::uuid\s+from prior/)
+    expect(write.sql).toMatch(/set evidence_ids = [\s\S]*krish = \$8, krish_source_id = \$9::uuid, status = 'candidate'\s+from prior/)
     expect(write.params[7]).toBeNull()
     expect(write.params[8]).toBeNull()
     const quoted = fake()

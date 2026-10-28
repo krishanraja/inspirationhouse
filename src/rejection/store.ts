@@ -61,7 +61,11 @@ export async function fileQuotes(db: Db, quotes: QuoteRow[], runId: string, writ
   return { ids: new Map(rows.map(r => [r.quote_key, r.id])), inserted: Number(res?.inserted ?? 0), reclassed: Number(res?.reclassed ?? 0) }
 }
 
-export interface RecordResult { inserted: number; restored: number; withdrawn: number }
+export interface RecordResult {
+  inserted: number; restored: number; withdrawn: number
+  /** Records already stored, of the same source, ref and version, under another venture than the one computed now. */
+  ventureMismatch: number
+}
 
 /**
  * Each record version, once. A version read again after it was withdrawn stands again. When the read is whole (the
@@ -78,10 +82,20 @@ export async function fileRecords(
   // a broken read. Only the reports are read this way; an empty folder is always a broken read.
   opts: { write: boolean; whole: WholeRead | null; emptyIsWhole?: boolean },
 ): Promise<RecordResult> {
-  if (!records.length && !(opts.emptyIsWhole && opts.whole?.kinds.length)) return { inserted: 0, restored: 0, withdrawn: 0 }
-  const keep = JSON.stringify(records.map(r => ({ s: r.source, r: r.sourceRef, v: r.version })))
+  if (!records.length && !(opts.emptyIsWhole && opts.whole?.kinds.length)) return { inserted: 0, restored: 0, withdrawn: 0, ventureMismatch: 0 }
+  // The venture rides in the read set but is never part of a record's identity: the read, and the withdrawal it decides,
+  // stay whole across ventures, so filing one venture's records never withdraws another's.
+  const keep = JSON.stringify(records.map(r => ({ s: r.source, r: r.sourceRef, v: r.version, w: r.venture })))
   const read = `exists (select 1 from jsonb_to_recordset($1::jsonb) as k(s text, r text, v text)
                         where k.s = t.source and k.r = t.source_ref and k.v = t.source_version)`
+  // A record keeps its venture (the database refuses a change), so one stored under another is counted, never mended.
+  const [m] = !records.length ? [{ n: 0 }] : await db.query<{ n: number }>(
+    `select count(*)::int as n from jsonb_to_recordset($1::jsonb) as k(s text, r text, v text, w text)
+     join public.taste_rejections t on t.source = k.s and t.source_ref = k.r and t.source_version = k.v
+     where t.venture is distinct from k.w`,
+    [keep],
+  )
+  const ventureMismatch = Number(m?.n ?? 0)
   const sources = [...new Set([...records.map(r => r.source), ...(opts.whole ? [opts.whole.source] : [])])]
   if (!opts.write) {
     const [c] = await db.query<{ held: number; restored: number; withdrawn: number }>(
@@ -91,7 +105,7 @@ export async function fileRecords(
        from public.taste_rejections t where t.source = any($3::text[])`,
       [keep, opts.whole?.source ?? null, sources, opts.whole?.kinds ?? []],
     )
-    return { inserted: records.length - Number(c?.held ?? 0), restored: Number(c?.restored ?? 0), withdrawn: Number(c?.withdrawn ?? 0) }
+    return { inserted: records.length - Number(c?.held ?? 0), restored: Number(c?.restored ?? 0), withdrawn: Number(c?.withdrawn ?? 0), ventureMismatch }
   }
   const payload = JSON.stringify(records.map(r => ({
     source: r.source, source_ref: r.sourceRef, source_version: r.version, kind: r.kind, rejected_at: r.rejectedAt,
@@ -100,20 +114,21 @@ export async function fileRecords(
     theme: r.theme, formats: r.formats, rule_kind: r.ruleKind, capture: r.capture, piece: r.piece,
     moment_ms: r.moment?.ms ?? null, moment_origin: r.moment?.ms != null ? r.moment.origin : null,
     meta: { ...r.meta, ...(r.moment?.anchor ? { moment_anchor: r.moment.anchor, moment_anchor_origin: r.moment.origin } : {}), media_plan: r.media },
+    venture: r.venture,
   })))
   const [ins] = !records.length ? [{ n: 0 }] : await db.query<{ n: number }>(
     `with ins as (
        insert into public.taste_rejections
          (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, item, reason, wanted_instead,
-          strength, theme, formats, rule_kind, capture, piece, rules_rev, moment_ms, moment_origin, collected_run, meta)
+          strength, theme, formats, rule_kind, capture, piece, rules_rev, moment_ms, moment_origin, collected_run, meta, venture)
        select source, source_ref, source_version, kind, rejected_at,
               array(select jsonb_array_elements_text(quote_ids))::uuid[], attribution, item, reason, wanted_instead,
               strength, theme, array(select jsonb_array_elements_text(formats)), rule_kind, capture, piece, $3,
-              moment_ms, moment_origin, $2::uuid, meta
+              moment_ms, moment_origin, $2::uuid, meta, venture
        from jsonb_to_recordset($1::jsonb) as x(source text, source_ref text, source_version text, kind text,
          rejected_at timestamptz, quote_ids jsonb, attribution text, item text, reason text, wanted_instead text,
          strength text, theme text, formats jsonb, rule_kind text, capture text, piece text, moment_ms integer,
-         moment_origin text, meta jsonb)
+         moment_origin text, meta jsonb, venture text)
        on conflict (source, source_ref, source_version) do nothing
        returning 1)
      select count(*)::int as n from ins`,
@@ -135,7 +150,7 @@ export async function fileRecords(
     )
     withdrawn = gone.length
   }
-  return { inserted: Number(ins?.n ?? 0), restored: back.length, withdrawn }
+  return { inserted: Number(ins?.n ?? 0), restored: back.length, withdrawn, ventureMismatch }
 }
 
 /**

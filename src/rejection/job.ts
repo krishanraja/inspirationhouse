@@ -4,6 +4,7 @@ import type { Google } from '../google.ts'
 import type { Llm } from '../llm.ts'
 import { githubApi, type GitHubApi } from '../publish/harness.ts'
 import { judgeRun } from '../runs.ts'
+import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { fileCapture, fileReportDislike, markCollected, reportedDislikes, uncollectedInbox, type InboxRow } from './arrivals.ts'
 import { distilFloor, recountStandards } from './distil.ts'
 import { readDump, type Dump } from './dump.ts'
@@ -92,7 +93,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   // 2. What arrived from sessions.
   const reported: RecordRow[] = []
   let reportsRead = false
-  let inbox: InboxRow[] = []
+  let inbox: Array<InboxRow & { venture: Venture }> = []
   const captured: RecordRow[] = []
   try {
     for (const e of await reportedDislikes(d.db)) {
@@ -106,13 +107,18 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   } catch (err) { problem('reports', err) }
   if (tables) {
     try {
-      inbox = await uncollectedInbox(d.db)
+      const read = await uncollectedInbox(d.db)
+      inbox = read.rows
       for (const row of inbox) {
         const f = fileCapture(row)
         holdQuote(quotes, f.quote)
         captured.push(f.record)
       }
       counts.rejections_inbox = inbox.length
+      // A capture with no venture is never filed under a guess, and never quietly left: the run fails until its
+      // session's repository is mapped or the capture names its venture.
+      counts.rejections_inbox_unassigned = read.unassigned
+      if (read.unassigned) problems.push(`rejections inbox: ${read.unassigned} capture(s) held with no venture`)
     } catch (err) { problem('inbox', err) }
   }
   const input = records.length + reported.length + captured.length
@@ -128,7 +134,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       counts.rejections_quotes_new = q.inserted
       counts.rejections_quotes_reclassed = q.reclassed
       const ids = q.ids
-      const sum = { inserted: 0, restored: 0, withdrawn: 0 }
+      const sum = { inserted: 0, restored: 0, withdrawn: 0, ventureMismatch: 0 }
       // The folder and the reports are each read whole, so a record no longer in them is withdrawn; the inbox is read
       // once per capture and never withdraws. An empty folder files and withdraws nothing (fileRecords); the reports are
       // a query, so when it succeeds with none, his last report was taken back. Each source is filed on its own, so one
@@ -142,13 +148,17 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       for (const [name, rows, whole, emptyIsWhole] of sources) {
         try {
           const r = await fileRecords(d.db, rows, ids, d.runId, { write, whole, emptyIsWhole })
-          sum.inserted += r.inserted; sum.restored += r.restored; sum.withdrawn += r.withdrawn
+          sum.inserted += r.inserted; sum.restored += r.restored; sum.withdrawn += r.withdrawn; sum.ventureMismatch += r.ventureMismatch
           standing += rows.length
         } catch (err) { problem(`file ${name}`, err) }
       }
       counts.rejections_records_new = sum.inserted
       counts.rejections_records_restored = sum.restored
       counts.rejections_records_withdrawn = sum.withdrawn
+      // Stored records of the same identity under another venture than src/venture.ts gives them: the proof the code and
+      // the migration's backfill agree. A record keeps its venture, so one is a problem, never mended by a rewrite.
+      counts.rejections_venture_mismatch = sum.ventureMismatch
+      if (sum.ventureMismatch) problems.push(`rejections venture: ${sum.ventureMismatch} stored record(s) carry another venture than src/venture.ts gives them`)
       // What he liked nearby comes from the liked file, so it is filed only when that file was read whole: a liked file
       // missing or half read would clear it from every record.
       if (filed && dump?.whole.includes('liked')) counts.rejections_near = await fileNear(d.db, nearOf(records, filed.quotes), records, ids, write)
@@ -281,7 +291,7 @@ async function doneCaptures(db: Db, captured: RecordRow[]): Promise<{ done: Set<
 function inMemory(records: RecordRow[], quotes: Map<string, QuoteRow>): RenderInput {
   return {
     standards: [],
-    records: records.filter(r => r.ruleKind !== 'subject').map(r => ({
+    records: records.filter(r => r.ruleKind !== 'subject' && r.venture === FLOOR_VENTURE).map(r => ({
       source: r.source, source_ref: r.sourceRef, kind: r.kind, rejected_at: r.rejectedAt, theme: r.theme, formats: r.formats,
       rule_kind: r.ruleKind, capture: r.capture, piece: r.piece, item: r.item, wanted_instead: r.wantedInstead,
       strength: r.strength, quote_ids: r.quoteKeys, near: [], media_sha256: [], pointed: false, moment_ms: r.moment?.ms ?? null,

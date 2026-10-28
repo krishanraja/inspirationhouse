@@ -12,7 +12,7 @@ import type { Llm } from '../src/llm.ts'
 const row = (over: Partial<EvidenceRow> = {}): EvidenceRow => ({
   id: 'e1', source: 'learnings_json', polarity: 'dislikes', lane: 'voice', layer: null, title: 'a rule',
   excerpt: 'the ending drags and the hook is great', meta: {}, attribution: 'krish_words',
-  card_facets: null, card_kind: null, card_kind_source: null, ...over,
+  card_facets: null, card_kind: null, card_kind_source: null, venture: 'publication', ...over,
 })
 const raw = (over: Record<string, unknown> = {}) => ({
   dimension: 'close', attribute: 'surprise_last', label: null, polarity: 'dislikes' as const, strength: 2,
@@ -64,7 +64,7 @@ describe('resolveSignal', () => {
   it('reads the whole of a cut excerpt, and a card\'s typed fields', () => {
     const long = `${'word '.repeat(90)}and the ending drags`
     const r = normalise({ source: 'learnings_json', sourceRef: '1', occurredAt: '2026-10-01T00:00:00Z', attribution: 'krish_words',
-      polarity: 'dislikes', lane: 'voice', layer: null, title: null, excerpt: long, meta: {} })
+      polarity: 'dislikes', lane: 'voice', layer: null, title: null, excerpt: long, meta: {}, venture: 'publication' })
     expect(r.excerpt!.length).toBeLessThanOrEqual(400)
     expect(resolveSignal(raw(), row({ excerpt: r.excerpt, meta: r.meta }))).toMatchObject({ origin: 'krish' })
     expect(resolveSignal(raw({ span: 'try it Monday' }), row({ source: 'inspiration_page', excerpt: 'x', meta: { would_do: 'try it  Monday' } })))
@@ -118,7 +118,7 @@ describe('renderEvidence', () => {
 describe('the whole of a cut excerpt', () => {
   const ev = (excerpt: string, source: Evidence['source'] = 'learnings_json'): Evidence => ({
     source, sourceRef: 'r1', occurredAt: '2026-10-01T00:00:00Z', attribution: 'krish_words', polarity: 'likes',
-    lane: 'voice', layer: null, title: null, excerpt, meta: { why: 'recorded' },
+    lane: 'voice', layer: null, title: null, excerpt, meta: { why: 'recorded' }, venture: 'publication',
   })
 
   it('is kept only when the excerpt was cut, and normalising twice changes nothing', () => {
@@ -141,8 +141,16 @@ describe('patternsOf', () => {
     const b = resolveSignal(raw(), row({ id: 'e2', source: 'title_verdicts' }))!
     const c = resolveSignal(raw(), row({ id: 'e2', source: 'title_verdicts' }))!
     const guess = resolveSignal(raw({ span: null }), row({ id: 'e3' }))!
-    const [p] = patternsOf([a, b, c, guess])
-    expect(p).toMatchObject({ attribute: 'close.surprise_last', polarity: 'dislikes', evidence: 2, sources: 2, grounded: 2, guesses: 1 })
+    const mymu = (s: typeof a) => ({ ...s, venture: 'publication' })
+    const [p] = patternsOf([a, b, c, guess].map(mymu))
+    expect(p).toMatchObject({ venture: 'publication', attribute: 'close.surprise_last', polarity: 'dislikes', evidence: 2, sources: 2, grounded: 2, guesses: 1 })
+  })
+
+  it('counts within one venture, as the view does: the same tag in two ventures is two patterns', () => {
+    const a = { ...resolveSignal(raw(), row({ id: 'e1' }))!, venture: 'publication' }
+    const b = { ...resolveSignal(raw(), row({ id: 'e2', source: 'session_report' }))!, venture: 'heartside' }
+    expect(patternsOf([a, b]).map(p => [p.venture, p.attribute, p.evidence]))
+      .toEqual([['heartside', 'close.surprise_last', 1], ['publication', 'close.surprise_last', 1]])
   })
 })
 
@@ -182,6 +190,7 @@ describe('extractSignals', () => {
     const r = await extractSignals(fakeDb(false, log), stub(calls), 'run', { write: false })
     expect(r).toMatchObject({ items: 2, signals: 2, krish: 2, dropped: 1, missing: true })
     expect(r.preview.signals.map(s => s.attribute)).toEqual(['close.surprise_last', 'opening.provocative_hook'])
+    expect(r.preview.signals.map(s => s.venture)).toEqual(['publication', 'publication'])
     expect(log.some(l => /insert|update/i.test(l.sql.split('\n')[0]!))).toBe(false)
   })
 

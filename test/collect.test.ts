@@ -3,6 +3,8 @@ import { collectGitTaste, TASTE_FILES } from '../src/collect/gitTaste.ts'
 import { sheetEvidence } from '../src/collect/drive.ts'
 import { versionOf, normalise, clip, excerptMax } from '../src/evidence.ts'
 import { answerLane } from '../src/tag/items.ts'
+import { collectVisibility } from '../src/collect/supabaseSources.ts'
+import type { Db } from '../src/db.ts'
 
 // Synthetic files only. No real taste data is ever committed here.
 const files: Record<string, unknown> = {
@@ -62,15 +64,35 @@ describe('the What I like sheet', () => {
 
 describe('evidence versions', () => {
   it('give the same entry the same version whatever order its fields arrive in', () => {
-    const a = { source: 'golden_examples', sourceRef: 'x', occurredAt: '2026-10-01T00:00:00Z', attribution: 'krish_words', polarity: 'likes', lane: 'voice', layer: null, title: 't', excerpt: 'e', meta: { a: 1, b: 2 } } as const
+    const a = { source: 'golden_examples', sourceRef: 'x', occurredAt: '2026-10-01T00:00:00Z', attribution: 'krish_words', polarity: 'likes', lane: 'voice', layer: null, title: 't', excerpt: 'e', meta: { a: 1, b: 2 }, venture: 'publication' } as const
     const b = { ...a, meta: { b: 2, a: 1 } }
     expect(versionOf(a)).toBe(versionOf(b))
     expect(versionOf({ ...a, excerpt: 'changed' })).not.toBe(versionOf(a))
   })
 
+  it('keep the venture out of the version, so no stored row is ever versioned again for it', () => {
+    const a = { source: 'feedback_hist', sourceRef: 'x', occurredAt: '2026-10-01T00:00:00Z', attribution: 'krish_action', polarity: 'dislikes', lane: 'visibility', layer: null, title: null, excerpt: null, meta: { agent: 'nova' }, venture: 'mindmake' } as const
+    expect(versionOf({ ...a, venture: 'publication' })).toBe(versionOf(a))
+  })
+
+  it('give a visibility target a new version when its product is set or changed, and none while it has no product', async () => {
+    const target = { id: 'synthetic-target', title: 'A synthetic stage', status: 'applied', type: 'talk', format: 'panel', pitch_type: null,
+      audience_seniority: null, audience_size: null, at: '2026-10-01T00:00:00Z' }
+    const read = async (product: string | null) => (await collectVisibility({
+      query: async () => [{ ...target, product_slug: product }], close: async () => {},
+    } as unknown as Db))[0]!
+    const none = await read(null)
+    expect(none.venture).toBe('mindmake')
+    expect(none.meta).not.toHaveProperty('product')
+    const pulse = await read('fractionl_pulse')
+    const heart = await read('heartside')
+    expect([pulse.venture, heart.venture]).toEqual(['fractionl_pulse', 'heartside'])
+    expect(new Set([versionOf(none), versionOf(pulse), versionOf(heart)]).size).toBe(3)
+  })
+
   it('never stores an excerpt longer than the column allows, and cuts on a word', () => {
     const long = 'word '.repeat(200)
-    expect(normalise({ source: 'learnings_json', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'voice', layer: 'nonsense', title: null, excerpt: long, meta: {} }).excerpt!.length).toBeLessThanOrEqual(400)
+    expect(normalise({ source: 'learnings_json', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'voice', layer: 'nonsense', title: null, excerpt: long, meta: {}, venture: 'publication' }).excerpt!.length).toBeLessThanOrEqual(400)
     expect(clip('a b c', 3)).toBe('a b')
   })
 
@@ -88,7 +110,7 @@ describe('evidence versions', () => {
 
   it('keeps an Inspiration answer up to 2000 characters, and every other source at 400', () => {
     const long = 'word '.repeat(450)
-    const page = normalise({ source: 'inspiration_page', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'production', layer: null, title: null, excerpt: long, meta: {} })
+    const page = normalise({ source: 'inspiration_page', sourceRef: 'x', occurredAt: '', attribution: 'krish_words', polarity: 'likes', lane: 'production', layer: null, title: null, excerpt: long, meta: {}, venture: 'publication' })
     expect(page.excerpt!.length).toBeGreaterThan(1900)
     expect(page.excerpt!.length).toBeLessThanOrEqual(2000)
     expect(excerptMax('inspiration_page')).toBe(2000)

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Db } from '../db.ts'
 import { contentHash } from '../hash.ts'
 import type { Llm } from '../llm.ts'
+import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { normaliseWords } from './file.ts'
 import { FORMATS, FORMAT_GROUPS, RULES_REV, THEMES, type FormatSlug, type ThemeSlug } from './vocab.ts'
 
@@ -133,21 +134,23 @@ function majority(xs: string[]): string {
   return [...c].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? 'other'
 }
 
-/** The standing records a standard may rest on, with his quotes and the liked quotes nearby. */
-export async function floorRecords(db: Db): Promise<{ records: FloorRecord[]; liked: Map<string, FloorQuote> }> {
+/** One venture's standing records a standard may rest on, with his quotes and the liked quotes nearby. */
+export async function floorRecords(db: Db, venture: Venture = FLOOR_VENTURE): Promise<{ records: FloorRecord[]; liked: Map<string, FloorQuote> }> {
   const records = await db.query<FloorRecord>(
     `select r.source, r.source_ref, r.kind, r.theme, r.formats, r.rule_kind, r.item, r.wanted_instead, r.strength, r.capture, r.near,
             coalesce((select json_agg(json_build_object('id', q.id, 'text', q.text, 'attribution', q.attribution, 'said_at', q.said_at) order by q.said_at, q.id)
                       from public.taste_rejection_quotes q where q.id = any(r.quote_ids)), '[]'::json) as quotes
      from public.taste_rejections r
-     where r.withdrawn_at is null and r.kind in ('rejected', 'process') and r.rule_kind in ('form', 'workflow')
+     where r.venture = $1 and r.withdrawn_at is null and r.kind in ('rejected', 'process') and r.rule_kind in ('form', 'workflow')
        and r.attribution in ('krish_words', 'krish_action')
      order by r.rejected_at, r.source_ref`,
+    [venture],
   )
   const likedRows = await db.query<FloorQuote>(
     `select q.id::text, q.text, q.attribution, q.said_at::text from public.taste_rejection_quotes q
-     where exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and r.kind = 'liked' and r.rule_kind = 'form'
-                   and q.id = any(r.quote_ids))`,
+     where exists (select 1 from public.taste_rejections r where r.venture = $1 and r.withdrawn_at is null and r.kind = 'liked'
+                   and r.rule_kind = 'form' and q.id = any(r.quote_ids))`,
+    [venture],
   )
   return { records, liked: new Map(likedRows.map(q => [q.id, q])) }
 }
@@ -181,10 +184,11 @@ export interface FloorDistilResult {
 
 /**
  * Draft the standards again when the standing records changed since the last distil (or none was ever drafted). A
- * dry run calls the model too (unless --no-model), and keeps what it drafted in the preview only.
+ * dry run calls the model too (unless --no-model), and keeps what it drafted in the preview only. One venture's floor
+ * only (FLOOR_VENTURE): its records, its existing standards and its priors, and only its candidates are superseded.
  */
-export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolean): Promise<FloorDistilResult> {
-  const { records, liked } = await floorRecords(db)
+export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolean, venture: Venture = FLOOR_VENTURE): Promise<FloorDistilResult> {
+  const { records, liked } = await floorRecords(db, venture)
   const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, calls: 0, failures: {}, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
   if (!records.length) return result
   const cursor = contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
@@ -194,7 +198,9 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
   if (mark?.cursor === cursor) { result.skipped = true; return result }
 
   const existing = await db.query<{ statement: string; formats: string[] }>(
-    `select statement, formats from public.taste_floor_standards where status in ('candidate', 'proposed') order by updated_at desc limit 200`,
+    `select statement, formats from public.taste_floor_standards where venture = $1 and status in ('candidate', 'proposed')
+     order by updated_at desc limit 200`,
+    [venture],
   )
   const drafted: ResolvedStandard[] = []
   let model = 'unknown'
@@ -247,7 +253,7 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
     try {
       rows = await db.query<{ n: number }>(
         `with prior as (
-           select id, status from public.taste_floor_standards where fingerprint = $1 order by version desc limit 1
+           select id, status from public.taste_floor_standards where venture = $16 and fingerprint = $1 order by version desc limit 1
          ), upd as (
            update public.taste_floor_standards f
            set statement = $2, how_to_check = $3, formats = $4::text[], theme = $5, layer = $6, kind = $7,
@@ -259,14 +265,14 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
          ), ins as (
            insert into public.taste_floor_standards
              (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, record_refs, boundary_quote_ids,
-              krish, krish_quote_id, run_id, model, prompt_rev)
-           select $1, $2, $3, $4::text[], $5, $6, $7, $8::uuid[], $9::text[], $10::uuid[], $11, $12::uuid, $13::uuid, $14, $15
+              krish, krish_quote_id, run_id, model, prompt_rev, venture)
+           select $1, $2, $3, $4::text[], $5, $6, $7, $8::uuid[], $9::text[], $10::uuid[], $11, $12::uuid, $13::uuid, $14, $15, $16
            where not exists (select 1 from prior)
            returning 1
          )
          select (select count(*) from upd)::int + (select count(*) from ins)::int as n`,
         [s.fingerprint, s.statement, s.howToCheck, s.formats, s.theme, s.layer, s.kind, s.quoteIds, s.recordRefs, s.boundaryIds,
-          s.krish, s.krishQuoteId, runId, model.slice(0, 80), FLOOR_PROMPT_REV],
+          s.krish, s.krishQuoteId, runId, model.slice(0, 80), FLOOR_PROMPT_REV, venture],
         { write: true },
       )
     } catch { result.refused++; continue }
@@ -277,8 +283,8 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
   if (!result.failed && !result.refused) {
     const gone = await db.query<{ id: string }>(
       `update public.taste_floor_standards set status = 'superseded'
-       where status = 'candidate' and not (fingerprint = any($1::text[])) returning id::text`,
-      [drafted.map(s => s.fingerprint)],
+       where venture = $2 and status = 'candidate' and not (fingerprint = any($1::text[])) returning id::text`,
+      [drafted.map(s => s.fingerprint), venture],
       { write: true },
     )
     result.superseded = gone.length
