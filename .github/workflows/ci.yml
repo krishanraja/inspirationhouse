@@ -41,6 +41,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The rejections job cuts and re-encodes with ffmpeg; without it its media and end-to-end suites would skip.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
       - run: pnpm typecheck
       - name: Hand the database tests their database and migrations
         shell: bash
@@ -54,3 +56,4 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
           REQUIRE_DB_TESTS: '1'
+          REQUIRE_FFMPEG: '1'

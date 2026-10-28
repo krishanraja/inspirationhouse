@@ -86,13 +86,14 @@ export interface InboxRow {
   whole_cut: boolean
   repository: string
   session_ref: string
+  reported_at: string
 }
 
 export async function uncollectedInbox(db: Db, limit = 200): Promise<InboxRow[]> {
   return db.query<InboxRow>(
     `select id::text, kind, said, said_where, said_at::text, piece, formats, note,
             case when screenshot is null then null else encode(screenshot, 'base64') end as screenshot_b64,
-            screenshot_mime, master_drive_id, master_sha256, at_ms, whole_cut, repository, session_ref
+            screenshot_mime, master_drive_id, master_sha256, at_ms, whole_cut, repository, session_ref, reported_at::text
      from public.taste_rejection_inbox where collected_at is null order by reported_at limit $1`,
     [limit],
   )
@@ -128,12 +129,14 @@ export function fileCapture(row: InboxRow): { quote: QuoteRow; record: RecordRow
   }
 }
 
-export async function markCollected(db: Db, ids: string[], runId: string): Promise<number> {
+/** Stamp captures collected, once and for good, with the run and, when not everything landed, why. */
+export async function markCollected(db: Db, ids: string[], runId: string, reason: string | null = null): Promise<number> {
   if (!ids.length) return 0
   const done = await db.query<{ id: string }>(
-    `update public.taste_rejection_inbox set collected_at = now(), meta = meta || jsonb_build_object('run_id', $2::text)
+    `update public.taste_rejection_inbox
+     set collected_at = now(), meta = meta || jsonb_build_object('run_id', $2::text) || jsonb_strip_nulls(jsonb_build_object('collected_reason', $3::text))
      where id = any($1::uuid[]) and collected_at is null returning id::text`,
-    [ids, runId],
+    [ids, runId, reason],
     { write: true },
   )
   return done.length

@@ -74,13 +74,15 @@ export interface WholeRead { source: 'drive_dump' | 'session_report'; kinds: str
 
 export async function fileRecords(
   db: Db, records: RecordRow[], quoteIds: Map<string, string>, runId: string,
-  opts: { write: boolean; whole: WholeRead | null },
+  // emptyIsWhole: the read is a query that succeeded, so no rows means none stands (his last report taken back), never
+  // a broken read. Only the reports are read this way; an empty folder is always a broken read.
+  opts: { write: boolean; whole: WholeRead | null; emptyIsWhole?: boolean },
 ): Promise<RecordResult> {
-  if (!records.length) return { inserted: 0, restored: 0, withdrawn: 0 }
+  if (!records.length && !(opts.emptyIsWhole && opts.whole?.kinds.length)) return { inserted: 0, restored: 0, withdrawn: 0 }
   const keep = JSON.stringify(records.map(r => ({ s: r.source, r: r.sourceRef, v: r.version })))
   const read = `exists (select 1 from jsonb_to_recordset($1::jsonb) as k(s text, r text, v text)
                         where k.s = t.source and k.r = t.source_ref and k.v = t.source_version)`
-  const sources = [...new Set(records.map(r => r.source))]
+  const sources = [...new Set([...records.map(r => r.source), ...(opts.whole ? [opts.whole.source] : [])])]
   if (!opts.write) {
     const [c] = await db.query<{ held: number; restored: number; withdrawn: number }>(
       `select count(*) filter (where ${read})::int as held,
@@ -99,7 +101,7 @@ export async function fileRecords(
     moment_ms: r.moment?.ms ?? null, moment_origin: r.moment?.ms != null ? r.moment.origin : null,
     meta: { ...r.meta, ...(r.moment?.anchor ? { moment_anchor: r.moment.anchor, moment_anchor_origin: r.moment.origin } : {}), media_plan: r.media },
   })))
-  const [ins] = await db.query<{ n: number }>(
+  const [ins] = !records.length ? [{ n: 0 }] : await db.query<{ n: number }>(
     `with ins as (
        insert into public.taste_rejections
          (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, item, reason, wanted_instead,
@@ -134,6 +136,23 @@ export async function fileRecords(
     withdrawn = gone.length
   }
   return { inserted: Number(ins?.n ?? 0), restored: back.length, withdrawn }
+}
+
+/**
+ * His words as a capture filed them, for the quotes in this read. A capture is read once, so a later read of the same
+ * words (a merge pass of the dump that holds them only as a paraphrase) must not reclass what he captured as his own.
+ */
+export async function capturedWords(db: Db, keys: string[]): Promise<QuoteRow[]> {
+  if (!keys.length) return []
+  return db.query<QuoteRow>(
+    `select q.quote_key as key, q.text, q.said_at as "saidAt", q.said_precision as precision, q.said_where as "saidWhere",
+            q.source, 'krish_words' as attribution
+     from public.taste_rejection_quotes q
+     where q.quote_key = any($1::text[])
+       and exists (select 1 from public.taste_rejections r
+                   where r.source = 'inbox' and r.withdrawn_at is null and r.attribution = 'krish_words' and q.id = any(r.quote_ids))`,
+    [keys],
+  ).then(rows => rows.map(r => ({ ...r, saidAt: new Date(r.saidAt).toISOString() })))
 }
 
 /** What he liked nearby, on the standing version of each record. Changes only when the set changes. */

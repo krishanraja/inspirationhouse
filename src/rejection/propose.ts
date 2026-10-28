@@ -16,7 +16,9 @@ export interface FloorEligible {
 
 export const FLOOR_ELIGIBLE_SQL = `
   select s.id::text, s.fingerprint, s.statement, s.how_to_check, s.formats, s.theme, s.kind,
+         -- His quote goes to him only while a standing record cites it and it is still his words, as the taste_floor view.
          case when exists (select 1 from public.taste_rejections r where r.withdrawn_at is null and s.krish_quote_id = any(r.quote_ids))
+               and exists (select 1 from public.taste_rejection_quotes q where q.id = s.krish_quote_id and q.attribution = 'krish_words')
               then s.krish end as krish,
          s.quote_ids::text[] as quote_ids, s.support_n,
          (select count(distinct q.said_at::date)::int from public.taste_rejection_quotes q where q.id = any(s.quote_ids)) as days

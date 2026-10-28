@@ -25,6 +25,8 @@ const hasFfmpeg = (() => {
   } catch { return false }
 })()
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
+// CI installs ffmpeg and sets REQUIRE_FFMPEG: there, a missing ffmpeg is a fault, never a quiet skip.
+if (process.env.REQUIRE_FFMPEG && !hasFfmpeg) throw new Error('REQUIRE_FFMPEG is set but ffmpeg or ffprobe is missing')
 const ff = (args: string[]) => execFileSync('ffmpeg', ['-v', 'error', '-y', ...args])
 
 // A vertical master with sound, a still far over the image cap, and a small still, made once for the whole file.
@@ -317,7 +319,7 @@ describe('keepMedia on a dry run', () => {
     expect(h.calls.filter(c => /^\s*(insert|update)/i.test(c.sql))).toEqual([])
     expect(r).toEqual({
       stills: 1, strips: 3, clips: 1, reused: 0, missing: 1, unreachableLocal: 1, gone: 1, unresolved: 0, noMoment: 1,
-      masters: 2, tooBig: 0, deferred: 0, pointed: 1, failed: 0, failures: {},
+      masters: 2, tooBig: 0, deferred: 0, pointed: 1, failed: 0, failedBefore: 0, unresolvedPaths: 0, rootsUnseen: 0, failures: {},
     })
   })
 
@@ -350,6 +352,58 @@ describe('keepMedia on a real run', () => {
     expect(r).toMatchObject({ tooBig: 1, masters: 0, clips: 0, failed: 0 })
     expect(h.streamed).toEqual([])
     expect(h.inserts()).toEqual([])
+  })
+
+  it('counts a still too large to hold as too big, never as a failure of the run', async () => {
+    const h = harness()
+    const google = { ...(h.google as object), download: async () => { throw new Error('google download refused: file is over the size cap') } } as unknown as Google
+    const r = await keepMedia(h.db, google, [record('huge-still', { capture: 'still', media: plan({ stills: ['assets/synthetic-a/synthetic still.png'] }) })], FOLDER_FILES, true)
+    expect(r).toMatchObject({ tooBig: 1, stills: 0, failed: 0, failures: {} })
+  })
+
+  it('remembers a cut that cannot be made from a master, and never fetches that master for it again', async () => {
+    const dead = drive(id(60), 'synthetic-sound-only.mp4')
+    const h = harness({ byId: { [dead.id]: dead } })
+    // The record's meta, as the database keeps it between runs.
+    let note: unknown = null
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = [], o?: { write?: boolean }) {
+        if (/jsonb_build_object\('cut_failed'/.test(sql)) { note = JSON.parse(params[3] as string); return [] as T[] }
+        if (/meta->'cut_failed'/.test(sql)) return [{ failed: note }] as T[]
+        return h.db.query<T>(sql, params, o)
+      },
+      async close() {},
+    }
+    const rec = record('dead', { capture: 'moment', moment: at(3500), media: plan({ masters: [{ where: 'drive_id', ref: dead.id }] }) })
+    const cut: NonNullable<KeepDeps['cut']> = async () => { throw new Error('media: no picture in the file') }
+    const first = await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut })
+    expect(first).toMatchObject({ masters: 1, failed: 1, failures: { no_picture: 1 }, failedBefore: 0 })
+    expect(note).toMatchObject({ master: dead.id, rev: CUT_REV, class: 'no_picture' })
+    const second = await keepMedia(db, h.google, [rec], FOLDER_FILES, true, { cut })
+    expect(second).toMatchObject({ masters: 0, failed: 0, failedBefore: 1 })
+    expect(h.streamed.map(s => s.fileId)).toEqual([dead.id])
+    // A failure another try could mend (the download broke) is tried again next run.
+    note = null
+    const flaky = harness({ byId: { [dead.id]: dead }, downloadTo: async () => { throw new Error('google download failed: HTTP 500') } })
+    const once = await keepMedia(db, flaky.google, [rec], FOLDER_FILES, true, { cut })
+    expect(once).toMatchObject({ failed: 1, failedBefore: 0 })
+    expect(note).toBeNull()
+  })
+
+  it('says when a master path is not found because 3 Posts or Archive is not shared with the engine', async () => {
+    const h = harness()
+    const google = { ...(h.google as object), listFolder: async () => [] } as unknown as Google
+    const r = await keepMedia(h.db, google, [record('unshared', { capture: 'whole_cut', media: plan({ masters: [
+      { where: 'drive_path', ref: postsPath('synthetic-piece-one', 'synthetic-master.mp4') },
+      { where: 'drive_path', ref: 'H:\\My Drive\\Somewhere Else\\synthetic-master.mp4' },
+    ] }) })], FOLDER_FILES, true)
+    // Only the path under 3 Posts could be found by sharing; neither root is visible to this engine.
+    expect(r).toMatchObject({ unresolved: 2, unresolvedPaths: 1, rootsUnseen: 2 })
+    const shared = harness({ byId: { [DRIVE.posts]: drive(DRIVE.posts, '3 Posts', { mimeType: FOLDER_MIME }), [DRIVE.archive]: drive(DRIVE.archive, 'Archive', { mimeType: FOLDER_MIME }) } })
+    const seen = await keepMedia(shared.db, { ...(shared.google as object), listFolder: async () => [] } as unknown as Google, [record('shared', { capture: 'whole_cut', media: plan({ masters: [
+      { where: 'drive_path', ref: postsPath('synthetic-piece-one', 'synthetic-master.mp4') },
+    ] }) })], FOLDER_FILES, true)
+    expect(seen).toMatchObject({ unresolvedPaths: 1, rootsUnseen: 0 })
   })
 
   it(`fetches at most ${MASTERS_PER_RUN} masters in one run and defers the rest`, async () => {
@@ -465,7 +519,7 @@ describe.skipIf(!hasFfmpeg)('keepMedia on a real run with ffmpeg', () => {
     const r = await keepMedia(h.db, h.google, records, FOLDER_FILES, true)
     expect(r).toEqual({
       stills: 1, strips: 1, clips: 1, reused: 2, missing: 0, unreachableLocal: 0, gone: 0, unresolved: 0, noMoment: 0,
-      masters: 1, tooBig: 0, deferred: 0, pointed: 0, failed: 0, failures: {},
+      masters: 1, tooBig: 0, deferred: 0, pointed: 0, failed: 0, failedBefore: 0, unresolvedPaths: 0, rootsUnseen: 0, failures: {},
     })
 
     // Only what was not held was fetched.

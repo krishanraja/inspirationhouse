@@ -10,7 +10,8 @@ import type { Db } from '../src/db.ts'
 import { FOLDER_MIME, type DriveFile, type Google } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
 import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts'
-import { runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
+import { INBOX_WAIT_DAYS, runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
+import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
 
 // The Rejections floor against a real Postgres with content-engine's real migrations (supabase/migrations/), and
 // stubs in place of Drive and the model. Synthetic rows only: nothing here is anything Krish said or any file in his
@@ -41,6 +42,8 @@ const hasFfmpeg = (() => {
     return true
   } catch { return false }
 })()
+// CI installs ffmpeg and sets REQUIRE_FFMPEG: there, a missing ffmpeg is a fault, never a quiet skip of the job's suite.
+if (process.env.REQUIRE_FFMPEG && !hasFfmpeg) throw new Error('REQUIRE_FFMPEG is set but ffmpeg or ffprobe is missing')
 const runJob = listed && hasFfmpeg ? describe : describe.skip
 
 /** This file's own database on the given server, made once. Returns its URL. */
@@ -71,6 +74,9 @@ async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
       begin execute format('create role %I', r); exception when duplicate_object or unique_violation then null; end;
     end loop;
   end $$;`)
+  // As on Supabase: the service role may use the schema, and gets everything on each new table unless a migration takes
+  // it back.
+  await client.query('grant usage on schema public to service_role; alter default privileges in schema public grant all on tables to service_role;')
   // The tables the engine reads that other repositories own, cut to the columns it uses.
   await client.query(`
     create table public.mindmake_studio_learning_proposals (
@@ -139,11 +145,21 @@ run('the floor\'s guarantees, on a real database', () => {
        $1, case when $2::text is null then null else now() end, $2, $3) returning id::text`,
     [status, decidedBy, note],
   )).rows[0].id as string
-  const media = (bytes: Buffer, o: { role?: string; mime?: string; durationMs?: number | null; sha?: string } = {}) => client.query(
-    `insert into taste_rejection_media (sha256, role, mime, bytes, width, height, duration_ms, cut_rev)
-     values ($1, $2, $3, $4, 480, 854, $5, 'cut-v1')`,
-    [o.sha ?? sha256(bytes), o.role ?? 'clip', o.mime ?? 'video/mp4', bytes, o.durationMs === undefined ? 4000 : o.durationMs],
-  )
+  // The first bytes of each kind of file, so synthetic bytes are what their label says unless a test says otherwise.
+  const MAGIC: Record<string, Buffer> = {
+    'video/mp4': Buffer.from('00000018667479706d703432', 'hex'), 'image/jpeg': Buffer.from('ffd8ffe0', 'hex'),
+    'image/png': Buffer.from('89504e470d0a1a0a', 'hex'), 'image/webp': Buffer.from('524946460000000057454250', 'hex'),
+  }
+  const labelled = (mime: string, rest: Buffer) => Buffer.concat([MAGIC[mime]!, rest])
+  const media = (rest: Buffer, o: { role?: string; mime?: string; durationMs?: number | null; sha?: string; raw?: boolean } = {}) => {
+    const mime = o.mime ?? 'video/mp4'
+    const bytes = o.raw ? rest : labelled(mime, rest)
+    return client.query(
+      `insert into taste_rejection_media (sha256, role, mime, bytes, width, height, duration_ms, cut_rev)
+       values ($1, $2, $3, $4, 480, 854, $5, 'cut-v1')`,
+      [o.sha ?? sha256(bytes), o.role ?? 'clip', mime, bytes, o.durationMs === undefined ? 4000 : o.durationMs],
+    )
+  }
   const supportOf = async (id: string) =>
     (await client.query(`select support_n, action_n from taste_floor_standards where id = $1`, [id])).rows[0]
 
@@ -160,6 +176,13 @@ run('the floor\'s guarantees, on a real database', () => {
     const still = { role: 'screenshot', mime: 'image/jpeg', durationMs: null }
     await expect(media(bytes, { ...still, sha: sha256(randomBytes(1000)) })).rejects.toThrow(/taste_rejection_media_hash_is_bytes/)
     await media(bytes, still)
+  })
+
+  it('refuses bytes that are not what their label says, so an image cap can never hold a video', async () => {
+    await expect(media(randomBytes(1000), { raw: true })).rejects.toThrow(/taste_rejection_media_bytes_are_the_mime/)
+    await expect(media(labelled('video/mp4', randomBytes(1000)), { raw: true, role: 'screenshot', mime: 'image/jpeg', durationMs: null }))
+      .rejects.toThrow(/taste_rejection_media_bytes_are_the_mime/)
+    for (const mime of ['image/jpeg', 'image/png', 'image/webp']) await media(randomBytes(1000), { role: 'screenshot', mime, durationMs: null })
   })
 
   it('keeps a quote\'s words as he said them, while how the engine classes them can change', async () => {
@@ -193,12 +216,29 @@ run('the floor\'s guarantees, on a real database', () => {
   it('refuses a record of his words that cites no quote of his words', async () => {
     const words = await quote('synthetic: give the card room')
     const paraphrase = await quote('synthetic: he wanted more room around the card', 'observation')
-    await expect(record([])).rejects.toThrow(/must cite a quote that is his words/)
+    await expect(record([])).rejects.toThrow(/taste_rejections_words_are_quoted/)
     await expect(record([paraphrase])).rejects.toThrow(/must cite a quote that is his words/)
     await expect(record(['00000000-0000-4000-8000-000000000000'])).rejects.toThrow(/cited quote\(s\) do not exist/)
     // A paraphrase can stand as an observation, and his words as his words.
     await record([paraphrase], { attribution: 'observation' })
     await record([words, paraphrase])
+  })
+
+  it('checks a record of his words once, when it is filed, so a version sent again after a reclass is skipped, not refused', async () => {
+    const said = await quote('synthetic: give the card room')
+    const insert = () => client.query(
+      `insert into taste_rejections (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, strength, theme,
+         formats, rule_kind, capture, rules_rev)
+       values ('drive_dump', 'dump:synthetic-again', $1, 'rejected', '2026-10-20T12:00:00Z', array[$2::uuid], 'krish_words', 'disliked',
+         'layout', '{short_video}', 'form', 'words', 'rules-v1')
+       on conflict (source, source_ref, source_version) do nothing`,
+      [md5('version again'), said])
+    await insert()
+    await client.query(`update taste_rejection_quotes set attribution = 'observation' where id = $1`, [said])
+    // The same version again: skipped (a before trigger would fire for it, and refuse it, every run).
+    await insert()
+    // A new version of his words on that quote alone is refused.
+    await expect(record([said])).rejects.toThrow(/must cite a quote that is his words/)
   })
 
   it('takes a standard\'s quote of him only when it is his words verbatim, whitespace aside, on a quote it cites', async () => {
@@ -212,6 +252,40 @@ run('the floor\'s guarantees, on a real database', () => {
     await expect(standard({ quoteIds: [said], krish: 'The Card Hugs The Edge', krishQuoteId: said })).rejects.toThrow(refused)
     await expect(standard({ quoteIds: [said], krish: 'something else', krishQuoteId: other })).rejects.toThrow(refused)
     await expect(standard({ quoteIds: [said, paraphrase], krish: 'give it room', krishQuoteId: paraphrase })).rejects.toThrow(refused)
+    // Whitespace alone is no quote of his, though a space is in nearly everything he said.
+    for (const krish of ['\t', '\n', '  ']) {
+      await expect(standard({ quoteIds: [said], krish, krishQuoteId: said })).rejects.toThrow(/taste_floor_standards_krish_check/)
+    }
+  })
+
+  it('never puts a quote to him as his words once it is classed a paraphrase, as the floor view never shows it', async () => {
+    const q = await quote('synthetic: the join chops the word')
+    const w = await quote('synthetic: play every join with the sound on')
+    await record([q, w])
+    await standard({ quoteIds: [q, w], krish: 'chops the word', krishQuoteId: q })
+    await client.query(`update taste_rejection_quotes set attribution = 'observation' where id = $1`, [q])
+    await recountStandards(db, true)
+    const [eligible] = await db.query<{ krish: string | null; support_n: number }>(FLOOR_ELIGIBLE_SQL)
+    expect(eligible).toMatchObject({ krish: null, support_n: 1 })
+    expect((await client.query(`select krish from taste_floor`)).rows).toEqual([{ krish: null }])
+  })
+
+  it('lets the engine\'s key withdraw and stamp, but never delete or empty what it filed', async () => {
+    const q = await quote('synthetic: give it room')
+    await record([q])
+    for (const sql of ['delete from taste_rejection_quotes', 'delete from taste_rejections', 'truncate taste_rejection_inbox',
+      'truncate taste_rejection_media', 'delete from taste_floor_standards']) {
+      await client.query('begin')
+      try {
+        await client.query('set local role service_role')
+        await expect(client.query(sql)).rejects.toThrow(/permission denied/)
+      } finally { await client.query('rollback') }
+    }
+    await client.query('begin')
+    try {
+      await client.query('set local role service_role')
+      await client.query(`update taste_rejections set withdrawn_at = now()`)
+    } finally { await client.query('rollback') }
   })
 
   it('never rewrites a standard once it is on a proposal, though its status can still move', async () => {
@@ -295,6 +369,26 @@ run('the floor\'s guarantees, on a real database', () => {
     await client.query(`update taste_rejection_inbox set collected_at = now(), meta = '{"run_id": "synthetic"}' where id = $1`, [id])
     await expect(client.query(`update taste_rejection_inbox set collected_at = null where id = $1`, [id])).rejects.toThrow(/a filed capture stays filed/)
     await expect(capture('synthetic: the same capture, sent again')).rejects.toThrow(/taste_rejection_inbox_retry_once/)
+  })
+
+  it('takes a capture in one shape only: words, a screenshot, a master by id with the moment, or a whole cut by id', async () => {
+    let k = 0
+    const shape = (o: { shot?: Buffer; mime?: string; master?: string; sha?: string; atMs?: number; wholeCut?: boolean }) => client.query(
+      `insert into taste_rejection_inbox (said, said_where, said_at, screenshot, screenshot_mime, master_drive_id, master_sha256, at_ms,
+         whole_cut, session_ref, repository, surface, emitter_id, client_report_id, reported_at)
+       values ('synthetic: a capture', 'a synthetic session', '2026-10-27T10:00:00Z', $1, $2, $3, $4, $5, $6, 'synthetic-session',
+         'synthetic/repo', 'cli', 'synthetic-emitter', $7, '2026-10-27T10:05:00Z')`,
+      [o.shot ?? null, o.shot ? (o.mime ?? 'image/png') : null, o.master ?? null, o.sha ?? null, o.atMs ?? null, o.wholeCut ?? false,
+        `synthetic-shape-${String(k++).padStart(8, '0')}`])
+    const master = '1SYNTHETICmasterid0000000009'
+    const png = labelled('image/png', randomBytes(100))
+    for (const ok of [{}, { shot: png }, { master, atMs: 3000 }, { master, wholeCut: true }, { master, sha: 'b'.repeat(64), atMs: 3000 }]) await shape(ok)
+    for (const bad of [
+      { shot: png, master }, { shot: png, atMs: 3000 }, { master }, { sha: 'b'.repeat(64), atMs: 3000 }, { sha: 'b'.repeat(64), wholeCut: true },
+      { master, atMs: 3000, wholeCut: true }, { atMs: 3000 },
+    ]) await expect(shape(bad), JSON.stringify(Object.keys(bad))).rejects.toThrow(/taste_rejection_inbox_one_shape/)
+    // A screenshot is the image it says it is.
+    await expect(shape({ shot: labelled('video/mp4', randomBytes(100)), mime: 'image/png' })).rejects.toThrow(/taste_rejection_inbox_screenshot_is_an_image/)
   })
 })
 
@@ -521,7 +615,8 @@ runJob('the rejections job, end to end, on a real database', () => {
     for (const google of [drive(null), drive(dump({ rejected: null }))]) {
       const r = await job(google)
       expect(r.problems).toEqual(['rejections read: Error'])
-      expect(r.counts.rejections_records_withdrawn).toBeUndefined()
+      // The reports are their own read and are still filed; nothing of the folder's is withdrawn.
+      expect(r.counts.rejections_records_withdrawn ?? 0).toBe(0)
       expect(await tally()).toEqual(before)
     }
     expect((await client.query(`select item from taste_rejections where withdrawn_at is not null`)).rows).toEqual([{ item: B.item }])
@@ -631,6 +726,13 @@ runJob('the rejections job, end to end, on a real database', () => {
       .toEqual({ capture: 'moment', moment_ms: 12_000, media: 0 })
     const third = await job(drive(dump({ rejected: [A, C] }), [big]))
     expect(third.counts).toMatchObject({ rejections_inbox: 1, rejections_inbox_collected: 0, rejections_inbox_waiting: 1, rejections_records_new: 0 })
+    // A master never shared must not hold the inbox for good: past the wait, his words are kept and the run says so.
+    const later = await job(drive(dump({ rejected: [A, C] }), [big]), { now: new Date(Date.parse('2026-10-27T11:05:00Z') + (INBOX_WAIT_DAYS + 1) * 86_400_000) })
+    expect(later.problems).toEqual([`rejections inbox: 1 capture(s) kept as words only: their media did not land in ${INBOX_WAIT_DAYS} days`])
+    expect(later.counts).toMatchObject({ rejections_inbox: 1, rejections_inbox_collected: 0, rejections_inbox_gave_up: 1, rejections_inbox_waiting: 0 })
+    expect(await one(`select collected_at is not null as collected, meta->>'collected_reason' as reason from taste_rejection_inbox where id = $1`, [moment.id]))
+      .toEqual({ collected: true, reason: 'media_never_landed' })
+    expect(await one(`select withdrawn_at is null as standing from taste_rejections where source_ref = $1`, [`inbox:${moment.id}`])).toEqual({ standing: true })
   })
 
   // A later merge pass marks his process words a paraphrase, and a later one puts them back.
@@ -692,6 +794,27 @@ runJob('the rejections job, end to end, on a real database', () => {
       .toEqual({ attribution: 'krish_words', item: null, standing: true })
     // The dump's record keeps its own label: the compiler's paraphrase.
     expect(await one(`select attribution from taste_rejections where item = $1 and withdrawn_at is null`, [C.item])).toEqual({ attribution: 'observation' })
+  })
+
+  it('withdraws a reported rejection when he takes his last report back, though the read is then empty', async () => {
+    await client.query(`update taste_evidence set withdrawn_at = now() where source_ref = 'report:synthetic-0001'`)
+    const r = await job(drive(dump({ rejected: [A, C] })))
+    expect(r.problems).toEqual([])
+    expect(r.counts).toMatchObject({ rejections_reports: 0, rejections_records_withdrawn: 1 })
+    expect(await one(`select withdrawn_at is not null as withdrawn from taste_rejections where source = 'session_report'`)).toEqual({ withdrawn: true })
+  })
+
+  it('keeps what he captured as his words, when a later dump holds the same words only as a paraphrase', async () => {
+    const captured = 'synthetic: the lower third covers his face'
+    const X = { id: 'syn-004', date: '2026-10-27', piece: 'synthetic piece three', format: 'Short cut 9:16', category: 'Visual',
+      theme: 'Layout, composition and alignment', item: 'synthetic: a lower third over a face',
+      quotes: [{ text: captured, when: '2026-10-27', source: 'cloud' }], strength: 'Disliked', confidence: 'paraphrased ruling' }
+    const r = await job(drive(dump({ rejected: [A, C, X] })))
+    expect(r.problems).toEqual([])
+    expect(r.counts).toMatchObject({ rejections_quotes_reclassed: 0, rejections_records_new: 1 })
+    expect(await one(`select attribution, source from taste_rejection_quotes where text = $1`, [captured])).toEqual({ attribution: 'krish_words', source: 'capture' })
+    // The dump's record keeps its own label, and the capture's record of his words stands on his words.
+    expect(await one(`select attribution from taste_rejections where item = $1`, [X.item])).toEqual({ attribution: 'observation' })
   })
 
   it('keeps every count of every run under a rejections_ key', () => {

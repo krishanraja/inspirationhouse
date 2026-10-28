@@ -13,7 +13,7 @@ import { keepStill } from './media.ts'
 import { proposeFloor, syncFloorDecisions } from './propose.ts'
 import { publishFloor } from './publish.ts'
 import { loadFloor, renderFloor, type RenderInput } from './render.ts'
-import { fileNear, fileQuotes, fileRecords, rejectionTablesExist, type WholeRead } from './store.ts'
+import { capturedWords, fileNear, fileQuotes, fileRecords, rejectionTablesExist, type WholeRead } from './store.ts'
 
 // The Rejections job (`pnpm engine rejections`): the floor beside the ceiling. Krish, 2026-10-28: "I want this
 // repository to house a separate side engine called Rejections (where all the working rejected production work goes,
@@ -90,6 +90,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
 
   // 2. What arrived from sessions.
   const reported: RecordRow[] = []
+  let reportsRead = false
   let inbox: InboxRow[] = []
   const captured: RecordRow[] = []
   try {
@@ -100,6 +101,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       reported.push(f.record)
     }
     counts.rejections_reports = reported.length
+    reportsRead = true
   } catch (err) { problem('reports', err) }
   if (tables) {
     try {
@@ -116,8 +118,10 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
 
   // 3. Filed: his quotes, then each record, then what he liked nearby.
   let standing = 0
-  if (tables && quotes.size) {
+  if (tables && (quotes.size || reportsRead)) {
     try {
+      // What a capture filed as his words stays his words, whatever a later read of the same words says.
+      for (const q of await capturedWords(d.db, [...quotes.keys()])) holdQuote(quotes, q)
       const q = await fileQuotes(d.db, [...quotes.values()], d.runId, write)
       counts.rejections_quotes = quotes.size
       counts.rejections_quotes_new = q.inserted
@@ -125,16 +129,21 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       const ids = q.ids
       const sum = { inserted: 0, restored: 0, withdrawn: 0 }
       // The folder and the reports are each read whole, so a record no longer in them is withdrawn; the inbox is read
-      // once per capture and never withdraws. An empty read files and withdraws nothing (fileRecords).
-      const sources: Array<[RecordRow[], WholeRead | null]> = [
-        [records, dump ? { source: 'drive_dump', kinds: dump.whole } : null],
-        [reported, { source: 'session_report', kinds: ['rejected'] }],
-        [captured, null],
+      // once per capture and never withdraws. An empty folder files and withdraws nothing (fileRecords); the reports are
+      // a query, so when it succeeds with none, his last report was taken back. Each source is filed on its own, so one
+      // the database refuses never keeps the others out.
+      const sources: Array<[string, RecordRow[], WholeRead | null, boolean]> = [
+        ['dump', records, dump ? { source: 'drive_dump', kinds: dump.whole } : null, false],
+        ['reports', reported, reportsRead ? { source: 'session_report', kinds: ['rejected'] } : null, reportsRead],
+        ['inbox', captured, null, false],
       ]
       if (dump) counts.rejections_read_whole = dump.whole.length
-      for (const [rows, whole] of sources) {
-        const r = await fileRecords(d.db, rows, ids, d.runId, { write, whole })
-        sum.inserted += r.inserted; sum.restored += r.restored; sum.withdrawn += r.withdrawn
+      for (const [name, rows, whole, emptyIsWhole] of sources) {
+        try {
+          const r = await fileRecords(d.db, rows, ids, d.runId, { write, whole, emptyIsWhole })
+          sum.inserted += r.inserted; sum.restored += r.restored; sum.withdrawn += r.withdrawn
+          standing += rows.length
+        } catch (err) { problem(`file ${name}`, err) }
       }
       counts.rejections_records_new = sum.inserted
       counts.rejections_records_restored = sum.restored
@@ -142,19 +151,20 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       // What he liked nearby comes from the liked file, so it is filed only when that file was read whole: a liked file
       // missing or half read would clear it from every record.
       if (filed && dump?.whole.includes('liked')) counts.rejections_near = await fileNear(d.db, nearOf(records, filed.quotes), records, ids, write)
-      standing = records.length + reported.length + captured.length
     } catch (err) { problem('file', err) }
   } else {
     counts.rejections_quotes = quotes.size
     counts.rejections_records_new = input
   }
 
-  // 4. What is kept of each asset.
-  if (dump && (records.length || captured.length)) {
+  // 4. What is kept of each asset. A capture's master is reached by its Drive id, so it is cut even on a day the folder
+  // could not be read.
+  if (records.length || captured.length) {
     try {
-      const m = await keepMedia(d.db, d.google, [...records, ...captured], dump.files, write)
+      const m = await keepMedia(d.db, d.google, [...records, ...captured], dump?.files ?? new Map(), write)
       for (const [k, v] of Object.entries(m)) if (typeof v === 'number') counts[`rejections_media_${snake(k)}`] = v
       if (m.failed) problems.push(`rejections media: ${m.failed} failed (${Object.keys(m.failures).join(', ')})`)
+      if (m.rootsUnseen) problems.push(`rejections media: ${m.unresolvedPaths} master path(s) not found, and ${m.rootsUnseen} of the 3 Posts and Archive folders are not shared with the engine`)
     } catch (err) { problem('media', err) }
   }
   if (write && inbox.length) {
@@ -175,9 +185,15 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       // A capture is collected only once what it asks for has landed: its record, and its still, its clip or its
       // master's pointer. Until then it is read again on the next run (filing it again changes nothing), so a cut that
       // waited on the budget, or a master not yet shared, is never lost.
-      const done = await doneCaptures(d.db, captured)
+      // One whose record stands but whose media has not landed in INBOX_WAIT_DAYS is collected with its words kept and
+      // the reason noted, and the run says so: a master never shared must not hold the inbox for good.
+      const { done, filedOnly } = await doneCaptures(d.db, captured)
+      const cutoff = d.now.getTime() - INBOX_WAIT_DAYS * 86_400_000
+      const gaveUp = inbox.filter((r, i) => filedOnly.has(captured[i]!.sourceRef) && new Date(r.reported_at).getTime() < cutoff)
       counts.rejections_inbox_collected = await markCollected(d.db, inbox.filter((_, i) => done.has(captured[i]!.sourceRef)).map(r => r.id), d.runId)
-      counts.rejections_inbox_waiting = inbox.length - done.size
+      counts.rejections_inbox_gave_up = await markCollected(d.db, gaveUp.map(r => r.id), d.runId, 'media_never_landed')
+      if (gaveUp.length) problems.push(`rejections inbox: ${gaveUp.length} capture(s) kept as words only: their media did not land in ${INBOX_WAIT_DAYS} days`)
+      counts.rejections_inbox_waiting = inbox.length - done.size - gaveUp.length
     } catch (err) { problem('inbox', err) }
   }
 
@@ -238,18 +254,25 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
 
 const snake = (s: string) => s.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`)
 
-/** The captures whose record stands with everything its kind of capture needs. */
-async function doneCaptures(db: Db, captured: RecordRow[]): Promise<Set<string>> {
-  if (!captured.length) return new Set()
-  const rows = await db.query<{ source_ref: string }>(
-    `select source_ref from public.taste_rejections
-     where source = 'inbox' and withdrawn_at is null and source_ref = any($1::text[])
-       and (capture = 'words'
-            or (capture in ('still', 'moment') and cardinality(media_sha256) > 0)
-            or (capture = 'whole_cut' and master_drive_id is not null))`,
+/** How long a filed capture waits for its still, clip or pointer before it is kept as words only. */
+export const INBOX_WAIT_DAYS = 14
+
+/** The captures whose record stands with everything its kind of capture needs (done), and those filed but still waiting. */
+async function doneCaptures(db: Db, captured: RecordRow[]): Promise<{ done: Set<string>; filedOnly: Set<string> }> {
+  if (!captured.length) return { done: new Set(), filedOnly: new Set() }
+  const rows = await db.query<{ source_ref: string; done: boolean }>(
+    `select source_ref,
+            (capture = 'words'
+             or (capture in ('still', 'moment') and cardinality(media_sha256) > 0)
+             or (capture = 'whole_cut' and master_drive_id is not null)) as done
+     from public.taste_rejections
+     where source = 'inbox' and withdrawn_at is null and source_ref = any($1::text[])`,
     [captured.map(r => r.sourceRef)],
   )
-  return new Set(rows.map(r => r.source_ref))
+  return {
+    done: new Set(rows.filter(r => r.done).map(r => r.source_ref)),
+    filedOnly: new Set(rows.filter(r => !r.done).map(r => r.source_ref)),
+  }
 }
 
 /** Before the migration, the dry run's preview still shows the file the floor would be, from what it read. */

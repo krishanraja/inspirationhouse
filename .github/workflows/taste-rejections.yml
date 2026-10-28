@@ -21,18 +21,21 @@ on:
         default: false
 permissions:
   contents: read
+# Its own group: the floor's tables are its own, and sharing 'taste' would let a queued run here cancel a pending
+# taste-harness or taste-weekly run (GitHub keeps one pending run per group). Two floor runs never overlap.
 concurrency:
-  group: taste
+  group: taste-rejections
   cancel-in-progress: false
 jobs:
   run:
-    # Schedules stay off until setup is done: set the repository variable TASTE_ENABLED to true after the migration
-    # and secrets are in place. A scheduled run puts standards to him only once FLOOR_PROPOSE_ENABLED is true.
-    if: github.event_name != 'schedule' || vars.TASTE_ENABLED == 'true'
+    # The schedule stays off until Krish has seen a first real run: set the repository variable REJECTIONS_ENABLED to
+    # true after the migration, the Drive sharing and that run (TASTE_ENABLED alone, which the live taste jobs already
+    # use, never starts it). A scheduled run puts standards to him only once FLOOR_PROPOSE_ENABLED is true.
+    if: github.event_name != 'schedule' || (vars.TASTE_ENABLED == 'true' && vars.REJECTIONS_ENABLED == 'true')
     runs-on: ubuntu-latest
-    # The media stage starts no new master after 18 minutes (KEEP_BUDGET_MS); one started just inside that can take a
-    # few more, and the standards and the floor come after.
-    timeout-minutes: 30
+    # The media stage starts no new master after 12 minutes (KEEP_BUDGET_MS); one started just inside that can take a
+    # few more, and the standards (up to seven model calls) and the floor come after.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

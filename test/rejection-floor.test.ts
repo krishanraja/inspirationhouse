@@ -720,6 +720,7 @@ describe('a capture from the inbox', () => {
     id: UUID(700), kind: 'rejected', said: 'synthetic: that join clips the word', said_where: 'synthetic: a capture in a session',
     said_at: '2026-10-04T08:00:00Z', piece: 'synthetic: short cut one', formats: [], note: null, screenshot_b64: null, screenshot_mime: null,
     master_drive_id: null, master_sha256: null, at_ms: null, whole_cut: false, repository: 'synthetic/repo', session_ref: 'synthetic-session',
+    reported_at: '2026-10-04T08:05:00Z',
     ...over,
   })
 
