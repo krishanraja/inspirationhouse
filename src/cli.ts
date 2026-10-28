@@ -23,6 +23,7 @@ import { propose, syncDecisions } from './publish/propose.ts'
 import { score } from './score/scoreboard.ts'
 import { githubApi, syncHarness } from './publish/harness.ts'
 import { recordRun, judgeRun, type RunStatus } from './runs.ts'
+import { runRejections } from './rejection/job.ts'
 import { log } from './log.ts'
 
 type Counts = Record<string, number | boolean | string>
@@ -321,6 +322,18 @@ async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ 
   return finish(ctx, 1)
 }
 
+// The Rejections job (src/rejection/job.ts): the floor beside the ceiling. His Rejections folder, the dislikes sessions
+// report and the capture inbox, filed with a frame, strip or clip kept and never a master; the standards drafted and,
+// with --propose, put to him; the floor rendered and proposed to content-engine by pull request.
+async function rejections(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, now: Date, propose: boolean): Promise<{ status: RunStatus; reason: string | null }> {
+  const r = await runRejections({ db: ctx.db, google: ctx.google, llm: ctx.llm, cfg, runId: ctx.runId, write: !ctx.dry, propose, now })
+  Object.assign(ctx.counts, r.counts)
+  ctx.problems.push(...r.problems)
+  if (ctx.dry) Object.assign(ctx.preview, r.preview)
+  log({ stage: 'rejections', dry_run: ctx.dry, ...r.counts })
+  return finish(ctx, r.input)
+}
+
 function finish(ctx: Ctx, input: number): { status: RunStatus; reason: string | null } {
   if (ctx.problems.length) return { status: 'failed', reason: ctx.problems.join('; ').slice(0, 600) }
   if (input === 0) return { status: 'skipped', reason: 'no input' }
@@ -334,8 +347,10 @@ async function main(): Promise<void> {
   // A dry run that costs nothing: collect and count, but call no model.
   const noModel = args.includes('--no-model')
   const trigger = args.includes('--cron') ? 'cron' : 'manual'
-  if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards') {
-    console.error('usage: engine daily|weekly|harness|cards [--dry-run] [--no-model] [--cron] [--preview]')
+  // Put the floor's standards to him (rejections only). Off unless asked: his yes comes before the first batch.
+  const proposeFloor = args.includes('--propose')
+  if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards' && job !== 'rejections') {
+    console.error('usage: engine daily|weekly|harness|cards|rejections [--dry-run] [--no-model] [--cron] [--preview] [--propose]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -349,7 +364,8 @@ async function main(): Promise<void> {
     `select to_regclass('public.taste_evidence') is not null and to_regclass('public.inspiration_items') is not null as ok`,
   )
   ctx.ledger = Boolean(reg?.ok)
-  if (!ctx.ledger && !dry) ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration')
+  // The rejections job has its own tables (src/rejection/store.ts) and needs the ledger only for session reports.
+  if (!ctx.ledger && !dry && job !== 'rejections') ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration')
 
   // A scheduled run without its credentials is a broken run, not a quiet one.
   // The harness job reads the database and GitHub only: no Google, no model.
@@ -362,14 +378,15 @@ async function main(): Promise<void> {
 
   let outcome: { status: RunStatus; reason: string | null }
   try {
-    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx) : await harness(ctx, cfg)
+    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx)
+      : job === 'rejections' ? await rejections(ctx, cfg, started, proposeFloor) : await harness(ctx, cfg)
   } catch (err) {
     outcome = { status: 'failed', reason: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 600) }
   }
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|cues|tagging|no words heard|explain|signals|distil|harness|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|items|link|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })

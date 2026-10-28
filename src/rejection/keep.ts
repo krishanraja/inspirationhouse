@@ -1,0 +1,346 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DRIVE } from '../config.ts'
+import type { Db } from '../db.ts'
+import { FOLDER_MIME, type DriveFile, type Google } from '../google.ts'
+import type { MasterRef, RecordRow } from './file.ts'
+import { CUT_REV, cutMoment, keepStill, keepStrip, probe, stripAcross, type Kept } from './media.ts'
+
+// The media stage: for each standing record, keep what its plan names (src/rejection/file.ts mediaOf). A still or a
+// strip already in the folder is fetched and kept as an image. A moment is cut from a master the engine can reach,
+// and the master is deleted from the runner the moment the cut is made. A whole cut is pointed at by its master's
+// Drive id. Nothing already kept is fetched again: media is found by the Drive file it came from and the recipe.
+// Every outcome is counted; none fails the run except an error the engine could not explain.
+
+/** A master larger than this is never fetched (the largest he rejected so far is about 1 GB). */
+export const MASTER_MAX_BYTES = 1_200_000_000
+/** A still is re-encoded to under 400 KB whatever its size; this only bounds what is held in memory to do it. */
+const STILL_MAX_BYTES = 25_000_000
+/**
+ * How many masters one run fetches, and when it stops starting new ones. The job is cancelled at 45 minutes, and the
+ * model's reading of the floor comes after this stage, so a master started at the edge still leaves it room.
+ */
+export const MASTERS_PER_RUN = 8
+export const KEEP_BUDGET_MS = 12 * 60_000
+
+export interface KeepResult {
+  stills: number; strips: number; clips: number; reused: number
+  missing: number; unreachableLocal: number; gone: number; unresolved: number; noMoment: number
+  masters: number; tooBig: number; deferred: number; pointed: number; failed: number
+  /** A cut that failed on bytes the engine fetched, skipped since: the same bytes fail the same way. */
+  failedBefore: number
+  /** Master paths not found, and how many of the folders they sit under are not shared with the engine. */
+  unresolvedPaths: number; rootsUnseen: number
+  failures: Record<string, number>
+}
+
+export interface KeepDeps {
+  now?: () => number
+  cut?: typeof cutMoment
+  across?: typeof stripAcross
+}
+
+const empty = (): KeepResult => ({
+  stills: 0, strips: 0, clips: 0, reused: 0, missing: 0, unreachableLocal: 0, gone: 0, unresolved: 0, noMoment: 0,
+  masters: 0, tooBig: 0, deferred: 0, pointed: 0, failed: 0, failedBefore: 0, unresolvedPaths: 0, rootsUnseen: 0, failures: {},
+})
+
+const MASTER_ROOTS: Array<[RegExp, string]> = [
+  [/^[A-Z]:\\My Drive\\Ventures\\Active Ventures\\makeyourmindup\\3 Posts\\/i, DRIVE.posts],
+  [/^[A-Z]:\\My Drive\\Ventures\\Active Ventures\\makeyourmindup\\Video Engine\\Archive\\/i, DRIVE.archive],
+  [/^[A-Z]:\\My Drive\\Ventures\\Active Ventures\\makeyourmindup\\Video Engine\\Rejections\\/i, DRIVE.rejections],
+]
+
+/**
+ * Turns an H:\My Drive\... path into the file's Drive id by walking the folders the engine is shared on, one name at
+ * a time, from the nearest root it knows. A name two files share, or a path under no known root, is never guessed.
+ */
+export function pathResolver(google: Pick<Google, 'listFolder'>) {
+  const listings = new Map<string, Promise<DriveFile[]>>()
+  const list = (id: string) => {
+    if (!listings.has(id)) listings.set(id, google.listFolder(id))
+    return listings.get(id)!
+  }
+  const roots = MASTER_ROOTS
+  return async (path: string): Promise<{ file: DriveFile; root: string } | 'ambiguous' | null> => {
+    const root = roots.find(([re]) => re.test(path))
+    if (!root) return null
+    const parts = path.replace(root[0], '').split('\\').filter(Boolean)
+    let folder = root[1]
+    for (const [i, name] of parts.entries()) {
+      const matches = (await list(folder)).filter(f => f.name === name)
+      if (matches.length > 1) return 'ambiguous'
+      const next = matches[0]
+      if (!next) return null
+      if (i === parts.length - 1) return next.mimeType === FOLDER_MIME ? null : { file: next, root: root[1] }
+      if (next.mimeType !== FOLDER_MIME) return null
+      folder = next.id
+    }
+    return null
+  }
+}
+
+interface Held { sha256: string; role: string }
+
+/** What was already kept from a Drive file, as long as the file is the same bytes (a file revised in place is not). */
+async function heldFrom(db: Db, file: DriveFile, role: string): Promise<Held[]> {
+  return db.query<Held>(
+    `select sha256, role from public.taste_rejection_media
+     where derived_from = $1 and role = $2 and cut_rev = $3
+       and ($4::text is null or derived_from_sha256 is null or derived_from_sha256 = $4)`,
+    [file.id, role, CUT_REV, file.sha256Checksum?.toLowerCase() ?? null],
+  )
+}
+
+/** What was already cut at the end of a master whose length Drive did not give when it was cut. */
+async function heldAtEnd(db: Db, driveId: string): Promise<Held[]> {
+  return db.query<Held>(
+    `select sha256, role from public.taste_rejection_media
+     where derived_from = $1 and role = any($2::text[]) and cut_rev = $3 and meta->>'anchor' = 'end'`,
+    [driveId, ['clip', 'strip'], CUT_REV],
+  )
+}
+
+/** What was already cut from a master: around this moment, or (at null) across the whole cut. */
+async function heldMedia(db: Db, driveId: string, roles: string[], atMs: number | null): Promise<Held[]> {
+  return db.query<Held>(
+    `select sha256, role from public.taste_rejection_media
+     where derived_from = $1 and role = any($2::text[]) and cut_rev = $3 and at_ms is not distinct from $4`,
+    [driveId, roles, CUT_REV, atMs],
+  )
+}
+
+export async function insertMedia(db: Db, k: Kept, derivedFrom: string | null, derivedSha: string | null, meta: Record<string, unknown> = {}): Promise<void> {
+  await db.query(
+    `insert into public.taste_rejection_media
+       (sha256, role, mime, bytes, width, height, duration_ms, at_ms, window_from_ms, window_to_ms, frames_n,
+        derived_from, derived_from_sha256, cut_rev, meta)
+     values ($1, $2, $3, decode($4, 'base64'), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
+     on conflict (sha256) do nothing`,
+    [k.sha256, k.role, k.mime, k.bytes.toString('base64'), k.width, k.height, k.durationMs, k.atMs, k.windowFromMs,
+      k.windowToMs, k.framesN, derivedFrom, derivedSha, CUT_REV, JSON.stringify(meta)],
+    { write: true },
+  )
+}
+
+export async function attachMedia(db: Db, r: Pick<RecordRow, 'source' | 'sourceRef' | 'version'>, hashes: string[]): Promise<void> {
+  if (!hashes.length) return
+  await db.query(
+    `update public.taste_rejections
+     set media_sha256 = array(select distinct h from unnest(media_sha256 || $4::text[]) as h order by h)
+     where source = $1 and source_ref = $2 and source_version = $3
+       and not (media_sha256 @> $4::text[])`,
+    [r.source, r.sourceRef, r.version, hashes],
+    { write: true },
+  )
+}
+
+async function pointAt(db: Db, r: RecordRow, driveId: string): Promise<boolean> {
+  const done = await db.query<{ id: string }>(
+    `update public.taste_rejections set master_drive_id = $4
+     where source = $1 and source_ref = $2 and source_version = $3 and master_drive_id is distinct from $4
+     returning id::text`,
+    [r.source, r.sourceRef, r.version, driveId],
+    { write: true },
+  )
+  return done.length > 0
+}
+
+/**
+ * What this record's last cut from a master came to, kept on the record (its meta) so no run fetches a master again for
+ * a cut it already holds or could not make. A cut made is held by its record, whatever master it came from (a copy and
+ * its original, the same bytes, cut to the same clip). A cut that failed on bytes the engine fetched fails again on the
+ * same bytes, so it is tried again only once the master changes; a fetch that broke, or a step that ran out of time,
+ * is tried again next run.
+ */
+interface CutNote { ok: boolean; master: string; sha: string | null; modified: string | null; rev: string; class?: string }
+
+async function lastCut(db: Db, r: RecordRow): Promise<CutNote | null> {
+  const [row] = await db.query<{ cut: CutNote | null; media: number }>(
+    `select meta->'cut' as cut, cardinality(media_sha256)::int as media
+     from public.taste_rejections where source = $1 and source_ref = $2 and source_version = $3`,
+    [r.source, r.sourceRef, r.version],
+  )
+  const c = row?.cut ?? null
+  if (!c || c.rev !== CUT_REV) return null
+  // A cut made counts only while the record holds what it made.
+  return c.ok && !Number(row?.media ?? 0) ? null : c
+}
+
+/** Whether a master is the bytes a note was made from: by Drive's sha256 where both are known, else by when it changed. */
+function sameBytes(note: CutNote, master: DriveFile): boolean {
+  const sha = master.sha256Checksum?.toLowerCase() ?? null
+  if (note.master !== master.id) return false
+  if (note.sha && sha) return note.sha === sha
+  return note.modified !== null && note.modified === master.modifiedTime
+}
+
+async function noteCut(db: Db, r: RecordRow, note: Omit<CutNote, 'rev'>): Promise<void> {
+  await db.query(
+    `update public.taste_rejections set meta = meta || jsonb_build_object('cut', $4::jsonb)
+     where source = $1 and source_ref = $2 and source_version = $3`,
+    [r.source, r.sourceRef, r.version, JSON.stringify({ ...note, rev: CUT_REV })],
+    { write: true },
+  )
+}
+
+/** Failures the next run may mend by itself: the fetch, the network, a step that ran out of time. */
+const PASSING = new Set(['no_access', 'fetch', 'timeout'])
+
+const failClass = (err: unknown): string => {
+  const m = String((err as Error)?.message ?? '')
+  if ((err as { killed?: boolean })?.killed || /ETIMEDOUT|timed out/i.test(m)) return 'timeout'
+  if (/size cap/.test(m)) return 'too_big'
+  if (/HTTP 40[34]/.test(m)) return 'no_access'
+  if (/google download failed|ECONNRESET|socket hang up|fetch failed/i.test(m)) return 'fetch'
+  if (/does not fit/.test(m)) return 'cap'
+  if (/no picture|states no length/.test(m)) return 'no_picture'
+  return (err as Error)?.name === 'Error' ? 'cut' : String((err as Error)?.name ?? 'cut').slice(0, 20).toLowerCase()
+}
+
+/**
+ * Keep the media of every record in the read. On a dry run, nothing is fetched or written: the plan is counted,
+ * and the master paths are resolved (a read), so a dry run proves what a real run would reach.
+ */
+export async function keepMedia(
+  db: Db, google: Google, records: RecordRow[], files: Map<string, DriveFile>, write: boolean, deps: KeepDeps = {},
+): Promise<KeepResult> {
+  const out = empty()
+  const now = deps.now ?? Date.now
+  const started = now()
+  const cut = deps.cut ?? cutMoment
+  const across = deps.across ?? stripAcross
+  const resolve = pathResolver(google)
+  const fail = (err: unknown) => { out.failed++; const c = failClass(err); out.failures[c] = (out.failures[c] ?? 0) + 1 }
+
+  for (const r of records) {
+    const hashes: string[] = []
+    // Stills and strips already in the folder.
+    for (const [paths, role] of [[r.media.stills, 'screenshot'], [r.media.strips, 'strip']] as const) {
+      for (const path of paths) {
+        const f = files.get(path)
+        if (!f) { out.missing++; continue }
+        const held = await heldFrom(db, f, role).catch(() => [])
+        if (held.length) { hashes.push(...held.map(h => h.sha256)); out.reused++; continue }
+        // Drive says how big it is: one too large to hold is skipped before it is fetched, not after.
+        if (Number(f.size ?? 0) > STILL_MAX_BYTES) { out.tooBig++; continue }
+        if (!write) { role === 'strip' ? out.strips++ : out.stills++; continue }
+        try {
+          const bytes = await google.download(f.id, STILL_MAX_BYTES)
+          const k = role === 'strip' ? await keepStrip(bytes) : await keepStill(bytes)
+          await insertMedia(db, k, f.id, f.sha256Checksum?.toLowerCase() ?? null)
+          hashes.push(k.sha256)
+          role === 'strip' ? out.strips++ : out.stills++
+        } catch (err) {
+          // A still too large to hold is skipped and counted, as a master too large to fetch is.
+          if (failClass(err) === 'too_big') out.tooBig++
+          else fail(err)
+        }
+      }
+    }
+
+    // A moment cut from its master, or a whole cut pointed at its master.
+    if (r.capture === 'moment' || r.capture === 'whole_cut') {
+      const reach = await reachable(r.media.masters, files, resolve, id => google.file(id))
+      out.unreachableLocal += reach.local
+      out.gone += reach.gone
+      out.unresolved += reach.unresolved
+      out.unresolvedPaths += reach.unresolvedPaths
+      // A whole cut points at the original master, never at a copy someone put in the Rejections folder.
+      const original = reach.found.find(m => m.original)
+      if (r.capture === 'whole_cut' && original) {
+        if (write) { if (await pointAt(db, r, original.file.id)) out.pointed++ } else out.pointed++
+      }
+      const master = reach.found[0]
+      const moment = r.moment
+      if (r.capture === 'moment' && !moment) out.noMoment++
+      const wantsCut = Boolean(r.capture === 'moment' && master && moment)
+      // Six frames across the cut when there is no moment to cut around and the folder holds no strip of it yet.
+      const wantsAcross = Boolean(!wantsCut && master && !r.media.strips.length)
+      if (master && (wantsCut || wantsAcross)) {
+        const duration = Number(master.file.videoMediaMetadata?.durationMillis ?? 0) || null
+        // He pointed at the end of a master Drive has not measured yet: the end is found from the master itself once it
+        // is on disk, and what is cut there is found again by that anchor, so the master is not fetched again.
+        const endUnmeasured = wantsCut && moment!.ms === null && moment!.anchor === 'end' && !duration
+        const at = wantsCut ? (moment!.ms ?? (moment!.anchor === 'end' ? (duration ? Math.max(0, duration - 2000) : null) : 2000)) : null
+        const held = await (endUnmeasured ? heldAtEnd(db, master.file.id) : heldMedia(db, master.file.id, wantsCut ? ['clip', 'strip'] : ['strip'], at)).catch(() => [])
+        let note: CutNote | null = null
+        if (held.length) { hashes.push(...held.map(h => h.sha256)); out.reused++ }
+        else if (Number(master.file.size ?? 0) > MASTER_MAX_BYTES) out.tooBig++
+        // A cut this record already holds, or could not make from these bytes, is not fetched for again.
+        else if (write && (note = await lastCut(db, r).catch(() => null)) && note.ok) out.reused++
+        else if (write && note && !note.ok && sameBytes(note, master.file)) out.failedBefore++
+        else if (out.masters >= MASTERS_PER_RUN || now() - started > KEEP_BUDGET_MS) out.deferred++
+        else if (!write) { out.masters++; if (wantsCut) out.clips++; out.strips++ }
+        else {
+          out.masters++
+          const dir = await mkdtemp(join(tmpdir(), 'taste-master-'))
+          let sha: string | null = null
+          try {
+            const path = join(dir, 'master')
+            const got = await google.downloadTo(master.file.id, path, MASTER_MAX_BYTES)
+            sha = got.sha256
+            const atMs = endUnmeasured ? Math.max(0, ((await probe(path)).durationMs ?? 2000) - 2000) : at!
+            const kept = wantsCut ? Object.values(await cut(path, atMs)) : [await across(path)]
+            for (const k of kept) {
+              await insertMedia(db, k, master.file.id, got.sha256, endUnmeasured ? { anchor: 'end' } : {})
+              hashes.push(k.sha256)
+              if (k.role === 'clip') out.clips++; else out.strips++
+            }
+            await noteCut(db, r, { ok: true, master: master.file.id, sha, modified: master.file.modifiedTime ?? null }).catch(() => {})
+          } catch (err) {
+            fail(err)
+            const cls = failClass(err)
+            // Only a failure on bytes it holds is remembered: the same bytes fail the same way.
+            if (sha && !PASSING.has(cls)) {
+              await noteCut(db, r, { ok: false, master: master.file.id, sha, modified: master.file.modifiedTime ?? null, class: cls }).catch(() => {})
+            }
+          } finally {
+            // Let the master go.
+            await rm(dir, { recursive: true, force: true }).catch(() => {})
+          }
+        }
+      }
+    }
+    if (write && hashes.length) await attachMedia(db, r, [...new Set(hashes)]).catch(fail)
+  }
+  // A master path not found may only be a folder not yet shared with the engine (Drive answers an unshared folder
+  // with nothing): say which, so the gap is seen rather than counted away.
+  if (out.unresolvedPaths) {
+    for (const root of [DRIVE.posts, DRIVE.archive]) if (!(await google.file(root).catch(() => null))) out.rootsUnseen++
+  }
+  return out
+}
+
+interface Reach { found: Array<{ file: DriveFile; original: boolean }>; local: number; gone: number; unresolved: number; unresolvedPaths: number }
+
+async function reachable(masters: MasterRef[], files: Map<string, DriveFile>, resolve: ReturnType<typeof pathResolver>, getFile: Google['file']): Promise<Reach> {
+  const out: Reach = { found: [], local: 0, gone: 0, unresolved: 0, unresolvedPaths: 0 }
+  for (const m of masters) {
+    if (m.where === 'gone') { out.gone++; continue }
+    if (m.where === 'local') { out.local++; continue }
+    if (m.where === 'folder') {
+      const f = files.get(m.ref)
+      if (f) out.found.push({ file: f, original: false })
+      else out.unresolved++
+      continue
+    }
+    if (m.where === 'drive_id') {
+      const f = await getFile(m.ref).catch(() => null)
+      if (f) out.found.push({ file: f, original: true })
+      else out.unresolved++
+      continue
+    }
+    const hit = await resolve(m.ref).catch(() => null)
+    if (hit && hit !== 'ambiguous') out.found.push({ file: hit.file, original: hit.root !== DRIVE.rejections })
+    else {
+      out.unresolved++
+      // Not found under 3 Posts or Archive: sharing that folder with the engine is what would find it.
+      if (hit === null && MASTER_ROOTS.some(([re, root]) => root !== DRIVE.rejections && re.test(m.ref))) out.unresolvedPaths++
+    }
+  }
+  // An original first: a cut from the master he saw, a copy only when it is all there is.
+  out.found.sort((a, b) => Number(b.original) - Number(a.original))
+  return out
+}

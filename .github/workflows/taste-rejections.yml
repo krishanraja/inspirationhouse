@@ -1,0 +1,56 @@
+name: taste-rejections
+# The floor (src/rejection/): read his Rejections folder, file what sessions reported and captured, keep a frame, strip
+# or clip of each (never a master), draft the standards, render the floor and propose it to content-engine.
+on:
+  schedule:
+    # 06:11 UTC daily, after taste-daily has filed the day's session reports. GitHub registers this only from main.
+    - cron: '11 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read only, write nothing
+        type: boolean
+        default: true
+      use_model:
+        description: Draft the standards with the model (text only; off proves access for free)
+        type: boolean
+        default: false
+      propose:
+        description: Put the drafted standards to Krish (one batch a week at most)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+# Its own group: the floor's tables are its own, and sharing 'taste' would let a queued run here cancel a pending
+# taste-harness or taste-weekly run (GitHub keeps one pending run per group). Two floor runs never overlap.
+concurrency:
+  group: taste-rejections
+  cancel-in-progress: false
+jobs:
+  run:
+    # The schedule stays off until Krish has seen a first real run: set the repository variable REJECTIONS_ENABLED to
+    # true after the migration, the Drive sharing and that run (TASTE_ENABLED alone, which the live taste jobs already
+    # use, never starts it). A scheduled run puts standards to him only once FLOOR_PROPOSE_ENABLED is true.
+    if: github.event_name != 'schedule' || (vars.TASTE_ENABLED == 'true' && vars.REJECTIONS_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    # The media stage starts no new master after 12 minutes (KEEP_BUDGET_MS); one started just inside that can take a
+    # few more, and the standards (up to seven model calls) and the floor come after.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Cutting clips and strips on the runner (src/rejection/media.ts), never by a model.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      # Logs on this public repository carry counts only (src/log.ts).
+      - run: pnpm -s engine rejections ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }} ${{ (github.event_name == 'workflow_dispatch' && !inputs.use_model) && '--no-model' || '' }} ${{ ((github.event_name == 'workflow_dispatch' && inputs.propose) || (github.event_name == 'schedule' && vars.FLOOR_PROPOSE_ENABLED == 'true')) && '--propose' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY }}
+          FLOOR_SYNC_TOKEN: ${{ secrets.FLOOR_SYNC_TOKEN }}

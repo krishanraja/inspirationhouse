@@ -26,6 +26,11 @@ const Env = z.object({
   HARNESS_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('krishanraja/ai-harness'),
   HARNESS_SYNC_TOKEN: z.string().optional(),
 
+  // Where the rejection floor's file is proposed, by pull request (src/rejection/publish.ts): content-engine, where
+  // every production session reads it. The token needs contents and pull request write on that one repository.
+  FLOOR_REPO: z.string().regex(/^[\w.-]+\/[\w.-]+$/).default('krishanraja/content-engine'),
+  FLOOR_SYNC_TOKEN: z.string().optional(),
+
   // Google service account with read-only scopes. Both folders and the sheet
   // are shared with it as Viewer. The key may be the bare PEM, or the whole
   // JSON key file Google downloads, in which case the email comes from it.
@@ -55,6 +60,13 @@ export const DRIVE = {
   // accounts he follows for strategy, captured one row per post. Re-uploaded
   // on 2026-10-24 as a new file (the old id 1KawZr2R3Bi1zWJ1F2rPeGdBeVkc1gQTD is gone).
   instagramInspo: '1N3qftTy5aHiFjMkK_2c_O4rOvTAirw3N',
+  // makeyourmindup > Video Engine > Rejections (Krish, 2026-10-28: "the opposite to inspiration"): what he rejected,
+  // with his reasons. Read by the rejections job (src/rejection/), never written.
+  rejections: '1tPwi8b2HZ0baf6KPE-5XHdpA_N-9nnJx',
+  // Where his masters live, so a rejection's timestamp can be cut from its master and a whole cut pointed at by id:
+  // makeyourmindup > 3 Posts, and Video Engine > Archive (content-engine docs/DRIVE.md).
+  posts: '17KdbFrZXKmGXkCaMpmntRD9rrAhnWkcT',
+  archive: '1h8Ia7iUCEXK8u2iqep4YhLPWC0-WNnjJ',
 } as const
 
 // Read-only, and nothing else. CI fails if a write scope appears in the repo.
