@@ -5,7 +5,7 @@ import { DRIVE } from '../config.ts'
 import type { Db } from '../db.ts'
 import { FOLDER_MIME, type DriveFile, type Google } from '../google.ts'
 import type { MasterRef, RecordRow } from './file.ts'
-import { CUT_REV, cutMoment, keepStill, keepStrip, stripAcross, type Kept } from './media.ts'
+import { CUT_REV, cutMoment, keepStill, keepStrip, probe, stripAcross, type Kept } from './media.ts'
 
 // The media stage: for each standing record, keep what its plan names (src/rejection/file.ts mediaOf). A still or a
 // strip already in the folder is fetched and kept as an image. A moment is cut from a master the engine can reach,
@@ -80,6 +80,15 @@ async function heldFrom(db: Db, driveId: string, role: string): Promise<Held[]> 
   )
 }
 
+/** What was already cut at the end of a master whose length Drive did not give when it was cut. */
+async function heldAtEnd(db: Db, driveId: string): Promise<Held[]> {
+  return db.query<Held>(
+    `select sha256, role from public.taste_rejection_media
+     where derived_from = $1 and role = any($2::text[]) and cut_rev = $3 and meta->>'anchor' = 'end'`,
+    [driveId, ['clip', 'strip'], CUT_REV],
+  )
+}
+
 /** What was already cut from a master: around this moment, or (at null) across the whole cut. */
 async function heldMedia(db: Db, driveId: string, roles: string[], atMs: number | null): Promise<Held[]> {
   return db.query<Held>(
@@ -89,15 +98,15 @@ async function heldMedia(db: Db, driveId: string, roles: string[], atMs: number 
   )
 }
 
-export async function insertMedia(db: Db, k: Kept, derivedFrom: string | null, derivedSha: string | null): Promise<void> {
+export async function insertMedia(db: Db, k: Kept, derivedFrom: string | null, derivedSha: string | null, meta: Record<string, unknown> = {}): Promise<void> {
   await db.query(
     `insert into public.taste_rejection_media
        (sha256, role, mime, bytes, width, height, duration_ms, at_ms, window_from_ms, window_to_ms, frames_n,
-        derived_from, derived_from_sha256, cut_rev)
-     values ($1, $2, $3, decode($4, 'base64'), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        derived_from, derived_from_sha256, cut_rev, meta)
+     values ($1, $2, $3, decode($4, 'base64'), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
      on conflict (sha256) do nothing`,
     [k.sha256, k.role, k.mime, k.bytes.toString('base64'), k.width, k.height, k.durationMs, k.atMs, k.windowFromMs,
-      k.windowToMs, k.framesN, derivedFrom, derivedSha, CUT_REV],
+      k.windowToMs, k.framesN, derivedFrom, derivedSha, CUT_REV, JSON.stringify(meta)],
     { write: true },
   )
 }
@@ -188,8 +197,11 @@ export async function keepMedia(
       const wantsAcross = Boolean(!wantsCut && master && !r.media.strips.length)
       if (master && (wantsCut || wantsAcross)) {
         const duration = Number(master.file.videoMediaMetadata?.durationMillis ?? 0) || null
-        const at = wantsCut ? (moment!.ms ?? (moment!.anchor === 'end' && duration ? Math.max(0, duration - 2000) : 2000)) : null
-        const held = await heldMedia(db, master.file.id, wantsCut ? ['clip', 'strip'] : ['strip'], at).catch(() => [])
+        // He pointed at the end of a master Drive has not measured yet: the end is found from the master itself once it
+        // is on disk, and what is cut there is found again by that anchor, so the master is not fetched again.
+        const endUnmeasured = wantsCut && moment!.ms === null && moment!.anchor === 'end' && !duration
+        const at = wantsCut ? (moment!.ms ?? (moment!.anchor === 'end' ? (duration ? Math.max(0, duration - 2000) : null) : 2000)) : null
+        const held = await (endUnmeasured ? heldAtEnd(db, master.file.id) : heldMedia(db, master.file.id, wantsCut ? ['clip', 'strip'] : ['strip'], at)).catch(() => [])
         if (held.length) { hashes.push(...held.map(h => h.sha256)); out.reused++ }
         else if (Number(master.file.size ?? 0) > MASTER_MAX_BYTES) out.tooBig++
         else if (out.masters >= MASTERS_PER_RUN || now() - started > KEEP_BUDGET_MS) out.deferred++
@@ -200,9 +212,10 @@ export async function keepMedia(
           try {
             const path = join(dir, 'master')
             const got = await google.downloadTo(master.file.id, path, MASTER_MAX_BYTES)
-            const kept = wantsCut ? Object.values(await cut(path, at!)) : [await across(path)]
+            const atMs = endUnmeasured ? Math.max(0, ((await probe(path)).durationMs ?? 2000) - 2000) : at!
+            const kept = wantsCut ? Object.values(await cut(path, atMs)) : [await across(path)]
             for (const k of kept) {
-              await insertMedia(db, k, master.file.id, got.sha256)
+              await insertMedia(db, k, master.file.id, got.sha256, endUnmeasured ? { anchor: 'end' } : {})
               hashes.push(k.sha256)
               if (k.role === 'clip') out.clips++; else out.strips++
             }

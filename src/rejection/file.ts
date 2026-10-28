@@ -112,12 +112,18 @@ export function saidAtOf(when: unknown, fallbackDay: string): { at: string; day:
     if (!Number.isNaN(d.getTime())) return { at: d.toISOString(), day: d.toISOString().slice(0, 10), precision: 'second' }
   }
   const day = /^\d{4}-\d{2}-\d{2}$/.test(w) ? w : /^\d{4}-\d{2}-\d{2}/.exec(fallbackDay)?.[0] ?? null
-  if (!day || Number.isNaN(new Date(`${day}T12:00:00Z`).getTime())) return null
+  if (!day || !realDay(day)) return null
   return { at: `${day}T12:00:00.000Z`, day, precision: 'day' }
 }
 
-// An approval of a session's own critique ("All recommended", "Yes to all four", "Signed, go (Recommended)") is his
-// action, not his words about what was wrong: the reason is the session's.
+// V8 reads 2026-02-30 as 2 March rather than refusing it, and Postgres refuses it: a day must survive the round trip.
+function realDay(day: string): boolean {
+  const d = new Date(`${day}T12:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day
+}
+
+// An approval of a session's own critique (a short yes, "all recommended", picking an option a session marked
+// Recommended) is his action, not his words about what was wrong: the reason is the session's.
 const APPROVAL = /^(yes\b|yep\b|all recommended|signed\b|confirmed\b|approved?\b|agreed\b|ok\b|okay\b|go\b)|\(recommended\)\s*\.?$/i
 
 /**
@@ -287,7 +293,7 @@ export function fileRecord(r: DumpRecord, kind: Kind, manifestFiles: string[], c
   const piece = clip(r.piece, 300)
   const item = clip(r.item, 4000)
   const sourceRef = identityOf(kind, r, quoteKeys, collides)
-  const day = /^\d{4}-\d{2}-\d{2}/.exec(r.date)?.[0]
+  const day = saidAtOf(null, r.date)?.day
   const earliest = quotes.map(q => q.saidAt).sort()[0]
   const rejectedAt = day ? `${day}T12:00:00.000Z` : earliest ?? new Date(0).toISOString()
   const content = {
