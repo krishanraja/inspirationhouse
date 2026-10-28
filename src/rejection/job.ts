@@ -208,9 +208,10 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
           rejections_distil_records: r.records, rejections_distil_groups: r.groups, rejections_drafted: r.drafted,
           rejections_standards: r.resolved, rejections_standards_written: r.written, rejections_superseded: r.superseded,
           rejections_distil_skipped: r.skipped ? 1 : 0, rejections_distil_failed: r.failed, rejections_distil_repaired: r.repaired,
-          rejections_standards_refused: r.refused,
+          rejections_standards_refused: r.refused, rejections_distil_calls: r.calls,
         })
-        if (r.failed) problems.push(`rejections distil: ${r.failed} group(s) unanswered`)
+        for (const [why, n] of Object.entries(r.failures)) counts[`rejections_distil_failed_${snake(why)}`] = n
+        if (r.failed) problems.push(`rejections distil: ${r.failed} call(s) unanswered (${Object.keys(r.failures).sort().join(', ')})`)
         if (r.refused) problems.push(`rejections distil: ${r.refused} standard(s) refused by the database`)
         if (!write) preview.standards = r.preview
         const judged = judgeRun(r.skipped ? 0 : r.records, r.resolved)
