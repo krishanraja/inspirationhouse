@@ -83,12 +83,17 @@ export function pathResolver(google: Pick<Google, 'listFolder'>) {
 
 interface Held { sha256: string; role: string }
 
-/** What was already kept from a Drive file, as long as the file is the same bytes (a file revised in place is not). */
+/**
+ * What was already kept from a Drive file, as long as the file is the same bytes (a file revised in place is not):
+ * kept from it, or kept first from another file whose image came out the same (an alias in meta.also_from).
+ */
 async function heldFrom(db: Db, file: DriveFile, role: string): Promise<Held[]> {
   return db.query<Held>(
-    `select sha256, role from public.taste_rejection_media
-     where derived_from = $1 and role = $2 and cut_rev = $3
-       and ($4::text is null or derived_from_sha256 is null or derived_from_sha256 = $4)`,
+    `select sha256, role from public.taste_rejection_media m
+     where m.role = $2 and m.cut_rev = $3
+       and ((m.derived_from = $1 and ($4::text is null or m.derived_from_sha256 is null or m.derived_from_sha256 = $4))
+            or exists (select 1 from jsonb_array_elements(coalesce(m.meta->'also_from', '[]'::jsonb)) a
+                       where a->>'id' = $1 and ($4::text is null or a->>'sha' is null or a->>'sha' = $4)))`,
     [file.id, role, CUT_REV, file.sha256Checksum?.toLowerCase() ?? null],
   )
 }
@@ -117,7 +122,13 @@ export async function insertMedia(db: Db, k: Kept, derivedFrom: string | null, d
        (sha256, role, mime, bytes, width, height, duration_ms, at_ms, window_from_ms, window_to_ms, frames_n,
         derived_from, derived_from_sha256, cut_rev, meta)
      values ($1, $2, $3, decode($4, 'base64'), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb)
-     on conflict (sha256) do nothing`,
+     on conflict (sha256) do update
+       -- The same image from another Drive file (the folder holds some twice): kept once, and that file noted beside it
+       -- so it is found as held next run and not fetched again. Only meta changes; the kept bytes never do.
+       set meta = public.taste_rejection_media.meta || jsonb_build_object('also_from',
+             coalesce(public.taste_rejection_media.meta->'also_from', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('id', $12::text, 'sha', $13::text)))
+       where $12::text is not null and public.taste_rejection_media.derived_from is distinct from $12::text
+         and not coalesce(public.taste_rejection_media.meta->'also_from', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', $12::text))`,
     [k.sha256, k.role, k.mime, k.bytes.toString('base64'), k.width, k.height, k.durationMs, k.atMs, k.windowFromMs,
       k.windowToMs, k.framesN, derivedFrom, derivedSha, CUT_REV, JSON.stringify(meta)],
     { write: true },
