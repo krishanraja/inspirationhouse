@@ -1,4 +1,7 @@
-import { createSign } from 'node:crypto'
+import { createHash, createSign } from 'node:crypto'
+import { createWriteStream } from 'node:fs'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { GOOGLE_SCOPES, type Config } from './config.ts'
 
 // A service account with read-only scopes, and nothing else. The engine never
@@ -12,6 +15,39 @@ export interface Google {
   text(file: DriveFile, maxChars?: number): Promise<string | null>
   // A file's own bytes (an uploaded workbook, say). Refuses past the cap.
   download(fileId: string, maxBytes?: number): Promise<Buffer>
+  // One file's listing fields by its id (a master a capture named), or null when the engine cannot see it.
+  file(fileId: string): Promise<DriveFile | null>
+  // A large file (a master) streamed to a local path, never held in memory, with the sha256 of what arrived. Stops,
+  // and throws, the moment it passes the cap.
+  downloadTo(fileId: string, path: string, maxBytes: number): Promise<{ bytes: number; sha256: string }>
+}
+
+export const FOLDER_MIME = 'application/vnd.google-apps.folder'
+
+/**
+ * Every file under a folder, by its path inside it ('assets/<piece>/<name>'), walked by id one level at a time. A
+ * folder deeper than maxDepth, or a walk past maxFiles, is cut short and throws: a half-read folder is never read as
+ * a whole one.
+ */
+export async function walkFolder(google: Pick<Google, 'listFolder'>, folderId: string, opts: { maxDepth?: number; maxFiles?: number } = {}): Promise<Array<{ path: string; file: DriveFile }>> {
+  const maxDepth = opts.maxDepth ?? 6
+  const maxFiles = opts.maxFiles ?? 5000
+  const out: Array<{ path: string; file: DriveFile }> = []
+  const queue: Array<{ id: string; prefix: string; depth: number }> = [{ id: folderId, prefix: '', depth: 0 }]
+  while (queue.length) {
+    const { id, prefix, depth } = queue.shift()!
+    for (const f of await google.listFolder(id)) {
+      const path = `${prefix}${f.name}`
+      if (f.mimeType === FOLDER_MIME) {
+        if (depth + 1 > maxDepth) throw new Error('drive walk: the folder is nested deeper than the walk reads')
+        queue.push({ id: f.id, prefix: `${path}/`, depth: depth + 1 })
+      } else {
+        out.push({ path, file: f })
+        if (out.length > maxFiles) throw new Error('drive walk: the folder holds more files than the walk reads')
+      }
+    }
+  }
+  return out
 }
 
 const TEXT_EXPORT: Record<string, string> = {
@@ -141,6 +177,39 @@ export async function connectGoogle(cfg: Config): Promise<Google> {
       const bytes = Buffer.from(await res.arrayBuffer())
       if (bytes.length > maxBytes) throw new Error('google download refused: file is over the size cap')
       return bytes
+    },
+    async file(fileId) {
+      const fields = encodeURIComponent('id,name,mimeType,modifiedTime,createdTime,size,thumbnailLink,videoMediaMetadata,sha256Checksum,trashed')
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=${fields}&supportsAllDrives=true`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      if (res.status === 404 || res.status === 403) return null
+      if (!res.ok) throw new Error(`google read failed: HTTP ${res.status}`)
+      const f = await res.json() as DriveFile & { trashed?: boolean }
+      return f.trashed ? null : f
+    },
+    async downloadTo(fileId, path, maxBytes) {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      if (!res.ok || !res.body) throw new Error(`google download failed: HTTP ${res.status}`)
+      const declared = Number(res.headers.get('content-length') ?? 0)
+      if (declared > maxBytes) {
+        await res.body.cancel().catch(() => {})
+        throw new Error('google download refused: file is over the size cap')
+      }
+      const hash = createHash('sha256')
+      let bytes = 0
+      const tap = new Transform({
+        transform(chunk: Buffer, _enc, done) {
+          bytes += chunk.length
+          if (bytes > maxBytes) { done(new Error('google download refused: file is over the size cap')); return }
+          hash.update(chunk)
+          done(null, chunk)
+        },
+      })
+      await pipeline(Readable.fromWeb(res.body as never), tap, createWriteStream(path))
+      return { bytes, sha256: hash.digest('hex') }
     },
   }
 }

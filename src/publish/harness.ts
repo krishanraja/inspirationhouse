@@ -106,38 +106,58 @@ export function pullBody(hash: string): string {
 
 export async function syncHarness(db: Db, gh: GitHubApi, write: boolean, base = 'main'): Promise<HarnessSyncResult> {
   const rules = await db.query<ApprovedRule>(APPROVED_SQL)
-  const wanted = HARNESS_FILES.map(f => ({ ...f, text: renderApproved(rules, f.skill, f.lanes) }))
+  const wanted = HARNESS_FILES.map(f => ({ path: f.path, text: renderApproved(rules, f.skill, f.lanes), message: `Approved taste rules for ${f.skill}` }))
+  const r = await syncPull(gh, {
+    files: wanted, branch: SYNC_BRANCH, base, write,
+    title: 'Approved taste rules for the voice and design skills', body: pullBody,
+  })
+  return { rules: rules.length, ...r }
+}
+
+export interface PullFile { path: string; text: string; message: string }
+export interface PullSyncResult { changed: number; written: number; pull: number | null; declined: number | null }
+
+/**
+ * Propose a set of rendered files to a repository by one pull request, the way the harness rules arrive (Ruling,
+ * Krish, 2026-10-24: "Rules arrive by PR"). Nothing changes on the default branch until he merges. An open pull
+ * request already holding the set is left alone, and a set he closed without merging is never proposed again: its
+ * hash is in the body. Used for ai-harness's skills and for content-engine's rejection floor (src/rejection/publish.ts).
+ */
+export async function syncPull(gh: GitHubApi, opts: {
+  files: PullFile[]; branch: string; base: string; write: boolean; title: string; body: (hash: string) => string
+}): Promise<PullSyncResult> {
+  const { files: wanted, branch, base } = opts
   const hash = contentHash(wanted.map(f => ({ path: f.path, text: f.text })))
   const onBase = await Promise.all(wanted.map(f => gh.readFile(f.path, base)))
   const changed = wanted.filter((f, i) => onBase[i]?.text !== f.text)
-  const result: HarnessSyncResult = { rules: rules.length, changed: changed.length, written: 0, pull: null, declined: null }
-  if (!changed.length || !write) return result
+  const result: PullSyncResult = { changed: changed.length, written: 0, pull: null, declined: null }
+  if (!changed.length || !opts.write) return result
 
-  let pull = await gh.openPull(SYNC_BRANCH)
+  let pull = await gh.openPull(branch)
   if (pull !== null) {
     // The open pull request already holds exactly this set: its files are left alone, so his review is not reset every
     // morning. Only its body is written, so a pull request opened before the body named its set gains the hash line,
     // and closing it declines this set.
-    const onBranch = await Promise.all(wanted.map(f => gh.readFile(f.path, SYNC_BRANCH)))
+    const onBranch = await Promise.all(wanted.map(f => gh.readFile(f.path, branch)))
     if (wanted.every((f, i) => onBranch[i]?.text === f.text)) {
-      await gh.updatePull(pull, pullBody(hash))
+      await gh.updatePull(pull, opts.body(hash))
       return { ...result, pull }
     }
   } else {
     // He closed a pull request with this same set without merging it: he declined it, so it is not opened again.
-    const declined = (await gh.closedPulls(SYNC_BRANCH)).find(p => !p.merged && p.body.includes(hashLine(hash)))
+    const declined = (await gh.closedPulls(branch)).find(p => !p.merged && p.body.includes(hashLine(hash)))
     if (declined) return { ...result, declined: declined.number }
   }
 
   // A pull request is rebuilt from the default branch each time the set changes, so it always shows the whole set.
-  await gh.resetBranch(SYNC_BRANCH, base)
+  await gh.resetBranch(branch, base)
   for (const f of changed) {
-    const cur = await gh.readFile(f.path, SYNC_BRANCH)
-    await gh.writeFile(f.path, SYNC_BRANCH, f.text, cur?.sha ?? null, `Approved taste rules for ${f.skill}`)
+    const cur = await gh.readFile(f.path, branch)
+    await gh.writeFile(f.path, branch, f.text, cur?.sha ?? null, f.message)
   }
-  if (pull === null) pull = await gh.createPull(SYNC_BRANCH, base, 'Approved taste rules for the voice and design skills', pullBody(hash))
+  if (pull === null) pull = await gh.createPull(branch, base, opts.title, opts.body(hash))
   // The body names the set the pull request now holds, so closing it declines this set and no older one.
-  else await gh.updatePull(pull, pullBody(hash))
+  else await gh.updatePull(pull, opts.body(hash))
   return { ...result, written: changed.length, pull }
 }
 
