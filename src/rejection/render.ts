@@ -119,6 +119,20 @@ const CHECK_BY: Record<string, string> = {
 }
 const WORDS_LABEL: Record<string, string> = { krish_words: 'his words', krish_action: 'his approval', observation: 'a paraphrase, not his words' }
 
+/**
+ * A pattern is a complaint he made about more than one production; a one-off is about one. Krish, 2026-10-28: "find
+ * patterns, so we can cement certain rejections as much being more critical to follow than a one off complaint about
+ * one production." A production is a record's piece, or its day when it names none. Patterns come first everywhere the
+ * floor is read, and only patterns are put to him (src/rejection/propose.ts, which counts productions the same way).
+ */
+export const FLOOR_PATTERN_MIN = 2
+
+/** The production a record is about: its piece, case and spacing aside, or its day when it names none. */
+export function productionOf(r: { piece: string | null; rejected_at: string }): string {
+  const piece = (r.piece ?? '').replace(/\s+/g, ' ').trim().toLowerCase()
+  return piece || `day:${r.rejected_at.slice(0, 10)}`
+}
+
 export interface RenderInput {
   standards: StandardRow[]; records: RecordViewRow[]; quotes: QuoteViewRow[]; media: MediaViewRow[]
 }
@@ -164,9 +178,18 @@ export function renderFloor(input: RenderInput): string {
     ...s.quote_ids.flatMap(q => byQuote.get(q) ?? []),
   ])].sort()
 
+  const recordByRef = new Map(input.records.map(r => [shortRef(r.source, r.source_ref), r]))
+  const productionsOf = (s: StandardRow) => new Set(recordsOf(s).map(ref => recordByRef.get(ref))
+    .filter((r): r is RecordViewRow => Boolean(r) && r!.kind !== 'liked').map(productionOf)).size
+  // Patterns first, then by how many productions and how many things he said, then by key: deterministic.
+  const ordered = input.standards.map(s => ({ s, n: productionsOf(s) }))
+    .sort((a, b) => b.n - a.n || b.s.support_n - a.s.support_n || a.s.fingerprint.localeCompare(b.s.fingerprint))
+
   const standards: Record<string, unknown> = {}
-  for (const s of input.standards) {
+  for (const { s, n } of ordered) {
     standards[`s${s.fingerprint.slice(0, 10)}`] = {
+      weight: n >= FLOOR_PATTERN_MIN ? 'pattern' : 'one_off',
+      productions: n,
       standing: s.standing,
       ...(s.decided_at ? { decided_on: day(s.decided_at) } : {}),
       // The model wrote these (or he reworded them) from records it read unscrubbed, so they are scrubbed too.
@@ -212,6 +235,7 @@ export function renderFloor(input: RenderInput): string {
       "his_words are his, verbatim, except that a link, path, id or email inside them is shown as [link], [path], [id] or [email]; the floor database keeps them whole. what, piece and wanted_instead are a session's description, never his words.",
       'A standard is approved or reworded by him, or a draft the engine read into his rejections. Reviewers and pre-delivery checks may test work against approved and reworded standards and his words, for craft and process only, never subject (Ruling, Krish, 2026-10-28).',
       'The engine wrote every check_before_delivery; check_by says whether he approved it with the statement, or it is still a draft.',
+      `weight is pattern when he raised it about ${FLOOR_PATTERN_MIN} or more productions (productions says how many), one_off when about one. A pattern is more critical to follow than a one-off, and comes first (Krish, 2026-10-28).`,
       'Media are kept in the floor database (content-engine taste_rejection_media) by sha256: a still, a six-frame strip or a 4 s clip, never a master.',
     ],
     version: contentHash(stableJson(body)),
@@ -219,6 +243,7 @@ export function renderFloor(input: RenderInput): string {
     counts: {
       standards: input.standards.length,
       approved: input.standards.filter(s => s.standing !== 'draft').length,
+      patterns: ordered.filter(o => o.n >= FLOOR_PATTERN_MIN).length,
       records: input.records.filter(r => r.kind !== 'liked').length,
       liked_nearby: input.records.filter(r => r.kind === 'liked').length,
     },

@@ -34,6 +34,8 @@ describe('the vocabulary', () => {
   it('maps a known attribute with or without its dimension, and anything else to other', () => {
     expect(slugOf('tone', 'dry_aside')).toBe('tone.dry_aside')
     expect(slugOf('tone', 'tone.dry_aside')).toBe('tone.dry_aside')
+    // What every object inherits is no tag of his.
+    for (const a of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) expect(slugOf('tone', a)).toBe('tone.other')
     expect(slugOf('tone', 'Dry Aside')).toBe('tone.dry_aside')
     expect(slugOf('tone', 'whimsical')).toBe('tone.other')
     expect(slugOf('subject', 'anything')).toBe('subject.topic')

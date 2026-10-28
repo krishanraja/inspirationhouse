@@ -14,6 +14,7 @@ import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts
 import { INBOX_WAIT_DAYS, runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
 import { keepMedia } from '../src/rejection/keep.ts'
 import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
+import { FLOOR_PATTERN_MIN } from '../src/rejection/render.ts'
 
 // The Rejections floor against a real Postgres with content-engine's real migrations (supabase/migrations/), and
 // stubs in place of Drive and the model. Synthetic rows only: nothing here is anything Krish said or any file in his
@@ -123,14 +124,15 @@ run('the floor\'s guarantees, on a real database', () => {
      values ($1, $2, '2026-10-20T12:00:00Z', 'day', 'a synthetic session', 'cloud', $3) returning id::text`,
     [md5(`quote ${n++}`), text, attribution],
   )).rows[0].id as string
-  const record = async (quoteIds: string[], over: { kind?: string; attribution?: string; venture?: string } = {}) => {
+  const record = async (quoteIds: string[], over: { kind?: string; attribution?: string; venture?: string; piece?: string | null; on?: string } = {}) => {
     const i = n++
     return (await client.query(
       `insert into taste_rejections (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, item,
-         reason, strength, theme, formats, rule_kind, capture, rules_rev, venture)
-       values ('drive_dump', $1, $2, $3, '2026-10-20T12:00:00Z', $4::uuid[], $5, 'synthetic: a title card crowds the edge',
-         'synthetic: no room around it', 'disliked', 'layout', '{short_video}', 'form', 'still', 'rules-v1', $6) returning id::text`,
-      [`dump:synthetic-${i}`, md5(`record ${i}`), over.kind ?? 'rejected', quoteIds, over.attribution ?? 'krish_words', over.venture ?? 'publication'],
+         reason, strength, theme, formats, rule_kind, capture, rules_rev, venture, piece)
+       values ('drive_dump', $1, $2, $3, $8::timestamptz, $4::uuid[], $5, 'synthetic: a title card crowds the edge',
+         'synthetic: no room around it', 'disliked', 'layout', '{short_video}', 'form', 'still', 'rules-v1', $6, $7) returning id::text`,
+      [`dump:synthetic-${i}`, md5(`record ${i}`), over.kind ?? 'rejected', quoteIds, over.attribution ?? 'krish_words', over.venture ?? 'publication',
+        over.piece === undefined ? null : over.piece, over.on ?? '2026-10-20T12:00:00Z'],
     )).rows[0].id as string
   }
   const standard = async (o: { quoteIds: string[]; statement?: string; krish?: string; krishQuoteId?: string; status?: string; proposalId?: string }) => (await client.query(
@@ -268,9 +270,27 @@ run('the floor\'s guarantees, on a real database', () => {
     await standard({ quoteIds: [q, w], krish: 'chops the word', krishQuoteId: q })
     await client.query(`update taste_rejection_quotes set attribution = 'observation' where id = $1`, [q])
     await recountStandards(db, true)
-    const [eligible] = await db.query<{ krish: string | null; support_n: number }>(FLOOR_ELIGIBLE_SQL, ['publication'])
+    const [eligible] = await db.query<{ krish: string | null; support_n: number }>(FLOOR_ELIGIBLE_SQL, ['publication', 1])
     expect(eligible).toMatchObject({ krish: null, support_n: 1 })
     expect((await client.query(`select krish from taste_floor`)).rows).toEqual([{ krish: null }])
+  })
+
+  it('puts only a pattern to him: a complaint about two or more productions, never a one-off about one', async () => {
+    // One production said three ways is a one-off; the same complaint about a second production makes it a pattern.
+    const a = await quote('synthetic: the card crowds the edge')
+    const b = await quote('synthetic: give the card room')
+    const c = await quote('synthetic: the edge again')
+    await record([a], { piece: 'Synthetic Monday short' })
+    await record([b], { piece: '  synthetic   monday SHORT ' })
+    const once = await standard({ quoteIds: [a, b], statement: 'synthetic: never crowd a card at the edge of one piece.' })
+    const eligible = async () => (await db.query<{ id: string; productions: number }>(FLOOR_ELIGIBLE_SQL, ['publication', FLOOR_PATTERN_MIN]))
+      .map(e => [e.id, e.productions])
+    expect(await eligible()).toEqual([])
+    // A record with no piece is its own production, by its day.
+    await record([c], { piece: null, on: '2026-10-21T09:00:00Z' })
+    const twice = await standard({ quoteIds: [a, c], statement: 'synthetic: never crowd a card at the edge, in any piece.' })
+    expect(await eligible()).toEqual([[twice, 2]])
+    expect(once).not.toBe(twice)
   })
 
   it('lets the engine\'s key withdraw and stamp, but never delete or empty what it filed', async () => {
@@ -525,7 +545,9 @@ runJob('the rejections job, end to end, on a real database', () => {
   const results: RejectionsResult[] = []
   const job = async (google: Google, over: Partial<RejectionsDeps> = {}) => {
     writes = []
-    const r = await runRejections({ db: watched, google, llm, cfg: loadConfig({}), runId, write: true, propose: true, now, gh: null, ...over })
+    // The fixture holds one production per maker, so a single one makes a pattern here; the pattern bar itself is held
+    // by "puts only a pattern to him" above.
+    const r = await runRejections({ db: watched, google, llm, cfg: loadConfig({}), runId, write: true, propose: true, now, gh: null, floorPatternMin: 1, ...over })
     results.push(r)
     return r
   }
@@ -593,7 +615,7 @@ runJob('the rejections job, end to end, on a real database', () => {
     }
     // He decides on the check with the statement, so the check that binds once he approves is one he saw.
     const assertions = (await client.query(`select assertion from mindmake_studio_learning_proposals order by assertion collate "C"`)).rows.map(r => r.assertion)
-    expect(assertions[0]).toBe('Floor for short_video: synthetic: always leave a title card room at the caption band. (In his words: "give it room") '
+    expect(assertions[0]).toBe('Floor for short_video (raised about 1 production): synthetic: always leave a title card room at the caption band. (In his words: "give it room") '
       + 'Check before delivery: synthetic: scrub to each title card and look at the caption band.')
     // Written as candidates first: every standard went in before any proposal did, and the database refuses a proposed
     // standard with no proposal, so each one stood as a candidate until its proposal was made.

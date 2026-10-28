@@ -37,6 +37,8 @@ export interface RejectionsDeps {
   now: Date
   /** For tests: the GitHub client the floor is proposed through. */
   gh?: GitHubApi | null
+  /** For tests whose fixture holds one production: how many productions make a pattern (FLOOR_PATTERN_MIN otherwise). */
+  floorPatternMin?: number
 }
 
 export interface RejectionsResult {
@@ -231,11 +233,11 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     try { counts.rejections_recounted = await recountStandards(d.db, write) } catch (err) { problem('recount', err) }
     if (d.propose) {
       try {
-        const p = await proposeFloor(d.db, d.now, write)
+        const p = await proposeFloor(d.db, d.now, write, d.floorPatternMin)
         Object.assign(counts, { rejections_eligible: p.eligible, rejections_proposed: p.proposed, rejections_batch_waiting: p.waiting ? 1 : 0 })
       } catch (err) { problem('propose', err) }
     } else {
-      try { counts.rejections_eligible = (await proposeFloor(d.db, d.now, false)).eligible } catch (err) { problem('propose', err) }
+      try { counts.rejections_eligible = (await proposeFloor(d.db, d.now, false, d.floorPatternMin)).eligible } catch (err) { problem('propose', err) }
     }
   }
 
