@@ -368,6 +368,19 @@ run('the floor\'s guarantees, on a real database', () => {
     // The engine stamps it (and notes its run) once it is filed.
     await client.query(`update taste_rejection_inbox set collected_at = now(), meta = '{"run_id": "synthetic"}' where id = $1`, [id])
     await expect(client.query(`update taste_rejection_inbox set collected_at = null where id = $1`, [id])).rejects.toThrow(/a filed capture stays filed/)
+    // A raw screenshot is never changed, and let go only once its capture is collected.
+    const shot = (await client.query(
+      `insert into taste_rejection_inbox (said, said_where, said_at, screenshot, screenshot_mime, session_ref, repository, surface, emitter_id,
+         client_report_id, reported_at)
+       values ('synthetic: a shot', 'a synthetic session', '2026-10-27T10:00:00Z', $1, 'image/png', 'synthetic-session', 'synthetic/repo', 'cli',
+         'synthetic-emitter', 'synthetic-capture-000099', '2026-10-27T10:05:00Z') returning id::text`,
+      [labelled('image/png', randomBytes(100))])).rows[0].id as string
+    await expect(client.query(`update taste_rejection_inbox set screenshot = null, screenshot_mime = null where id = $1`, [shot]))
+      .rejects.toThrow(/a capture is kept as it was filed/)
+    await client.query(`update taste_rejection_inbox set collected_at = now() where id = $1`, [shot])
+    await expect(client.query(`update taste_rejection_inbox set screenshot = $2 where id = $1`, [shot, labelled('image/png', randomBytes(100))]))
+      .rejects.toThrow(/a capture is kept as it was filed/)
+    await client.query(`update taste_rejection_inbox set screenshot = null, screenshot_mime = null where id = $1`, [shot])
     await expect(capture('synthetic: the same capture, sent again')).rejects.toThrow(/taste_rejection_inbox_retry_once/)
   })
 
@@ -665,6 +678,9 @@ runJob('the rejections job, end to end, on a real database', () => {
       .toEqual({ source: 'capture', attribution: 'krish_words' })
     expect(await one(`select collected_at is not null as collected, meta->>'run_id' as run from taste_rejection_inbox where id = $1`, [id]))
       .toEqual({ collected: true, run: runId })
+    // Its raw upload is let go once its still is kept: what stays is the re-encoded still on the record.
+    expect(await one(`select screenshot is null as released, screenshot_mime is null as mime_gone, meta->>'screenshot_released' as noted
+                      from taste_rejection_inbox where id = $1`, [id])).toEqual({ released: true, mime_gone: true, noted: 'true' })
     // Read once: the next run neither reads it again nor withdraws what it filed.
     const again = await job(drive(dump({ rejected: [A, C] })))
     expect(again.counts.rejections_inbox).toBe(0)

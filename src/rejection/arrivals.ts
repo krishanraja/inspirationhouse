@@ -129,14 +129,24 @@ export function fileCapture(row: InboxRow): { quote: QuoteRow; record: RecordRow
   }
 }
 
-/** Stamp captures collected, once and for good, with the run and, when not everything landed, why. */
+/**
+ * Stamp captures collected, once and for good, with the run and, when not everything landed, why. A capture collected
+ * done lets its raw screenshot go: the engine has kept its re-encoded still (under 400 KB, no metadata), and the raw
+ * upload (up to 5 MB, perhaps a phone's location) is not kept beside it (Krish, 2026-10-28: "Release after kept"). One
+ * collected without its media (given up) keeps the raw upload, since nothing else of it was kept.
+ */
 export async function markCollected(db: Db, ids: string[], runId: string, reason: string | null = null): Promise<number> {
   if (!ids.length) return 0
+  const release = reason === null
   const done = await db.query<{ id: string }>(
     `update public.taste_rejection_inbox
-     set collected_at = now(), meta = meta || jsonb_build_object('run_id', $2::text) || jsonb_strip_nulls(jsonb_build_object('collected_reason', $3::text))
+     set collected_at = now(),
+         screenshot = case when $4 then null else screenshot end,
+         screenshot_mime = case when $4 then null else screenshot_mime end,
+         meta = meta || jsonb_build_object('run_id', $2::text) || jsonb_strip_nulls(jsonb_build_object('collected_reason', $3::text))
+                || case when $4 and screenshot is not null then jsonb_build_object('screenshot_released', true) else '{}'::jsonb end
      where id = any($1::uuid[]) and collected_at is null returning id::text`,
-    [ids, runId, reason],
+    [ids, runId, reason, release],
     { write: true },
   )
   return done.length
