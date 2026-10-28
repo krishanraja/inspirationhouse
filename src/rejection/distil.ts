@@ -10,7 +10,7 @@ import { FORMATS, FORMAT_GROUPS, RULES_REV, THEMES, type FormatSlug, type ThemeS
 // 2026-10-24). It drafts the standards for one group of makers at a time; code checks every citation and every quote
 // of his; the database counts the support. A standard once put to him is never rewritten.
 
-export const FLOOR_PROMPT_REV = 'floor-v1'
+export const FLOOR_PROMPT_REV = 'floor-v2'
 const WATERMARK = 'rejections_distil'
 
 const LAYERS = new Set(['opening', 'structure', 'breakdown', 'proof', 'tone', 'close', 'packaging', 'length', 'editing',
@@ -160,8 +160,20 @@ export function groupsOf(r: Pick<FloorRecord, 'kind' | 'formats'>): string[] {
   return out.length ? out : ['everything']
 }
 
+/**
+ * How many records one call reads. The first real run (2026-10-28) left the four groups of 42 to 88 records
+ * unanswered, while those of 4 to 21 answered: a group that size asks for more standards than one answer holds. So a
+ * big group is read in parts of related records, each told the standards already drafted for its makers, and a part
+ * whose answer still runs out of room is read again as two halves.
+ */
+export const FLOOR_CHUNK_RECORDS = 30
+const FLOOR_SPLIT_MIN = 8
+const FLOOR_MAX_TOKENS = 32000
+
 export interface FloorDistilResult {
   records: number; groups: number; drafted: number; resolved: number; written: number; superseded: number
+  /** Model calls made, and those that came back with no answer, by why (max_tokens, unparsed, refusal). */
+  calls: number; failures: Record<string, number>
   skipped: boolean; failed: number; repaired: number; preview: ResolvedStandard[]
   /** Standards the database refused (its checks are the last word on his quote); the rest are still written. */
   refused: number
@@ -173,7 +185,7 @@ export interface FloorDistilResult {
  */
 export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolean): Promise<FloorDistilResult> {
   const { records, liked } = await floorRecords(db)
-  const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
+  const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, calls: 0, failures: {}, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
   if (!records.length) return result
   const cursor = contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
   const [mark] = await db.query<{ cursor: string | null }>(`select cursor from public.taste_watermarks where source = $1`, [WATERMARK])
@@ -192,16 +204,37 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
     result.groups++
     const allowed = group === 'everything' ? (['all'] as FormatSlug[]) : [...FORMAT_GROUPS[group]!].filter(f => f !== 'other') as FormatSlug[]
     const mine = existing.filter(e => e.formats.some(f => (allowed as string[]).includes(f))).map(e => e.statement)
-    const { text, words, likedRefs } = renderGroup(members, liked, mine)
-    const out = await llm.structured({ schema: FloorSchema, system: systemFor(group, allowed), content: [{ type: 'text', text }], maxTokens: 16000 })
-    if (!out.data) { result.failed++; continue }
-    model = out.model
-    result.repaired += out.repairs ?? 0
-    result.drafted += out.data.standards.length
-    for (const d of out.data.standards) {
-      const s = resolveStandard(d, group, allowed, members, words, likedRefs)
-      if (s && !drafted.some(x => x.fingerprint === s.fingerprint)) drafted.push(s)
+    // Related records together (by theme), in a fixed order, so the same records always make the same parts.
+    const sorted = [...members].sort((a, b) => a.theme.localeCompare(b.theme) || a.source.localeCompare(b.source) || a.source_ref.localeCompare(b.source_ref))
+    const parts: FloorRecord[][] = []
+    for (let i = 0; i < sorted.length; i += FLOOR_CHUNK_RECORDS) parts.push(sorted.slice(i, i + FLOOR_CHUNK_RECORDS))
+    // What this group has drafted so far is shown to each later part, so one no-no keeps one statement across parts.
+    const so_far: string[] = []
+    const read = async (part: FloorRecord[]): Promise<void> => {
+      const { text, words, likedRefs } = renderGroup(part, liked, [...mine, ...so_far])
+      result.calls++
+      const out = await llm.structured({ schema: FloorSchema, system: systemFor(group, allowed), content: [{ type: 'text', text }], maxTokens: FLOOR_MAX_TOKENS })
+      if (!out.data) {
+        if (out.failure === 'max_tokens' && part.length >= FLOOR_SPLIT_MIN * 2) {
+          const half = Math.ceil(part.length / 2)
+          await read(part.slice(0, half))
+          await read(part.slice(half))
+          return
+        }
+        result.failed++
+        const why = out.failure ?? 'unanswered'
+        result.failures[why] = (result.failures[why] ?? 0) + 1
+        return
+      }
+      model = out.model
+      result.repaired += out.repairs ?? 0
+      result.drafted += out.data.standards.length
+      for (const d of out.data.standards) {
+        const s = resolveStandard(d, group, allowed, part, words, likedRefs)
+        if (s && !drafted.some(x => x.fingerprint === s.fingerprint)) { drafted.push(s); so_far.push(s.statement) }
+      }
     }
+    for (const part of parts) await read(part)
   }
   result.resolved = drafted.length
   result.preview = drafted

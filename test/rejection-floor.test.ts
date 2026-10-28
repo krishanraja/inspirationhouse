@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  groupsOf, renderGroup, resolveStandard, standardFingerprint, distilFloor,
+  groupsOf, renderGroup, resolveStandard, standardFingerprint, distilFloor, FLOOR_CHUNK_RECORDS,
   type DraftStandard, type FloorQuote, type FloorRecord,
 } from '../src/rejection/distil.ts'
 import {
@@ -284,6 +284,72 @@ describe('distilling the floor', () => {
     expect(workflowText).not.toContain('Existing standards')
   })
 
+  // A group of n records, each a cut with words of his: enough to need parts.
+  const many = (n: number) => Array.from({ length: n }, (_, i) => floorRec({
+    source_ref: `synthetic-many-${String(i).padStart(3, '0')}`, formats: ['short_video'], theme: i % 2 ? 'edit_av' : 'layout', capture: 'moment',
+    quotes: [quote(200 + i, `synthetic: cut ${i} jumps mid word`)],
+  }))
+  function manyDb(records: ReturnType<typeof floorRec>[]) {
+    const writes: Array<{ sql: string; params: unknown[] }> = []
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = [], opts?: { write?: boolean }) {
+        if (opts?.write) writes.push({ sql, params })
+        if (/json_agg/.test(sql)) return records as T[]
+        if (/^with prior as/.test(sql)) return [{ n: 1 }] as T[]
+        return [] as T[]
+      },
+      close: async () => {},
+    }
+    return { db, writes }
+  }
+  // Each call drafts one standard per distinct record in its part, citing the part's first record.
+  function partLlm(o: { maxTokensAbove?: number } = {}) {
+    const sizes: number[] = []
+    const texts: string[] = []
+    const llm: Llm = {
+      model: 'synthetic-model',
+      async structured(args) {
+        const text = (args.content[0] as { text: string }).text
+        const n = (text.match(/<record /g) ?? []).length
+        sizes.push(n)
+        texts.push(text)
+        if (o.maxTokensAbove !== undefined && n > o.maxTokensAbove) return { data: null, failure: 'max_tokens', model: 'synthetic-model' } as never
+        const statement = `Never synthetic standard number ${sizes.length}.`
+        return { data: { standards: [draft({ statement, how_to_check: 'Synthetic: check every join.', formats: ['short_video'], theme: 'edit_av', records: [0] })] }, failure: null, model: 'synthetic-model', repairs: 0 } as never
+      },
+    }
+    return { llm, sizes, texts }
+  }
+
+  it(`reads a group of more than ${FLOOR_CHUNK_RECORDS} records in parts, each told what the group has drafted so far`, async () => {
+    const s = manyDb(many(70))
+    const m = partLlm()
+    const r = await distilFloor(s.db, m.llm, RUN, true)
+    expect(m.sizes).toEqual([30, 30, 10])
+    expect(r).toMatchObject({ groups: 1, calls: 3, failed: 0, resolved: 3, written: 3 })
+    // The second part sees the first part's standard; the third sees both.
+    expect(m.texts[1]).toContain('Never synthetic standard number 1.')
+    expect(m.texts[2]).toContain('Never synthetic standard number 1.')
+    expect(m.texts[2]).toContain('Never synthetic standard number 2.')
+    // The same records always make the same parts, whatever order they were read in.
+    const again = partLlm()
+    await distilFloor(manyDb(many(70).reverse()).db, again.llm, RUN, false)
+    expect(again.texts).toEqual(m.texts)
+  })
+
+  it('reads a part whose answer runs out of room again as two halves, and counts what still fails by why', async () => {
+    const s = manyDb(many(30))
+    const m = partLlm({ maxTokensAbove: 15 })
+    const r = await distilFloor(s.db, m.llm, RUN, true)
+    expect(m.sizes).toEqual([30, 15, 15])
+    expect(r).toMatchObject({ calls: 3, failed: 0, failures: {}, resolved: 2 })
+    // A part too small to halve that still runs out of room is a failure, counted as max_tokens, and supersedes nothing.
+    const t = manyDb(many(12))
+    const tight = await distilFloor(t.db, partLlm({ maxTokensAbove: 5 }).llm, RUN, true)
+    expect(tight).toMatchObject({ calls: 1, failed: 1, failures: { max_tokens: 1 }, superseded: 0 })
+    expect(t.writes.some(w => /taste_watermarks/.test(w.sql))).toBe(false)
+  })
+
   it('writes each standard, supersedes what it no longer drafts, and sets the watermark', async () => {
     const s = stubDb()
     const r = await distilFloor(s.db, stubLlm().llm, RUN, true)
@@ -316,7 +382,7 @@ describe('distilling the floor', () => {
   it('counts a failed group and supersedes nothing, keeping its candidates until a reading succeeds', async () => {
     const s = stubDb()
     const r = await distilFloor(s.db, stubLlm(['workflow']).llm, RUN, true)
-    expect(r).toMatchObject({ groups: 2, failed: 1, resolved: 1, written: 1, superseded: 0 })
+    expect(r).toMatchObject({ groups: 2, calls: 2, failed: 1, failures: { unparsed: 1 }, resolved: 1, written: 1, superseded: 0 })
     expect(s.writes.filter(w => /^with prior as/.test(w.sql))).toHaveLength(1)
     expect(s.writes.some(w => /set status = 'superseded'/.test(w.sql))).toBe(false)
     expect(s.writes.some(w => /taste_watermarks/.test(w.sql))).toBe(false)
