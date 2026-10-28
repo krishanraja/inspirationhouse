@@ -685,6 +685,11 @@ runJob('the rejections job, end to end, on a real database', () => {
     expect(half.counts).toMatchObject({
       rejections_read_rejected: 1, rejections_bad_rejected_json: 1, rejections_read_whole: 2, rejections_records_withdrawn: 0,
     })
+    // A liked file there and empty: the same, and the run says so.
+    const emptyLiked = await job(drive({ ...dump({ rejected: [A, C] }), liked: [] }))
+    expect(emptyLiked.problems).toEqual(['rejections read: the liked file holds no record; nothing of its kind was withdrawn'])
+    expect(emptyLiked.counts).toMatchObject({ rejections_read_liked: 0, rejections_read_whole: 2, rejections_records_withdrawn: 0 })
+    expect(emptyLiked.counts.rejections_near).toBeUndefined()
     expect(await tally()).toEqual(before)
     const standing = (await client.query(`select item from taste_rejections where withdrawn_at is null and source = 'drive_dump'`)).rows.map(r => r.item)
     expect(standing).toEqual(expect.arrayContaining([A.item, C.item, L.item, P.item]))

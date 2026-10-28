@@ -120,6 +120,28 @@ const ITEM_RULES: Array<[RegExp, FormatSlug]> = [
   [/\bsting\b|\boutro\b|\bintro\b|end card|end mark|brand mark|wordmark/i, 'intro_outro'],
 ]
 
+// The craft his own words can name. FORMAT_RULES read the compiler's format field, where "short" or "story-first" is a
+// format; in a sentence of his, "video", "story", "line", "question" or "cost" names nothing a maker owns. So his words
+// count as naming a craft only by these, and a card is a made card, never the inspiration card a report is about.
+const CRAFT_RULES: Array<[RegExp, FormatSlug]> = [
+  [/\bcaptions?\b|subtitles?/i, 'captions'],
+  [/\bmusic\b|loudness|\blufs\b|\bsound\b|\baudio\b|\bjoins?\b|lip[- ]?sync|chopped|clipped|voice[- ]?over|\bvo\b/i, 'audio'],
+  [/\bmotion\b|animat/i, 'motion'],
+  [/\bsting\b|\bintro\b|\boutro\b|end card|wordmark|brand mark/i, 'intro_outro'],
+  [/thumbnail/i, 'thumbnail'],
+  [/\b(?:the|a|this|that) cover\b|\bcover (?:image|art|frame|photo|design)/i, 'cover'],
+  [/carousel/i, 'carousel'],
+  [/\bgraphics?\b|title card|chapter card|on-screen text|\bfont\b|typeface|lower third/i, 'card'],
+  [/\bscript\b|teleprompter/i, 'script'],
+  [/\bheadline\b/i, 'title'],
+]
+
+/** The crafts his own words name, if any: a short, closed list, never a format inferred from what he talks about. */
+export function craftNamed(words: unknown): FormatSlug[] {
+  const text = typeof words === 'string' ? words : ''
+  return [...new Set(CRAFT_RULES.filter(([re]) => re.test(text)).map(([, slug]) => slug))].sort()
+}
+
 /** The formats a record is for, from its format text, and failing that from what it is about. Never empty. */
 export function formatsOf(format: unknown, fallback: { category?: unknown; theme?: ThemeSlug; item?: unknown } = {}): FormatSlug[] {
   const text = typeof format === 'string' ? format : ''

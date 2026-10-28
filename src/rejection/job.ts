@@ -77,6 +77,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     // and the run says so, since the engine cannot mend his folder.
     const bad = Object.values(dump.bad).reduce((a, n) => a + n, 0)
     if (bad) problems.push(`rejections read: ${bad} line(s) did not parse; nothing of their kind was withdrawn`)
+    for (const kind of dump.empty) problems.push(`rejections read: the ${kind} file holds no record; nothing of its kind was withdrawn`)
   } catch (err) { problem('read', err) }
   const filed = dump ? fileDump(dump) : null
   const records: RecordRow[] = filed ? [...filed.records] : []

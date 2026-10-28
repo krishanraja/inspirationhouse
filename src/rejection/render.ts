@@ -62,33 +62,44 @@ export async function loadFloor(db: Db): Promise<{ standards: StandardRow[]; rec
 const PATH_END = String.raw`(?=[,;)\]"'\n<>|]|\s{2}|$|\s\(|\s-\s|(?<=\.[A-Za-z0-9]{2,5})\s)`
 const WIN_PATH = new RegExp(String.raw`(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\n"<>|]*?${PATH_END}`, 'gm')
 const DRIVE_PATH = new RegExp(String.raw`\bMy Drive[\\/][^\n"<>|]*?${PATH_END}`, 'gmi')
-const HOME_PATH = /(?<![\w.:/~-])\/(?:Users|home|Volumes|mnt|media)\/[^\s"'<>|),;]+/gi
-const LINK = /https?:\/\/(?:drive|docs)\.google\.com\/[^\s"')]+|https?:\/\/claude\.ai\/[^\s"')]+/g
+const HOME_PATH = /(?<![\w.:/~-])\/(?:Users|home|Volumes|mnt|media)\/[^\s"'<>|),;]*/gi
+const LINK = /(?:https?:\/\/)?(?:drive|docs)\.google\.com[^\s"')]*|(?:https?:\/\/)?\bclaude\.ai\/[^\s"')]*/g
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi
-const SESSION = /\b(?:cse|session)_[A-Za-z0-9]{8,}\b/g
+const SESSION = /\b(?:cse|session)_[A-Za-z0-9]{8,}[A-Za-z0-9_-]*/g
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g
 // Drive ids: today's start with 1; a file from before 2015 with 0B, a shared drive with 0A.
 const DRIVE_ID = /\b(?:1[A-Za-z0-9_-]{24,43}|0[AB][A-Za-z0-9_-]{15,42})\b/g
 
+// What a public floor file may never hold, by name: the last check before publishing, and scrub's last pass.
+const PUBLIC_CHECKS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['path', /(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\bMy Drive[\\/]|(?<![\w.:/~-])\/(?:Users|home|Volumes|mnt|media)\//i],
+  ['link', /(?:drive|docs)\.google\.com|\bclaude\.ai\//],
+  ['id', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+  ['session', /\b(?:cse|session)_[A-Za-z0-9]{8,}/],
+  // A Drive id is mixed case with - or _; the floor's own lowercase hex (its version) is not one.
+  ['drive id', /\b(?:1(?=[A-Za-z0-9_-]*[A-Z_-])[A-Za-z0-9_-]{24,43}|0[AB][A-Za-z0-9_-]{15,42})\b/],
+  ['email', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/],
+]
+const LAST_PASS = PUBLIC_CHECKS.map(([name, re]) =>
+  [new RegExp(String.raw`\S*(?:${re.source})\S*`, re.flags.includes('i') ? 'gi' : 'g'), `[${name === 'drive id' ? 'id' : name}]`] as const)
+
 /**
  * The compiler's text, with anything that is not for a public file taken out. Pure. It takes out at least everything
- * assertPublic refuses, since a quote and a proposed standard never change: a miss here would block every render.
+ * assertPublic refuses, since a quote and a proposed standard never change: a miss here would block every render. The
+ * patterns above cut a path or link and keep the sentence around it; the last pass cuts whatever word still holds
+ * anything the last check refuses.
  */
 export function scrub(text: string | null): string | null {
   if (text === null) return null
-  return text.replace(LINK, '[link]').replace(WIN_PATH, '[path]').replace(DRIVE_PATH, '[path]').replace(HOME_PATH, '[path]')
+  let out = text.replace(LINK, '[link]').replace(WIN_PATH, '[path]').replace(DRIVE_PATH, '[path]').replace(HOME_PATH, '[path]')
     .replace(UUID, '[id]').replace(SESSION, '[session]').replace(EMAIL, '[email]').replace(DRIVE_ID, '[id]')
+  for (const [re, mark] of LAST_PASS) out = out.replace(re, mark)
+  return out
 }
 
 /** Throws when the rendered file still holds a path, a Drive link, an id or an email. Never publish past this. */
 export function assertPublic(text: string): void {
-  for (const [name, re] of [
-    ['path', /(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\bMy Drive[\\/]|(?<![\w.:/~-])\/(?:Users|home|Volumes|mnt|media)\//i],
-    ['link', /(?:drive|docs)\.google\.com|\bclaude\.ai\//], ['id', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
-    ['session', /\b(?:cse|session)_[A-Za-z0-9]{8,}/],
-    // A Drive id is mixed case with - or _; the floor's own lowercase hex (its version) is not one.
-    ['drive id', /\b(?:1(?=[A-Za-z0-9_-]*[A-Z_-])[A-Za-z0-9_-]{24,43}|0[AB][A-Za-z0-9_-]{15,42})\b/],
-    ['email', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/]] as const) {
+  for (const [name, re] of PUBLIC_CHECKS) {
     if (re.test(text)) throw new Error(`floor render: the file would hold a ${name}`)
   }
 }
@@ -134,6 +145,19 @@ export function renderFloor(input: RenderInput): string {
     }
   }
 
+  // A standard's records are the standing rejections and process records that carry the words it rests on, found by
+  // its quotes (the stable unit), with any it named still standing: a merge pass that re-files a record under a new
+  // identity never leaves a standard he was shown pointing at nothing.
+  const byQuote = new Map<string, string[]>()
+  for (const r of input.records) {
+    if (r.kind === 'liked') continue
+    for (const q of r.quote_ids) byQuote.set(q, [...(byQuote.get(q) ?? []), shortRef(r.source, r.source_ref)])
+  }
+  const recordsOf = (s: StandardRow) => [...new Set([
+    ...s.record_refs.map(r => refOf.get(r)).filter((x): x is string => Boolean(x)),
+    ...s.quote_ids.flatMap(q => byQuote.get(q) ?? []),
+  ])].sort()
+
   const standards: Record<string, unknown> = {}
   for (const s of input.standards) {
     standards[`s${s.fingerprint.slice(0, 10)}`] = {
@@ -149,7 +173,7 @@ export function renderFloor(input: RenderInput): string {
       support: s.support_n,
       ...(s.krish ? { in_his_words: scrub(s.krish) } : {}),
       his_words: words(s.quote_ids).filter(w => w.is === 'his words').slice(0, 6),
-      records: s.record_refs.map(r => refOf.get(r)).filter((x): x is string => Boolean(x)).sort(),
+      records: recordsOf(s),
       boundary: words(s.boundary_quote_ids).map(w => ({ said: w.said, on: w.on })),
     }
   }

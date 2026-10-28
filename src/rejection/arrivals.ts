@@ -2,7 +2,7 @@ import type { Db } from '../db.ts'
 import { clip } from '../evidence.ts'
 import { contentHash } from '../hash.ts'
 import { quoteKey, type Capture, type QuoteRow, type RecordRow } from './file.ts'
-import { FORMATS, RULES_REV, formatsOf, type FormatSlug } from './vocab.ts'
+import { FORMATS, RULES_REV, craftNamed, formatsOf, type FormatSlug } from './vocab.ts'
 
 // New rejections, arriving by themselves through doors that already exist. No Claude schedule and no session key:
 // the engine runs on GitHub Actions and reads what sessions have already filed.
@@ -47,9 +47,9 @@ export function fileReportDislike(e: ReportEvidence): { quote: QuoteRow; record:
     key: quoteKey(text, at.toISOString().slice(0, 10)), text, saidAt: at.toISOString(), precision: 'second',
     saidWhere: clip(where, 300) ?? where, source: 'session_report', attribution: 'krish_words',
   }
-  // The session's line and his words say which maker a report is for; his words alone say whether he named a craft.
-  const formats = formatsOf(e.title, { item: text })
-  const craft = formatsOf(text, { item: text }).filter(f => f !== 'other' && f !== 'all')
+  // The craft his words name says which maker a report is for; the session's line only where his words name none.
+  const craft = craftNamed(text)
+  const formats = craft.length ? craft : formatsOf(e.title, { item: text })
   // A dislike in the strategy or visibility lane is about what to make or where it goes, never how it is made; one about
   // an idea or a card (its subject line names the idea) is too, unless his words name the craft they fault. Either is
   // kept and never served or made a standard (anti-echo).

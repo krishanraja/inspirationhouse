@@ -429,12 +429,20 @@ describe('the whole dump', () => {
     expect(refs).not.toContain(fileRecord(twin('R001', 'synthetic: the grey card'), 'rejected', []).record.sourceRef)
   })
 
-  it('keeps records whose quotes and item are both shared apart by their date and piece', () => {
-    const filed = fileDump(dumpOf([twin('R001', 'synthetic: the grey card'), twin('R002', 'synthetic: the grey card', { piece: 'synthetic: piece two' })]))
-    const [first, second] = filed.records
-    expect(filed.collisions).toBe(1)
-    expect(second!.sourceRef).not.toBe(first!.sourceRef)
-    expect(second!.sourceRef.startsWith(`${first!.sourceRef}:`)).toBe(true)
+  it('keeps records whose quotes and item are both shared apart by their own content, whichever a merge pass writes first', () => {
+    const a = twin('R001', 'synthetic: the grey card')
+    const b = twin('R002', 'synthetic: the grey card', { piece: 'synthetic: piece two' })
+    const c = twin('R003', 'synthetic: the grey card', { reason: 'synthetic: too dull' })
+    const refsOf = (order: DumpRecord[]) => new Map(fileDump(dumpOf(order)).records.map(r => [r.meta.dump_id, r.sourceRef]))
+    const ab = refsOf([a, b, c])
+    expect(new Set(ab.values()).size).toBe(3)
+    expect(fileDump(dumpOf([a, b, c])).collisions).toBe(3)
+    // The same record, the same identity, in any order.
+    expect(refsOf([c, b, a])).toEqual(ab)
+    expect(refsOf([b, a, c])).toEqual(ab)
+    // Only a record the same in every way is numbered: it is the same record twice.
+    const same = fileDump(dumpOf([a, { ...a, id: 'R009' }])).records.map(r => r.sourceRef)
+    expect(same[1]).toBe(`${same[0]}:1`)
   })
 
   it('files a quote two records share once, and the strongest reading of it wins in either order', () => {

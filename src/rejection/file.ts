@@ -367,20 +367,30 @@ export function fileDump(dump: { rejected: DumpRecord[]; liked: DumpRecord[]; pr
   const baseOf = (x: { r: DumpRecord; kind: Kind }) => identityOf(x.kind, x.r, quotesOf(x.r).map(q => q.key).sort(), false)
   const counts = new Map<string, number>()
   for (const x of all) counts.set(baseOf(x), (counts.get(baseOf(x)) ?? 0) + 1)
+  const collides = (x: { r: DumpRecord; kind: Kind }) => (counts.get(baseOf(x)) ?? 0) > 1
+  // The identity each record gets before ties are broken: its quotes and category, and its item where those collide.
+  const filedRefs = all.map(x => identityOf(x.kind, x.r, quotesOf(x.r).map(q => q.key).sort(), collides(x)))
+  const shared = new Map<string, number>()
+  for (const ref of filedRefs) shared.set(ref, (shared.get(ref) ?? 0) + 1)
   const quotes = new Map<string, QuoteRow>()
   const records: RecordRow[] = []
-  const refs = new Map<string, number>()
+  const twins = new Map<string, number>()
   let collisions = 0
   for (const x of all) {
-    const filed = fileRecord(x.r, x.kind, dump.manifest.get(x.r.id) ?? [], (counts.get(baseOf(x)) ?? 0) > 1)
+    const filed = fileRecord(x.r, x.kind, dump.manifest.get(x.r.id) ?? [], collides(x))
     for (const q of filed.quotes) holdQuote(quotes, q)
+    // Records that share their quotes, category and item are told apart by their own content (the day, the piece, the
+    // reason and what he wanted instead), so which one a merge pass happens to write first never decides which is which.
+    // Only records the same in all of that are numbered, and those are the same record twice.
     let ref = filed.record.sourceRef
-    const n = refs.get(ref) ?? 0
-    if (n > 0) {
+    if ((shared.get(ref) ?? 0) > 1) {
+      const own = contentHash({ d: x.r.date, p: normaliseWords(x.r.piece ?? ''), r: normaliseWords(x.r.reason ?? ''), w: normaliseWords(x.r.wanted_instead ?? '') }).slice(0, 8)
+      const twin = `${ref}:${own}`
+      const n = twins.get(twin) ?? 0
+      twins.set(twin, n + 1)
+      ref = n ? `${twin}:${n}` : twin
       collisions++
-      ref = `${ref}:${contentHash({ d: x.r.date, p: normaliseWords(x.r.piece ?? ''), n }).slice(0, 8)}`
     }
-    refs.set(filed.record.sourceRef, n + 1)
     records.push({ ...filed.record, sourceRef: ref })
   }
   return { quotes, records, collisions }

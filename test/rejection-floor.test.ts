@@ -359,6 +359,30 @@ describe('scrubbing text for the public floor file', () => {
     expect(scrub('synthetic: before H:\\clip.mp4 and after')).toBe('synthetic: before [path] and after')
   })
 
+  it('leaves nothing the last check refuses, however the path, link, id or session name is written', () => {
+    for (const t of ['synthetic: drop the cut in /Users/ and stop', 'synthetic: just open claude.ai/code and do it there',
+      'synthetic: the brief was already in docs.google.com, read it', 'synthetic: never touch the session_transcript_store table',
+      'synthetic: drive.google.com/drive/folders', 'synthetic: (C:/x)', 'synthetic: a.b@c.de']) {
+      expect(() => assertPublic(scrub(t)!), t).not.toThrow()
+    }
+    // A sentence of his keeps what is around them.
+    expect(scrub('synthetic: just open claude.ai/code and do it there')).toBe('synthetic: just open [link] and do it there')
+    expect(scrub('synthetic: never touch the session_transcript_store table')).toBe('synthetic: never touch the [session] table')
+  })
+
+  it('never lets a made-up mix of paths, links, ids and words through to a file the last check refuses', () => {
+    const parts = ['C:', 'c:', 'H:', '\\', '/', 'Users', 'home', 'My Drive', 'My drive', 'drive.google.com', 'docs.google.com',
+      'claude.ai/', 'https://', 'session_', 'cse_', 'abcdefgh12', 'ABCDEFGH', '0B', '0A', '1', DRIVE_ID, UUID(7), '@', 'example.org',
+      ' ', ' ', '  ', '\n', ',', '.', ';', '(', ')', '"', "'", '|', '<', '-', '_', 'mp4', '.png', 'synthetic', 'the cut']
+    // A fixed seed: the same strings every run.
+    let seed = 20261028
+    const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 }
+    for (let i = 0; i < 3000; i++) {
+      const t = Array.from({ length: 1 + Math.floor(next() * 12) }, () => parts[Math.floor(next() * parts.length)]).join('')
+      expect(() => assertPublic(scrub(t)!), JSON.stringify(t)).not.toThrow()
+    }
+  })
+
   it('leaves nothing the last check refuses, so an unchangeable quote can never block the render', () => {
     const nasty = [
       'synthetic: H:\\My Drive\\a b\\c.mp4\nnext line C:/x/y', 'synthetic: c:/x|y<z>', 'synthetic: /Volumes/synthetic/x.mov;',
@@ -482,6 +506,15 @@ describe('rendering the floor', () => {
     expect(doc.formats.card!.draft).toEqual([drafted])
     expect(doc.counts).toMatchObject({ standards: 3, approved: 2 })
     expect(doc.as_of).toBe('2026-10-06')
+  })
+
+  it('finds a standard\'s records by the words it rests on, so a record re-filed under a new identity stays with it', () => {
+    const input = floorInput()
+    // The record the draft named is gone (a merge pass re-filed it), and a new one carries the same words of his.
+    input.records = input.records.map(r => (r.source_ref === 'synthetic-r2' ? { ...r, source_ref: 'synthetic-r2-refiled' } : r))
+    const doc = parse(renderFloor(input))
+    const drafted = `s${'c'.repeat(10)}`
+    expect(doc.standards[drafted]!.records).toEqual([keyOf(doc, 'synthetic: every cut ends on a logo')])
   })
 
   it('says the engine wrote every check, and whether he approved it with the statement or has not seen it', () => {
@@ -706,6 +739,21 @@ describe('a session report of his words that dislikes something', () => {
     expect(about('card:synthetic-2', 'synthetic: not this one').ruleKind).toBe('subject')
     expect(about('idea:synthetic-1', 'synthetic: the captions cover his mouth').ruleKind).toBe('form')
     expect(about('piece:synthetic-3', 'synthetic: nobody wants this').ruleKind).toBe('form')
+  })
+
+  it('counts his words as naming a craft only by a craft he names, never by "video", "story", "line" or "cost"', () => {
+    const about = (words: string, lane = 'voice') => fileReportDislike(report({
+      lane, title: 'synthetic idea: why a synthetic tariff reshapes a synthetic supply chain',
+      meta: { said_where: 'synthetic: a session', full_text: words, subject_ref: 'idea:synthetic-1' },
+    }))!.record
+    for (const words of ['synthetic: who would watch a video about this, skip it', 'synthetic: same narrative as last week, skip it',
+      'synthetic: this line of thinking costs too much', 'synthetic: the question is boring', 'synthetic: not this card']) {
+      expect(about(words).ruleKind, words).toBe('subject')
+    }
+    // A craft he names is form, and binds that maker, not every maker.
+    expect(about('synthetic: the captions cover his mouth').formats).toEqual(['captions'])
+    const script = fileReportDislike(report({ title: null, meta: { said_where: 'synthetic: a session', full_text: 'synthetic: the script reads like an advert' } }))!.record
+    expect(script).toMatchObject({ ruleKind: 'form', formats: ['script'] })
   })
 
   it('never shows the session\'s subject line as what was rejected: only his words', () => {

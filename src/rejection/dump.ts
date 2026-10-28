@@ -92,6 +92,8 @@ export interface Dump {
   ambiguous: number
   /** Each kind whose file was there and read with no bad line: only these are read whole, so only these withdraw. */
   whole: Array<'rejected' | 'liked' | 'process'>
+  /** Each kind whose file was there and held no record: a broken read, never "he took them all back". */
+  empty: Array<'liked' | 'process'>
 }
 
 /**
@@ -125,12 +127,15 @@ export async function readDump(google: Google, folderId: string): Promise<Dump> 
   for (const [prefix, b] of [['rejected', rejected.bad], ['liked', liked.bad], ['process', proc.bad]] as const) {
     for (const [k, n] of Object.entries(b)) bad[`${prefix}_${k}`] = n
   }
-  const clean = (text: string | null, p: Parsed<DumpRecord>) => text !== null && !Object.keys(p.bad).length
+  // Read whole: there, with no bad line, and holding a record. A file read as empty would withdraw every record of its kind.
+  const clean = (text: string | null, p: Parsed<DumpRecord>) => text !== null && !Object.keys(p.bad).length && p.rows.length > 0
   const whole = ([['rejected', rejectedText, rejected], ['liked', likedText, liked], ['process', processText, proc]] as const)
     .filter(([, text, p]) => clean(text, p)).map(([kind]) => kind)
+  const empty = ([['liked', likedText, liked], ['process', processText, proc]] as const)
+    .filter(([, text, p]) => text !== null && !p.rows.length).map(([kind]) => kind)
   return {
     rejected: rejected.rows, liked: liked.rows, process: proc.rows,
     manifest: manifestText === null ? new Map() : parseManifest(manifestText),
-    files, bad, ambiguous, whole,
+    files, bad, ambiguous, whole, empty,
   }
 }
