@@ -73,10 +73,13 @@ export function pathResolver(google: Pick<Google, 'listFolder'>) {
 
 interface Held { sha256: string; role: string }
 
-async function heldFrom(db: Db, driveId: string, role: string): Promise<Held[]> {
+/** What was already kept from a Drive file, as long as the file is the same bytes (a file revised in place is not). */
+async function heldFrom(db: Db, file: DriveFile, role: string): Promise<Held[]> {
   return db.query<Held>(
-    `select sha256, role from public.taste_rejection_media where derived_from = $1 and role = $2 and cut_rev = $3`,
-    [driveId, role, CUT_REV],
+    `select sha256, role from public.taste_rejection_media
+     where derived_from = $1 and role = $2 and cut_rev = $3
+       and ($4::text is null or derived_from_sha256 is null or derived_from_sha256 = $4)`,
+    [file.id, role, CUT_REV, file.sha256Checksum?.toLowerCase() ?? null],
   )
 }
 
@@ -165,7 +168,7 @@ export async function keepMedia(
       for (const path of paths) {
         const f = files.get(path)
         if (!f) { out.missing++; continue }
-        const held = await heldFrom(db, f.id, role).catch(() => [])
+        const held = await heldFrom(db, f, role).catch(() => [])
         if (held.length) { hashes.push(...held.map(h => h.sha256)); out.reused++; continue }
         if (!write) { role === 'strip' ? out.strips++ : out.stills++; continue }
         try {

@@ -13,7 +13,7 @@ import { keepStill } from './media.ts'
 import { proposeFloor, syncFloorDecisions } from './propose.ts'
 import { publishFloor } from './publish.ts'
 import { loadFloor, renderFloor, type RenderInput } from './render.ts'
-import { fileNear, fileQuotes, fileRecords, rejectionTablesExist } from './store.ts'
+import { fileNear, fileQuotes, fileRecords, rejectionTablesExist, type WholeRead } from './store.ts'
 
 // The Rejections job (`pnpm engine rejections`): the floor beside the ceiling. Krish, 2026-10-28: "I want this
 // repository to house a separate side engine called Rejections (where all the working rejected production work goes,
@@ -122,7 +122,12 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       const sum = { inserted: 0, restored: 0, withdrawn: 0 }
       // The folder and the reports are each read whole, so a record no longer in them is withdrawn; the inbox is read
       // once per capture and never withdraws. An empty read files and withdraws nothing (fileRecords).
-      const sources: Array<[RecordRow[], 'drive_dump' | 'session_report' | null]> = [[records, 'drive_dump'], [reported, 'session_report'], [captured, null]]
+      const sources: Array<[RecordRow[], WholeRead | null]> = [
+        [records, dump ? { source: 'drive_dump', kinds: dump.whole } : null],
+        [reported, { source: 'session_report', kinds: ['rejected'] }],
+        [captured, null],
+      ]
+      if (dump) counts.rejections_read_whole = dump.whole.length
       for (const [rows, whole] of sources) {
         const r = await fileRecords(d.db, rows, ids, d.runId, { write, whole })
         sum.inserted += r.inserted; sum.restored += r.restored; sum.withdrawn += r.withdrawn
@@ -130,7 +135,9 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       counts.rejections_records_new = sum.inserted
       counts.rejections_records_restored = sum.restored
       counts.rejections_records_withdrawn = sum.withdrawn
-      if (filed) counts.rejections_near = await fileNear(d.db, nearOf(records, filed.quotes), records, ids, write)
+      // What he liked nearby comes from the liked file, so it is filed only when that file was read whole: a liked file
+      // missing or half read would clear it from every record.
+      if (filed && dump?.whole.includes('liked')) counts.rejections_near = await fileNear(d.db, nearOf(records, filed.quotes), records, ids, write)
       standing = records.length + reported.length + captured.length
     } catch (err) { problem('file', err) }
   } else {
@@ -149,15 +156,24 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   if (write && inbox.length) {
     try {
       let shots = 0
+      let refused = 0
       for (const [i, row] of inbox.entries()) {
         if (!row.screenshot_b64) continue
-        const k = await keepStill(Buffer.from(row.screenshot_b64, 'base64'))
-        await insertMedia(d.db, k, null, null)
-        await attachMedia(d.db, captured[i]!, [k.sha256])
-        shots++
+        try {
+          const k = await keepStill(Buffer.from(row.screenshot_b64, 'base64'))
+          await insertMedia(d.db, k, null, null)
+          await attachMedia(d.db, captured[i]!, [k.sha256])
+          shots++
+        } catch { refused++ }
       }
       counts.rejections_inbox_screenshots = shots
-      counts.rejections_inbox_collected = await markCollected(d.db, inbox.map(r => r.id), d.runId)
+      if (refused) problems.push(`rejections inbox: ${refused} screenshot(s) could not be kept`)
+      // A capture is collected only once what it asks for has landed: its record, and its still, its clip or its
+      // master's pointer. Until then it is read again on the next run (filing it again changes nothing), so a cut that
+      // waited on the budget, or a master not yet shared, is never lost.
+      const done = await doneCaptures(d.db, captured)
+      counts.rejections_inbox_collected = await markCollected(d.db, inbox.filter((_, i) => done.has(captured[i]!.sourceRef)).map(r => r.id), d.runId)
+      counts.rejections_inbox_waiting = inbox.length - done.size
     } catch (err) { problem('inbox', err) }
   }
 
@@ -171,8 +187,10 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
           rejections_distil_records: r.records, rejections_distil_groups: r.groups, rejections_drafted: r.drafted,
           rejections_standards: r.resolved, rejections_standards_written: r.written, rejections_superseded: r.superseded,
           rejections_distil_skipped: r.skipped ? 1 : 0, rejections_distil_failed: r.failed, rejections_distil_repaired: r.repaired,
+          rejections_standards_refused: r.refused,
         })
         if (r.failed) problems.push(`rejections distil: ${r.failed} group(s) unanswered`)
+        if (r.refused) problems.push(`rejections distil: ${r.refused} standard(s) refused by the database`)
         if (!write) preview.standards = r.preview
         const judged = judgeRun(r.skipped ? 0 : r.records, r.resolved)
         if (judged.status === 'failed') problems.push(`rejections distil: ${judged.reason}`)
@@ -215,6 +233,20 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
 }
 
 const snake = (s: string) => s.replace(/[A-Z]/g, c => `_${c.toLowerCase()}`)
+
+/** The captures whose record stands with everything its kind of capture needs. */
+async function doneCaptures(db: Db, captured: RecordRow[]): Promise<Set<string>> {
+  if (!captured.length) return new Set()
+  const rows = await db.query<{ source_ref: string }>(
+    `select source_ref from public.taste_rejections
+     where source = 'inbox' and withdrawn_at is null and source_ref = any($1::text[])
+       and (capture = 'words'
+            or (capture in ('still', 'moment') and cardinality(media_sha256) > 0)
+            or (capture = 'whole_cut' and master_drive_id is not null))`,
+    [captured.map(r => r.sourceRef)],
+  )
+  return new Set(rows.map(r => r.source_ref))
+}
 
 /** Before the migration, the dry run's preview still shows the file the floor would be, from what it read. */
 function inMemory(records: RecordRow[], quotes: Map<string, QuoteRow>): RenderInput {

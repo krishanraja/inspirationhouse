@@ -381,6 +381,15 @@ describe('a record version', () => {
     expect(ac.sourceRef).not.toBe(a.sourceRef)
   })
 
+  it('gets a new version under the new label, not a new identity, when a merge pass reclasses his words', () => {
+    const a = fileRecord(base(), 'rejected', []).record
+    const b = fileRecord(base({ confidence: 'paraphrased ruling' }), 'rejected', []).record
+    expect(a.attribution).toBe('krish_words')
+    expect(b.attribution).toBe('observation')
+    expect(b.sourceRef).toBe(a.sourceRef)
+    expect(b.version).not.toBe(a.version)
+  })
+
   it('keys a record with no quote of his by its date, piece and item, and never calls it his words', () => {
     const r = rec({ item: 'synthetic: a grey card' })
     const a = fileRecord(r, 'rejected', []).record

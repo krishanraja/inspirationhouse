@@ -55,7 +55,7 @@ async function withDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 }
 
 /**
- * A still as kept: a JPEG at most 1280 px wide and 400 KB. A still already under both is re-encoded anyway, so every
+ * A still as kept: a JPEG at most 1280 px wide, 4000 px tall and 400 KB. A still already under both is re-encoded anyway, so every
  * kept image is one format and none carries the source file's metadata (a phone's location, a desktop's name).
  */
 export async function keepStill(bytes: Buffer): Promise<Kept> {
@@ -64,7 +64,8 @@ export async function keepStill(bytes: Buffer): Promise<Kept> {
     await writeFile(src, bytes)
     for (const [width, q] of [[1280, 4], [1280, 7], [960, 9], [720, 12]] as const) {
       const out = join(dir, `still-${width}-${q}.jpg`)
-      await run('ffmpeg', ['-v', 'error', '-y', '-i', src, '-frames:v', '1', '-vf', `scale='min(${width},iw)':-2`, '-q:v', String(q), '-map_metadata', '-1', out], { timeout: STEP_TIMEOUT_MS })
+      // Held inside the box the database allows (4000 px a side), keeping its shape: a long phone screenshot too.
+      await run('ffmpeg', ['-v', 'error', '-y', '-i', src, '-frames:v', '1', '-vf', `scale=w='min(${width},iw)':h='min(4000,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, '-q:v', String(q), '-map_metadata', '-1', out], { timeout: STEP_TIMEOUT_MS })
       const kept = await readFile(out)
       if (kept.length <= IMAGE_MAX_BYTES) {
         const p = await probe(out)

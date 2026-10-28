@@ -296,15 +296,18 @@ export function fileRecord(r: DumpRecord, kind: Kind, manifestFiles: string[], c
   const day = saidAtOf(null, r.date)?.day
   const earliest = quotes.map(q => q.saidAt).sort()[0]
   const rejectedAt = day ? `${day}T12:00:00.000Z` : earliest ?? new Date(0).toISOString()
+  // Whose words it holds is part of the version: a later merge pass that marks his words a paraphrase, or a paraphrase
+  // his words, files a new version under the new label and withdraws the old one, so no record keeps a stale label.
+  const attribution = attributionOf(quotes)
   const content = {
     k: kind, q: quoteKeys, i: item, r: clip(r.reason, 4000), w: clip(r.wanted_instead, 4000), s: strengthOf(r.strength),
-    t: theme, f: formats, c: capture, p: piece, a: rejectedAt, rules: RULES_REV,
+    t: theme, f: formats, c: capture, p: piece, a: rejectedAt, by: attribution, rules: RULES_REV,
   }
   return {
     quotes,
     record: {
       source: 'drive_dump', sourceRef, version: contentHash(content), kind, rejectedAt, quoteKeys,
-      attribution: attributionOf(quotes), item, reason: content.r, wantedInstead: content.w, strength: content.s,
+      attribution, item, reason: content.r, wantedInstead: content.w, strength: content.s,
       theme, formats, ruleKind: kindOfRecord(kind, theme), capture, piece, media,
       moment: capture === 'moment' ? momentOf(r, quotes) : null,
       meta: {

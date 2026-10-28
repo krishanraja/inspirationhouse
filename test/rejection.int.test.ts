@@ -346,33 +346,34 @@ runJob('the rejections job, end to end, on a real database', () => {
     manifest: '1SYNTHETICfileid000000000005',
   }
 
-  type Folder = { rejected: object[] | string | null; liked: object[]; process: object[]; manifest: object[] }
+  type Folder = { rejected: object[] | string | null; liked: object[] | null; process: object[]; manifest: object[] }
   /** The folder as a later merge pass leaves it: its rejections (or raw text, or no file at all), renumbered or not. */
-  const dump = (o: { rejected?: object[] | string | null; renumber?: boolean } = {}): Folder => {
+  const dump = (o: { rejected?: object[] | string | null; process?: object[]; renumber?: boolean } = {}): Folder => {
     const re = (r: object) => (o.renumber ? { ...r, id: `${(r as { id: string }).id}-renumbered` } : r)
     const rejected = o.rejected === undefined ? [A, B, C] : o.rejected
     return {
       rejected: Array.isArray(rejected) ? rejected.map(re) : rejected,
-      liked: [L].map(re), process: [P].map(re),
+      liked: [L].map(re), process: (o.process ?? [P]).map(re),
       manifest: [{ id: (re(A) as { id: string }).id, files: [STILL_PATH] }],
     }
   }
   const driveFile = (id: string, name: string, mimeType: string): DriveFile =>
     ({ id, name, mimeType, modifiedTime: '2026-10-28T09:00:00Z', createdTime: '2026-10-28T09:00:00Z' })
   const jsonl = (rows: object[]) => Buffer.from(`${rows.map(r => JSON.stringify(r)).join('\n')}\n`)
-  /** A read-only Drive holding the Rejections folder, or (null) an empty one. */
-  const drive = (folder: Folder | null): Google => {
+  /** A read-only Drive holding the Rejections folder, or (null) an empty one, and the masters it lets the engine see. */
+  const drive = (folder: Folder | null, masters: DriveFile[] = []): Google => {
     const tree = new Map<string, DriveFile[]>()
     const bytes = new Map<string, Buffer>()
     if (folder) {
       tree.set(DRIVE.rejections, [driveFile(ids.data, 'data', FOLDER_MIME), driveFile(ids.stills, 'synthetic-stills', FOLDER_MIME),
         driveFile(ids.manifest, '_manifest.json', 'application/json')])
-      const data = [driveFile(ids.liked, 'liked.jsonl', 'application/x-ndjson'), driveFile(ids.process, 'process.jsonl', 'application/x-ndjson')]
+      const data = [driveFile(ids.process, 'process.jsonl', 'application/x-ndjson')]
+      if (folder.liked !== null) data.unshift(driveFile(ids.liked, 'liked.jsonl', 'application/x-ndjson'))
       if (folder.rejected !== null) data.unshift(driveFile(ids.rejected, 'rejections.jsonl', 'application/x-ndjson'))
       tree.set(ids.data, data)
       tree.set(ids.stills, [driveFile(ids.still, 'syn-001 card.png', 'image/png')])
       if (folder.rejected !== null) bytes.set(ids.rejected, typeof folder.rejected === 'string' ? Buffer.from(folder.rejected) : jsonl(folder.rejected))
-      bytes.set(ids.liked, jsonl(folder.liked))
+      if (folder.liked !== null) bytes.set(ids.liked, jsonl(folder.liked))
       bytes.set(ids.process, jsonl(folder.process))
       bytes.set(ids.manifest, Buffer.from(JSON.stringify(folder.manifest)))
       bytes.set(ids.still, readFileSync(join(fx, 'still.png')))
@@ -385,7 +386,7 @@ runJob('the rejections job, end to end, on a real database', () => {
         if (b.length > maxBytes) throw new Error('google download refused: file is over the size cap')
         return b
       },
-      file: async () => null,
+      file: async (id: string) => masters.find(m => m.id === id) ?? null,
       downloadTo: async () => { throw new Error('synthetic: no master is fetched in this suite') },
     } as unknown as Google
   }
@@ -571,14 +572,112 @@ runJob('the rejections job, end to end, on a real database', () => {
     expect((await one(`select withdrawn_at is null as standing from taste_rejections where source = 'inbox'`)).standing).toBe(true)
   })
 
+  it('withdraws nothing of a kind whose file is missing or will not parse whole, and keeps what he liked nearby', async () => {
+    const before = await tally()
+    const nearBefore = (await one(`select near from taste_rejections where item = $1 and withdrawn_at is null`, [A.item])).near
+    // No liked file: his liked record stands, and the record beside it keeps it as nearby.
+    const noLiked = await job(drive({ ...dump({ rejected: [A, C] }), liked: null }))
+    expect(noLiked.problems).toEqual([])
+    expect(noLiked.counts).toMatchObject({ rejections_read_liked: 0, rejections_read_whole: 2, rejections_records_withdrawn: 0 })
+    expect(noLiked.counts.rejections_near).toBeUndefined()
+    // A rejections file with a line that will not parse: C, missing from what parsed, is not withdrawn.
+    const half = await job(drive(dump({ rejected: `${JSON.stringify(A)}\nsynthetic: not a record\n` })))
+    expect(half.problems).toEqual([])
+    expect(half.counts).toMatchObject({
+      rejections_read_rejected: 1, rejections_bad_rejected_json: 1, rejections_read_whole: 2, rejections_records_withdrawn: 0,
+    })
+    expect(await tally()).toEqual(before)
+    const standing = (await client.query(`select item from taste_rejections where withdrawn_at is null and source = 'drive_dump'`)).rows.map(r => r.item)
+    expect(standing).toEqual(expect.arrayContaining([A.item, C.item, L.item, P.item]))
+    expect((await one(`select near from taste_rejections where item = $1 and withdrawn_at is null`, [A.item])).near).toEqual(nearBefore)
+  })
+
+  it('leaves a capture in the inbox until what it asks for has landed, and collects it once it has', async () => {
+    const master = '1SYNTHETICmasterid0000000001'
+    const unseen = '1SYNTHETICmasterid0000000002'
+    const insert = (o: { said: string; key: string; master: string; atMs: number | null; wholeCut: boolean }) => one(
+      `insert into taste_rejection_inbox (kind, said, said_where, said_at, piece, formats, master_drive_id, at_ms, whole_cut,
+         session_ref, repository, surface, emitter_id, client_report_id, reported_at)
+       values ('rejected', $1, 'a synthetic session', '2026-10-27T11:00:00Z', 'synthetic piece four', '{long_video}', $2, $3, $4,
+         'synthetic-session', 'synthetic/repo', 'cli', 'synthetic-emitter', $5, '2026-10-27T11:05:00Z') returning id::text`,
+      [o.said, o.master, o.atMs, o.wholeCut, o.key])
+    const whole = await insert({ said: 'synthetic: the whole cut drags', key: 'synthetic-capture-000002', master, atMs: null, wholeCut: true })
+    const moment = await insert({ said: 'synthetic: the word is chopped here', key: 'synthetic-capture-000003', master: unseen, atMs: 12_000, wholeCut: false })
+    const collected = async () => (await client.query(
+      `select id::text from taste_rejection_inbox where collected_at is not null and id = any($1::uuid[])`, [[whole.id, moment.id]])).rows.map(r => r.id)
+
+    // Neither master is shared with the engine yet: both are filed, and both wait.
+    const first = await job(drive(dump({ rejected: [A, C] })))
+    expect(first.problems).toEqual([])
+    expect(first.counts).toMatchObject({ rejections_inbox: 2, rejections_inbox_collected: 0, rejections_inbox_waiting: 2, rejections_records_new: 2 })
+    expect(await collected()).toEqual([])
+
+    // The whole cut's master is shared now (too long to fetch, which a pointer never needs): it is pointed at and
+    // collected. The moment's master is still out of reach, so it waits, filed once.
+    const big = { ...driveFile(master, 'synthetic master.mp4', 'video/mp4'), size: '2000000000' } as DriveFile
+    const second = await job(drive(dump({ rejected: [A, C] }), [big]))
+    expect(second.problems).toEqual([])
+    expect(second.counts).toMatchObject({
+      rejections_inbox: 2, rejections_inbox_collected: 1, rejections_inbox_waiting: 1, rejections_records_new: 0, rejections_media_pointed: 1,
+    })
+    expect(await collected()).toEqual([whole.id])
+    expect(await one(`select capture, master_drive_id from taste_rejections where source_ref = $1`, [`inbox:${whole.id}`]))
+      .toEqual({ capture: 'whole_cut', master_drive_id: master })
+    expect(await one(`select capture, moment_ms, cardinality(media_sha256)::int as media from taste_rejections where source_ref = $1`, [`inbox:${moment.id}`]))
+      .toEqual({ capture: 'moment', moment_ms: 12_000, media: 0 })
+    const third = await job(drive(dump({ rejected: [A, C] }), [big]))
+    expect(third.counts).toMatchObject({ rejections_inbox: 1, rejections_inbox_collected: 0, rejections_inbox_waiting: 1, rejections_records_new: 0 })
+  })
+
+  // A later merge pass marks his process words a paraphrase, and a later one puts them back.
+  const Pp = { ...P, confidence: 'paraphrased ruling' }
+  const fifth: DraftStandard = { ...answer.standards[0]!, statement: 'synthetic: always leave a title card room at the top edge.' }
+  const five: Llm = { model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { standards: [...answer.standards, fifth] } as never }) }
+
+  it('files a reclassed record as a new version under its new label, and withdraws the old one though its quote is no longer his words', async () => {
+    const r = await job(drive(dump({ rejected: [A, C], process: [Pp] })), { llm: five })
+    expect(r.problems).toEqual([])
+    expect(r.counts).toMatchObject({
+      rejections_quotes_reclassed: 1, rejections_records_new: 1, rejections_records_withdrawn: 1, rejections_distil_skipped: 0,
+      rejections_standards_written: 1, rejections_batch_waiting: 1, rejections_proposed: 0,
+    })
+    expect(await one(`select attribution from taste_rejection_quotes where text = $1`, [P.quotes[0]!.text])).toEqual({ attribution: 'observation' })
+    const versions = (await client.query(
+      `select attribution, withdrawn_at is null as standing from taste_rejections where kind = 'process' order by created_at, id`)).rows
+    expect(versions).toEqual([{ attribution: 'krish_words', standing: false }, { attribution: 'observation', standing: true }])
+    // The new standard waits as a candidate: this week's batch has already gone to him.
+    expect(await one(`select status, proposal_id from taste_floor_standards where statement = $1`, [fifth.statement]))
+      .toEqual({ status: 'candidate', proposal_id: null })
+  })
+
+  it('supersedes a candidate a later reading no longer drafts, and brings the same standard back when it is drafted again', async () => {
+    const id = (await one(`select id::text from taste_floor_standards where statement = $1`, [fifth.statement])).id
+    const status = async () => (await one(`select status from taste_floor_standards where id = $1`, [id])).status
+    // His words back: the first version stands again, and a reading without the fifth standard supersedes it.
+    const back = await job(drive(dump({ rejected: [A, C] })))
+    expect(back.problems).toEqual([])
+    expect(back.counts).toMatchObject({ rejections_quotes_reclassed: 1, rejections_records_restored: 1, rejections_records_withdrawn: 1, rejections_superseded: 1 })
+    expect(await status()).toBe('superseded')
+    // Drafted again: the same row, a candidate once more, and no second copy of it.
+    const standards = (await tally()).standards
+    const again = await job(drive(dump({ rejected: [A, C], process: [Pp] })), { llm: five })
+    expect(again.problems).toEqual([])
+    expect(again.counts).toMatchObject({ rejections_records_new: 0, rejections_records_restored: 1, rejections_standards_written: 1, rejections_superseded: 0 })
+    expect(await status()).toBe('candidate')
+    expect((await tally()).standards).toBe(standards)
+    // And left as the earlier tests found it: his words standing, the fifth standard superseded.
+    const last = await job(drive(dump({ rejected: [A, C] })))
+    expect(last.problems).toEqual([])
+    expect(await status()).toBe('superseded')
+    expect(await one(`select attribution from taste_rejection_quotes where text = $1`, [P.quotes[0]!.text])).toEqual({ attribution: 'krish_words' })
+  })
+
   it('keeps every count of every run under a rejections_ key', () => {
     expect(results.length).toBeGreaterThanOrEqual(9)
     for (const r of results) for (const k of Object.keys(r.counts)) expect(k).toMatch(/^rejections_[a-z0-9_]+$/)
   })
 
-  // Fails today, and so is marked: src/rejection/dump.ts reads a rejections file in which no line is a record as an
-  // empty list, so the whole read withdraws every rejected record in a run that reports no problem. Last in the
-  // suite, since it changes what stands.
+  // Last in the suite: a broken read that went through would change what stands for every test after it.
   it('refuses a rejections file in which no line is a record, as it does a missing one, and withdraws nothing', async () => {
     const before = await tally()
     const r = await job(drive(dump({ rejected: 'synthetic: not a record\n{"synthetic": "nor this"}\n' })))

@@ -90,6 +90,8 @@ export interface Dump {
   bad: Record<string, number>
   /** Paths that two files share, which a manifest entry cannot tell apart. Never resolved to either. */
   ambiguous: number
+  /** Each kind whose file was there and read with no bad line: only these are read whole, so only these withdraw. */
+  whole: Array<'rejected' | 'liked' | 'process'>
 }
 
 /**
@@ -123,9 +125,12 @@ export async function readDump(google: Google, folderId: string): Promise<Dump> 
   for (const [prefix, b] of [['rejected', rejected.bad], ['liked', liked.bad], ['process', proc.bad]] as const) {
     for (const [k, n] of Object.entries(b)) bad[`${prefix}_${k}`] = n
   }
+  const clean = (text: string | null, p: Parsed<DumpRecord>) => text !== null && !Object.keys(p.bad).length
+  const whole = ([['rejected', rejectedText, rejected], ['liked', likedText, liked], ['process', processText, proc]] as const)
+    .filter(([, text, p]) => clean(text, p)).map(([kind]) => kind)
   return {
     rejected: rejected.rows, liked: liked.rows, process: proc.rows,
     manifest: manifestText === null ? new Map() : parseManifest(manifestText),
-    files, bad, ambiguous,
+    files, bad, ambiguous, whole,
   }
 }

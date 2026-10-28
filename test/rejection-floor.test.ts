@@ -318,7 +318,7 @@ describe('distilling the floor', () => {
     const r = await distilFloor(s.db, stubLlm(['workflow']).llm, RUN, true)
     expect(r).toMatchObject({ groups: 2, failed: 1, resolved: 1, written: 1, superseded: 0 })
     expect(s.writes.filter(w => /^with prior as/.test(w.sql))).toHaveLength(1)
-    expect(s.writes.some(w => /superseded/.test(w.sql))).toBe(false)
+    expect(s.writes.some(w => /set status = 'superseded'/.test(w.sql))).toBe(false)
     expect(s.writes.some(w => /taste_watermarks/.test(w.sql))).toBe(false)
   })
 })

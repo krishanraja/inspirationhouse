@@ -94,7 +94,8 @@ export interface ResolvedStandard {
   kind: 'form' | 'workflow'; quoteIds: string[]; recordRefs: string[]; boundaryIds: string[]; krish: string | null; krishQuoteId: string | null
 }
 
-const squash = (s: string) => s.replace(/\s+/g, ' ').trim()
+// Whitespace as the database's check collapses it (regexp \\s), so a phrase this accepts the trigger accepts too.
+const squash = (s: string) => s.replace(/[ \t\n\r\f\v]+/g, ' ').trim()
 
 /** Every value checked, every ref resolved; a standard resting on no words of his is dropped. Pure. */
 export function resolveStandard(d: DraftStandard, group: string, allowed: readonly FormatSlug[], records: FloorRecord[], words: FloorQuote[], likedRefs: FloorQuote[]): ResolvedStandard | null {
@@ -161,6 +162,8 @@ export function groupsOf(r: Pick<FloorRecord, 'kind' | 'formats'>): string[] {
 export interface FloorDistilResult {
   records: number; groups: number; drafted: number; resolved: number; written: number; superseded: number
   skipped: boolean; failed: number; repaired: number; preview: ResolvedStandard[]
+  /** Standards the database refused (its checks are the last word on his quote); the rest are still written. */
+  refused: number
 }
 
 /**
@@ -169,7 +172,7 @@ export interface FloorDistilResult {
  */
 export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolean): Promise<FloorDistilResult> {
   const { records, liked } = await floorRecords(db)
-  const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, skipped: false, failed: 0, repaired: 0, preview: [] }
+  const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
   if (!records.length) return result
   const cursor = contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
   const [mark] = await db.query<{ cursor: string | null }>(`select cursor from public.taste_watermarks where source = $1`, [WATERMARK])
@@ -204,35 +207,40 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
   if (!write) return result
 
   for (const s of drafted) {
-    // Only a candidate is rewritten. A standard once put to him, or retired, is never rewritten or put back.
-    const rows = await db.query<{ n: number }>(
-      `with prior as (
-         select id, status from public.taste_floor_standards where fingerprint = $1 order by version desc limit 1
-       ), upd as (
-         update public.taste_floor_standards f
-         set statement = $2, how_to_check = $3, formats = $4::text[], theme = $5, layer = $6, kind = $7,
-             quote_ids = $8::uuid[], record_refs = $9::text[], boundary_quote_ids = $10::uuid[],
-             krish = $11, krish_quote_id = $12::uuid, run_id = $13::uuid, model = $14, prompt_rev = $15
-         from prior where f.id = prior.id and prior.status = 'candidate'
-         returning 1
-       ), ins as (
-         insert into public.taste_floor_standards
-           (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, record_refs, boundary_quote_ids,
-            krish, krish_quote_id, run_id, model, prompt_rev)
-         select $1, $2, $3, $4::text[], $5, $6, $7, $8::uuid[], $9::text[], $10::uuid[], $11, $12::uuid, $13::uuid, $14, $15
-         where not exists (select 1 from prior)
-         returning 1
-       )
-       select (select count(*) from upd)::int + (select count(*) from ins)::int as n`,
-      [s.fingerprint, s.statement, s.howToCheck, s.formats, s.theme, s.layer, s.kind, s.quoteIds, s.recordRefs, s.boundaryIds,
-        s.krish, s.krishQuoteId, runId, model.slice(0, 80), FLOOR_PROMPT_REV],
-      { write: true },
-    )
+    // Only a candidate is rewritten, and a superseded one drafted again comes back as a candidate. A standard once put
+    // to him, or retired, is never rewritten or put back. One the database refuses is counted, and the rest are written.
+    let rows: Array<{ n: number }>
+    try {
+      rows = await db.query<{ n: number }>(
+        `with prior as (
+           select id, status from public.taste_floor_standards where fingerprint = $1 order by version desc limit 1
+         ), upd as (
+           update public.taste_floor_standards f
+           set statement = $2, how_to_check = $3, formats = $4::text[], theme = $5, layer = $6, kind = $7,
+               quote_ids = $8::uuid[], record_refs = $9::text[], boundary_quote_ids = $10::uuid[],
+               krish = $11, krish_quote_id = $12::uuid, run_id = $13::uuid, model = $14, prompt_rev = $15,
+               status = 'candidate'
+           from prior where f.id = prior.id and prior.status in ('candidate', 'superseded')
+           returning 1
+         ), ins as (
+           insert into public.taste_floor_standards
+             (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, record_refs, boundary_quote_ids,
+              krish, krish_quote_id, run_id, model, prompt_rev)
+           select $1, $2, $3, $4::text[], $5, $6, $7, $8::uuid[], $9::text[], $10::uuid[], $11, $12::uuid, $13::uuid, $14, $15
+           where not exists (select 1 from prior)
+           returning 1
+         )
+         select (select count(*) from upd)::int + (select count(*) from ins)::int as n`,
+        [s.fingerprint, s.statement, s.howToCheck, s.formats, s.theme, s.layer, s.kind, s.quoteIds, s.recordRefs, s.boundaryIds,
+          s.krish, s.krishQuoteId, runId, model.slice(0, 80), FLOOR_PROMPT_REV],
+        { write: true },
+      )
+    } catch { result.refused++; continue }
     result.written += Number(rows[0]?.n ?? 0)
   }
   // A candidate this reading no longer drafts is superseded, but only when every group was read: a group whose call
   // failed keeps its candidates until a reading succeeds.
-  if (!result.failed) {
+  if (!result.failed && !result.refused) {
     const gone = await db.query<{ id: string }>(
       `update public.taste_floor_standards set status = 'superseded'
        where status = 'candidate' and not (fingerprint = any($1::text[])) returning id::text`,
