@@ -103,7 +103,7 @@ export function fileCapture(row: InboxRow): { quote: QuoteRow; record: RecordRow
     key: quoteKey(row.said, at.toISOString().slice(0, 10)), text: row.said.trim(), saidAt: at.toISOString(), precision: 'second',
     saidWhere: clip(row.said_where, 300) ?? row.said_where, source: 'capture', attribution: 'krish_words',
   }
-  const named = row.formats.filter((f): f is FormatSlug => f in FORMATS && f !== 'other')
+  const named = row.formats.filter((f): f is FormatSlug => Object.hasOwn(FORMATS, f) && f !== 'other')
   const formats = named.length ? [...new Set(named)].sort() : formatsOf(`${row.piece ?? ''} ${row.note ?? ''}`, { item: `${row.note ?? ''} ${row.said}` })
   const capture: Capture = row.screenshot_b64 ? 'still' : row.at_ms !== null ? 'moment' : row.whole_cut ? 'whole_cut' : 'words'
   const masters = row.master_drive_id ? [{ where: 'drive_id' as const, ref: row.master_drive_id }] : []

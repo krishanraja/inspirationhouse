@@ -107,7 +107,7 @@ export function quoteSourceOf(source: unknown): QuoteSource {
 /** When he said it: a moment to the second where the record gives one, else the day, at noon UTC. */
 export function saidAtOf(when: unknown, fallbackDay: string): { at: string; day: string; precision: 'day' | 'second' } | null {
   const w = typeof when === 'string' ? when.trim() : ''
-  if (/^\d{4}-\d{2}-\d{2}T/.test(w)) {
+  if (/^\d{4}-\d{2}-\d{2}T/.test(w) && realDay(w.slice(0, 10))) {
     const d = new Date(w)
     if (!Number.isNaN(d.getTime())) return { at: d.toISOString(), day: d.toISOString().slice(0, 10), precision: 'second' }
   }
@@ -361,7 +361,7 @@ export function fileDump(dump: { rejected: DumpRecord[]; liked: DumpRecord[]; pr
     const n = refs.get(ref) ?? 0
     if (n > 0) {
       collisions++
-      ref = `${ref}:${contentHash({ d: x.r.date, p: normaliseWords(x.r.piece ?? '') }).slice(0, 8)}`
+      ref = `${ref}:${contentHash({ d: x.r.date, p: normaliseWords(x.r.piece ?? ''), n }).slice(0, 8)}`
     }
     refs.set(filed.record.sourceRef, n + 1)
     records.push({ ...filed.record, sourceRef: ref })

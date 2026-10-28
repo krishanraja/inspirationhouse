@@ -72,8 +72,11 @@ export function scrub(text: string | null): string | null {
 
 /** Throws when the rendered file still holds a path, a Drive link, an id or an email. Never publish past this. */
 export function assertPublic(text: string): void {
-  for (const [name, re] of [['path', /\b[A-Z]:\\/], ['link', /(?:drive|docs)\.google\.com/], ['id', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
-    ['session', /\bcse_[A-Za-z0-9]{8,}/], ['email', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/]] as const) {
+  for (const [name, re] of [['path', /\b[A-Z]:\\/], ['link', /(?:drive|docs)\.google\.com|\bclaude\.ai\//], ['id', /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i],
+    ['session', /\b(?:cse|session)_[A-Za-z0-9]{8,}/],
+    // A Drive id is mixed case with - or _; the floor's own lowercase hex (its version) is not one.
+    ['drive id', /\b1(?=[A-Za-z0-9_-]*[A-Z_-])[A-Za-z0-9_-]{24,43}\b/],
+    ['email', /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/]] as const) {
     if (re.test(text)) throw new Error(`floor render: the file would hold a ${name}`)
   }
 }
@@ -119,8 +122,9 @@ export function renderFloor(input: RenderInput): string {
     standards[`s${s.fingerprint.slice(0, 10)}`] = {
       standing: s.standing,
       ...(s.decided_at ? { decided_on: day(s.decided_at) } : {}),
-      never_beneath: s.statement,
-      check_before_delivery: s.how_to_check,
+      // The model wrote these (or he reworded them) from records it read unscrubbed, so they are scrubbed too.
+      never_beneath: scrub(s.statement),
+      check_before_delivery: scrub(s.how_to_check),
       formats: s.formats, theme: s.theme, layer: s.layer, kind: s.kind,
       support: s.support_n,
       ...(s.krish ? { in_his_words: scrub(s.krish) } : {}),
@@ -169,7 +173,9 @@ export function renderFloor(input: RenderInput): string {
     },
     ...body,
   }
-  const text = `${JSON.stringify(doc, null, 2)}\n`
-  assertPublic(text)
+  // Checked on the values, not the JSON text, where a quote or a line break after "B:" is written B:\" or B:\n.
+  const values: string[] = []
+  const text = `${JSON.stringify(doc, (_k, v: unknown) => { if (typeof v === 'string') values.push(v); return v }, 2)}\n`
+  assertPublic(values.join('\n'))
   return text
 }

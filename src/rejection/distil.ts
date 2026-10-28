@@ -108,7 +108,7 @@ export function resolveStandard(d: DraftStandard, group: string, allowed: readon
   const quotes = new Map<string, FloorQuote>()
   for (const r of cited) for (const q of r.quotes) if (q.attribution === 'krish_words' || q.attribution === 'krish_action') quotes.set(q.id, q)
   if (![...quotes.values()].some(q => q.attribution === 'krish_words')) return null
-  const theme = (d.theme in THEMES && !['liked', 'other', 'story_angle'].includes(d.theme) ? d.theme : majority(cited.map(r => r.theme))) as string
+  const theme = (Object.hasOwn(THEMES, d.theme) && !['liked', 'other', 'story_angle'].includes(d.theme) ? d.theme : majority(cited.map(r => r.theme))) as string
   const layer = d.layer && LAYERS.has(d.layer) ? d.layer : null
   const kind: 'form' | 'workflow' = group === 'workflow' || d.kind === 'workflow' ? 'workflow' : 'form'
   let krish: string | null = null
@@ -150,10 +150,11 @@ export async function floorRecords(db: Db): Promise<{ records: FloorRecord[]; li
   return { records, liked: new Map(likedRows.map(q => [q.id, q])) }
 }
 
-/** Which group's call a record goes to: the workflow floor alone for process records, else every group of its formats. */
+/** Which group's call a record goes to: the workflow floor alone for process records, else every group of its formats
+ *  (a rejection about how a session works, format session or pipeline, joins the workflow floor). */
 export function groupsOf(r: Pick<FloorRecord, 'kind' | 'formats'>): string[] {
   if (r.kind === 'process') return ['workflow']
-  const out = Object.entries(FORMAT_GROUPS).filter(([g, fs]) => g !== 'workflow' && r.formats.some(f => (fs as readonly string[]).includes(f))).map(([g]) => g)
+  const out = Object.entries(FORMAT_GROUPS).filter(([, fs]) => r.formats.some(f => (fs as readonly string[]).includes(f))).map(([g]) => g)
   return out.length ? out : ['everything']
 }
 
@@ -172,8 +173,9 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
   if (!records.length) return result
   const cursor = contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
   const [mark] = await db.query<{ cursor: string | null }>(`select cursor from public.taste_watermarks where source = $1`, [WATERMARK])
-  const [open] = await db.query<{ n: number }>(`select count(*)::int as n from public.taste_floor_standards where status in ('candidate', 'proposed')`)
-  if (mark?.cursor === cursor && Number(open?.n ?? 0) > 0) { result.skipped = true; return result }
+  // The same standing records, read by the same prompt, give nothing new: the model is not asked again, whether or
+  // not he has decided every standard it drafted from them.
+  if (mark?.cursor === cursor) { result.skipped = true; return result }
 
   const existing = await db.query<{ statement: string; formats: string[] }>(
     `select statement, formats from public.taste_floor_standards where status in ('candidate', 'proposed') order by updated_at desc limit 200`,

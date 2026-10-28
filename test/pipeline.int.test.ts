@@ -56,11 +56,10 @@ async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
   const client = new pg.Client({ connectionString: url })
   await client.connect()
   await client.query('drop schema public cascade; create schema public;')
-  await client.query(`do $$ begin
-    if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon; end if;
-    if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated; end if;
-    if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role; end if;
-  end $$;`)
+  // Roles are the server's, not the database's: test/rejection.int.test.ts may create the same ones at the same moment.
+  for (const role of ['anon', 'authenticated', 'service_role']) {
+    await client.query(`do $$ begin create role ${role}; exception when duplicate_object or unique_violation then null; end $$;`)
+  }
   // The tables the engine reads that other repositories own, cut to the columns it uses.
   await client.query(`
     create table public.mindmake_studio_learning_proposals (

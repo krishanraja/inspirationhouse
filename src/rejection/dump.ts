@@ -115,6 +115,8 @@ export async function readDump(google: Google, folderId: string): Promise<Dump> 
     read(DUMP_FILES.liked), read(DUMP_FILES.process), read(DUMP_FILES.manifest),
   ])
   const rejected = parseJsonl(rejectedText)
+  // A rejections file that holds no record is a broken read too: read as empty, it would withdraw every rejection.
+  if (!rejected.rows.length) throw new Error('rejections dump: data/rejections.jsonl holds no record')
   const liked = likedText === null ? { rows: [], bad: {} } : parseJsonl(likedText)
   const proc = processText === null ? { rows: [], bad: {} } : parseJsonl(processText)
   const bad: Record<string, number> = {}
