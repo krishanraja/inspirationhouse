@@ -184,7 +184,8 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
  * His feedback on ideas and cards, and his presses on the publish board, as cues the Sunday session draws on
  * (src/collect/feedbackCues.ts). The cards are read only when the ledger's tables are there. Until content-engine's
  * feedback_cues migration is applied the stage writes nothing and says so in its counts (cues_table_missing), without
- * failing the run. A failure is recorded, never thrown.
+ * failing the run. A failure is recorded, never thrown. A stage that finishes puts cues_board in the run's counts, which
+ * is how the next run knows when the board was last read.
  */
 async function cues(ctx: Ctx): Promise<void> {
   const r = await syncCues(ctx.db, ctx.llm, { write: !ctx.dry, cards: ctx.ledger }).catch(err => {
@@ -198,12 +199,14 @@ async function cues(ctx: Ctx): Promise<void> {
     cues_superseded: r.superseded, cues_guessed: r.guessed, cues_reused: r.reused, cues_skipped: r.skipped,
     cues_unclassified: r.unclassified, cues_failed: r.failed, cues_table_missing: r.missing ? 1 : 0,
     cues_board: r.board, cues_board_wordless: r.boardWordless, cues_offday: r.offday, cues_board_unfiled: r.boardUnfiled,
-    cues_board_missing: r.boardMissing ? 1 : 0,
+    cues_board_unfiled_new: r.boardUnfiledNew, cues_board_unread: r.boardUnread, cues_board_missing: r.boardMissing ? 1 : 0,
   }
   Object.assign(ctx.counts, counts)
   if (r.failed) ctx.problems.push(`cues: the model gave no guess for ${r.failed} answer(s)`)
-  // His words on a press are never cut to fit or filed under a guess, so a press that cannot be filed is said.
-  if (r.boardUnfiled) ctx.problems.push(`cues: ${r.boardUnfiled} press(es) of his on the board not filed (no idea id, or words longer than a cue holds)`)
+  // His words on a press are never cut to fit or filed under a guess, so a press that cannot be filed is said: while its
+  // board is live, and once when it is saved on an older one. After that it is counted (cues_board_unfiled), so one
+  // document nobody edits never keeps every later run red and hides what else fails.
+  if (r.boardUnfiledNew) ctx.problems.push(`cues: ${r.boardUnfiledNew} press(es) of his on the board not filed (no idea id, or words longer than a cue holds)`)
   log({ stage: 'cues', dry_run: ctx.dry, ...counts })
 }
 

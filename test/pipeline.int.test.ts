@@ -874,7 +874,7 @@ run('his presses on the publish board, as cues', () => {
     const doc = (collection: string, id: string, body: Record<string, unknown>, by = 'Krish') => client.query(
       `insert into board_documents (week, collection, doc_id, body, updated_by) values ('2026-11-09', $1, $2, $3::jsonb, $4)`,
       [collection, id, JSON.stringify(body), by])
-    await doc('queue', later, { use: 'next_week', note: 'synthetic: next week, with the new figures', at: '2026-11-01T09:00:00Z' })
+    await doc('queue', later, { use: 'next_week', note: 'synthetic: next week, with the new figures', target_week: '2026-11-16', at: '2026-11-01T09:00:00Z' })
     await doc('queue', offday, { use: 'offday', day: 'sat', approved: true })
     await doc('picks', 'mon', { pick: 'mon-1', idea_id: picked, story: 'synthetic story', day: 'mon', note: 'synthetic: open on the price' })
     // A session's relay is never his tap.
@@ -888,9 +888,26 @@ run('his presses on the publish board, as cues', () => {
       { source: 'idea_queue', source_ref: `${later}:future_piece`, subject_ref: later, subject: 'synthetic idea for next week', use: 'future_piece',
         use_origin: 'krish', venture: 'publication', decided_by: 'Krish', target_week: '2026-11-16' },
       { source: 'week_pick', source_ref: '2026-11-09:mon', subject_ref: picked, subject: 'synthetic picked idea', use: 'brief',
-        use_origin: 'krish', venture: 'publication', decided_by: 'Krish', target_week: null },
+        use_origin: 'rule', venture: 'publication', decided_by: 'Krish', target_week: null },
     ])
     expect(await syncCues(db, null, { write: true, cards: false })).toMatchObject({ inserted: 0, updated: 0, withdrawn: 0 })
+  })
+
+  it('says an unfiled press on an old board once, then only counts it, by the last run that read the board', async () => {
+    const now = new Date('2026-11-01T12:00:00Z')
+    // A press of his with no idea to file it under, on a board three weeks gone, saved on 13 October.
+    await client.query(`insert into board_documents (week, collection, doc_id, body, updated_at, updated_by)
+      values ('2026-10-12', 'queue', 'fri-3', '{"use": "track_over_time", "note": "synthetic: no idea row"}'::jsonb, '2026-10-13T09:00:00Z', 'Krish')`)
+    expect(await syncCues(db, null, { write: false, cards: false, now })).toMatchObject({ boardUnfiled: 1, boardUnfiledNew: 1 })
+    // A daily run whose cues stage read the board after it was saved (a run of another job, or one whose stage never
+    // finished, does not count).
+    await client.query(`insert into content_engine_runs (job, trigger, status, counts, started_at) values
+      ('taste_weekly', 'cron', 'ok', '{"cues_board": 0}', '2026-10-31T07:00:00Z'),
+      ('taste_daily', 'cron', 'failed', '{"dry_run": false}', '2026-10-31T08:00:00Z')`)
+    expect(await syncCues(db, null, { write: false, cards: false, now })).toMatchObject({ boardUnfiledNew: 1 })
+    await client.query(`insert into content_engine_runs (job, trigger, status, counts, started_at)
+      values ('taste_daily', 'cron', 'failed', '{"cues_board": 2, "cues_board_unfiled": 1}', '2026-10-14T06:00:00Z')`)
+    expect(await syncCues(db, null, { write: false, cards: false, now })).toMatchObject({ boardUnfiled: 1, boardUnfiledNew: 0 })
   })
 })
 

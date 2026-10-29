@@ -30,25 +30,31 @@ import { CUE_VENTURE, type Venture } from '../venture.ts'
 //                     optional comments easily ... OR mark an idea as being useful in a future wider piece OR ... stored
 //                     for a future trend OR queue it for next week OR reject it." A queue document with an explicit
 //                     `use` is his tap naming the use, so its cue is use_origin 'krish', decided_by Krish, never a rule
-//                     or a guess: wider_piece_context and track_over_time as they are, next_week as a future_piece that
-//                     carries its target week (meta.target_week, so the Sunday gather can list it first), not_for_us as
-//                     it is. It joins its idea's queue thread, so one idea keeps one cue per use, and the answer in the
-//                     queue that relays the same words is not read again by the verdict rules. An offday press is
-//                     Growth's (its approvals are not cues) and is only counted. A pick with a note is a week_pick cue:
-//                     his brief for the piece he picked, one per week and day.
+//                     or a guess: wider_piece_context and track_over_time as they are, next_week as a future_piece,
+//                     not_for_us as it is. It joins its idea's queue thread, so one idea keeps one cue per use, and the
+//                     answer in the queue that relays the same words (written after the press) is not read again by the
+//                     verdict rules. An offday press is Growth's (its approvals are not cues) and is only counted. A
+//                     pick with a note is a week_pick cue, one per week and day: the tap names a day, so reading the
+//                     note as his brief is a rule ('rule'). Every pick of his also joins its idea's queue thread as a
+//                     yes, so it retires a not_for_us cue before it.
+//                     Which week a next_week idea is queued for lives in one place: target_week on the idea's queue
+//                     mark (content_ideas meta.queue, content-engine _ideaQueue.ts), which the Sunday gather orders by.
+//                     The cue's meta.target_week is context only: the Monday the press that carried his words named,
+//                     kept only when it is one, never a guess, and a later re-queue with no words does not change it.
+//                     A queue document of his with words but no use this reader knows is counted (unread), never read.
 // Not read: board comments. They sit on board anchors ('rvs-wed-article-draft', 'idea-fri-2') that no table maps to an
 // idea or card id, most are edits to drafts (craft, which the taste ledger reads), and his QUEUE comments reach the idea
 // queue already (plan-week step 1).
 //
-// The use is read by deterministic rules first: his press, then his words naming the use (use_origin 'krish'), then
-// his verdict or the card's route ('rule'). Only when no rule fires does a model guess, labelled 'model_guess' with its
+// The use is read by deterministic rules first: his press ('krish', a pick's note 'rule'), then his words naming the use
+// ('krish'), then his verdict or the card's route ('rule'). Only when no rule fires does a model guess, labelled 'model_guess' with its
 // model and prompt revision; a guess is kept and reused while his words stay the same, so it is never asked twice.
 // A press with no words makes no cue (`said` is always his words), but it is still his answer: it retires what it
 // contradicts, as a tap on the queue does.
 //
 // One cue per answer: on the queue, one per idea and use (a later answer of the same use updates it, never duplicates
-// it); on a card, one per field. A later drop retires the idea's other cues, and a later verdict that is not a drop
-// retires its not_for_us cue ('superseded'); an answer that is gone retires its cue ('withdrawn'); either comes back
+// it); on a card, one per field. A later drop retires the idea's other cues, and a later verdict or press that is not a
+// drop (a pick among them) retires its not_for_us cue ('superseded'); an answer that is gone retires its cue ('withdrawn'); either comes back
 // open when his answer does. A cue a piece used stays used.
 
 export const USES = ['future_piece', 'wider_piece_context', 'track_over_time', 'brief', 'not_for_us'] as const
@@ -69,7 +75,10 @@ export interface BoardRef {
   /** The board's Monday and the document's id. */
   week: string
   doc: string
-  /** next_week only: the Monday of the week it is queued for. */
+  /**
+   * next_week only: the Monday the press names, as context. Null when it names none; never guessed. The week an idea is
+   * queued for is the queue mark's target_week (content_ideas meta.queue), not this.
+   */
   targetWeek: string | null
 }
 
@@ -151,8 +160,9 @@ export function themeOf(said: string): string | null {
 }
 
 /**
- * The use his press names. His tap decides it, so it is his ('krish'); his words only name a wider piece's theme. A
- * note on a pick is his brief for the piece he picked.
+ * The use his press names. A queue press's tap names the use, so it is his ('krish'); his words only name a wider
+ * piece's theme. A pick's tap names a day, not a use: reading its note as his brief for the piece is a rule ('rule'),
+ * as reading the angle verdict as a brief is.
  */
 export function pressReading(press: BoardPress, said: string): Reading {
   switch (press) {
@@ -160,7 +170,7 @@ export function pressReading(press: BoardPress, said: string): Reading {
     case 'track_over_time': return { use: 'track_over_time', theme: null, origin: 'krish', rule: 'board_track' }
     case 'next_week': return { use: 'future_piece', theme: null, origin: 'krish', rule: 'board_next_week' }
     case 'not_for_us': return { use: 'not_for_us', theme: null, origin: 'krish', rule: 'board_not_for_us' }
-    case 'pick': return { use: 'brief', theme: null, origin: 'krish', rule: 'board_pick_note' }
+    case 'pick': return { use: 'brief', theme: null, origin: 'rule', rule: 'board_pick_note' }
   }
 }
 
@@ -294,7 +304,10 @@ export interface BoardRow {
 }
 
 export interface BoardRead {
-  /** His queue presses (offday aside) by idea id, oldest first: each joins its idea's queue thread. */
+  /**
+   * His queue presses (offday aside) and his picks by idea id, oldest first: each joins its idea's queue thread. A pick
+   * joins it as a yes with no words (its note is its own week_pick thread), so it retires a not_for_us before it.
+   */
   queue: Map<string, Entry[]>
   /** His pick notes, one thread each. */
   picks: Thread[]
@@ -306,6 +319,13 @@ export interface BoardRead {
   offday: number
   /** Presses whose words could not be filed: no idea id to file them under, or longer than a cue holds. */
   unfiled: number
+  /**
+   * Of those, the ones the run says as a problem: on this week's or next week's board, or saved since the last run that
+   * read the board. An older one is only counted, so one press nobody edits never keeps every later run red.
+   */
+  unfiledNew: number
+  /** His queue documents with a note or a reason but no use this reader knows: counted, never read. */
+  unread: number
   /** Ideas with a press too long to file: their cues are left as they are. */
   held: Set<string>
   /** His documents read. None is a read that found nothing, which withdraws nothing. */
@@ -324,11 +344,13 @@ function mondayOf(v: unknown): string | null {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v && d.getUTCDay() === 1 ? v : null
 }
 
-function weekAfter(monday: string): string | null {
-  if (!mondayOf(monday)) return null
-  const d = new Date(`${monday}T00:00:00Z`)
+/** This week's Monday and next week's, in UTC: the boards a press still matters on while they are live. */
+export function liveWeeks(now: Date): Set<string> {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+  const thisWeek = d.toISOString().slice(0, 10)
   d.setUTCDate(d.getUTCDate() + 7)
-  return d.toISOString().slice(0, 10)
+  return new Set([thisWeek, d.toISOString().slice(0, 10)])
 }
 
 /** His words on a press: the note and the reason he typed, each whole. A pick carries a note only. */
@@ -339,32 +361,54 @@ export function pressWords(collection: string, body: Record<string, unknown>): s
 
 /**
  * His presses, from the board documents he wrote himself (readBoardRows reads only those). A queue document counts when
- * its `use` is one of BOARD_USES; its old verdict fields are not read beside it. A pick counts when it carries a note.
+ * its `use` is one of BOARD_USES; its old verdict fields are not read beside it. A pick with a note counts as a press;
+ * every pick on an idea joins its queue thread as his yes.
+ *
+ * `now` and `since` (when the last run that read the board started; null when none did) decide which unfiled presses
+ * are said as a problem: one on a live board (liveWeeks) or saved since that run. Every unfiled press is counted.
  */
-export function boardPresses(rows: BoardRow[]): BoardRead {
-  const out: BoardRead = { queue: new Map(), picks: [], presses: 0, wordless: 0, offday: 0, unfiled: 0, held: new Set(), docs: rows.length }
+export function boardPresses(rows: BoardRow[], opts: { now?: Date; since?: string | null } = {}): BoardRead {
+  const out: BoardRead = {
+    queue: new Map(), picks: [], presses: 0, wordless: 0, offday: 0, unfiled: 0, unfiledNew: 0, unread: 0, held: new Set(), docs: rows.length,
+  }
+  const live = liveWeeks(opts.now ?? new Date())
+  const since = opts.since ? Date.parse(opts.since) : Number.NaN
+  const unfiled = (r: BoardRow) => {
+    out.unfiled++
+    if (live.has(r.week) || Number.isNaN(since) || !(Date.parse(r.updated_at) <= since)) out.unfiledNew++
+  }
+  const join = (ideaId: string, e: Entry) => out.queue.set(ideaId, [...(out.queue.get(ideaId) ?? []), e])
   for (const r of rows) {
     const body = isObj(r.body) ? r.body : {}
     let press: BoardPress
     if (r.collection === 'picks') {
-      if (!words(body.note)) continue
       press = 'pick'
     } else if (r.collection === 'queue' && (BOARD_USES as readonly string[]).includes(String(body.use))) {
       // His off-day approvals are Growth's to act on (plan W5b); they say nothing about what to make here.
       if (body.use === 'offday') { out.offday++; continue }
       press = body.use as BoardPress
-    } else continue
-    out.presses++
+    } else {
+      // His words on a queue document this reader does not know (a use renamed, or a field the board adds): counted, so
+      // a board that changes its shape shows in the run's counts instead of reading as no presses at all.
+      if (r.collection === 'queue' && (words(body.note) || words(body.reason))) out.unread++
+      continue
+    }
     const ideaId = typeof r.idea_id === 'string' && UUID.test(r.idea_id) ? r.idea_id.toLowerCase() : null
-    if (!ideaId) { out.unfiled++; continue }
     const at = isoOr(body.at, isoOr(r.updated_at, new Date(0).toISOString()))
     const parts = pressWords(r.collection, body)
     const said = parts.join('\n\n')
+    if (press === 'pick') {
+      // A pick is his yes to the idea, with a note or without: it retires a not_for_us cue before it.
+      if (ideaId) join(ideaId, { verdict: null, said: null, press, at })
+      if (!said) continue
+    }
+    out.presses++
+    if (!ideaId) { unfiled(r); continue }
     const tooLong = Array.from(said).length > MAX_SAID
-    if (tooLong) { out.unfiled++; out.held.add(ideaId) }
+    if (tooLong) { unfiled(r); out.held.add(ideaId) }
     const board: BoardRef = {
       press, week: r.week, doc: r.doc_id,
-      targetWeek: press === 'next_week' ? mondayOf(body.target_week) ?? weekAfter(r.week) : null,
+      targetWeek: press === 'next_week' ? mondayOf(body.target_week) : null,
     }
     const s: Said | null = said && !tooLong ? {
       source: press === 'pick' ? 'week_pick' : 'idea_queue', subjectRef: ideaId,
@@ -376,9 +420,7 @@ export function boardPresses(rows: BoardRow[]): BoardRead {
       continue
     }
     if (!said) out.wordless++
-    const list = out.queue.get(ideaId) ?? []
-    list.push({ verdict: null, said: s, press, at })
-    out.queue.set(ideaId, list)
+    join(ideaId, { verdict: null, said: s, press, at })
   }
   for (const list of out.queue.values()) list.sort((a, b) => Date.parse(a.at!) - Date.parse(b.at!))
   return out
@@ -396,9 +438,10 @@ function relays(press: Said, said: string): boolean {
 }
 
 /**
- * The queue threads with his presses joined in, each in the order he gave it. A queue answer that carries a press's
- * words on the same idea is that press relayed into the queue (plan-week step 1 copies board marks there): its words
- * are not read again, so the verdict rules never make a second cue of the same press. Its verdict stays, as his tap.
+ * The queue threads with his presses joined in, each in the order he gave it. A queue answer given at or after a press,
+ * on the same idea and carrying that press's words, is the press relayed into the queue (plan-week step 1 copies board
+ * marks there, stamped when it copies them): its words are not read again, so the verdict rules never make a second cue
+ * of the same press. Its verdict stays, as his tap. An answer given before the press is his own, even in the same words.
  * A queue answer kept with no time of its own counts as older than any press.
  */
 export function mergePresses(queue: Thread[], board: BoardRead): Thread[] {
@@ -408,8 +451,8 @@ export function mergePresses(queue: Thread[], board: BoardRead): Thread[] {
     const presses = th.source === 'idea_queue' ? board.queue.get(th.subjectRef) : undefined
     if (!presses) return th
     joined.add(th.subjectRef)
-    const said = presses.flatMap(p => (p.said ? [p.said] : []))
-    const answers = th.entries.map(e => (e.said && said.some(p => relays(p, e.said!.said)) ? { ...e, said: null } : e))
+    const relay = (e: Entry) => Boolean(e.said) && presses.some(p => p.said && time(e) >= time(p) && relays(p.said, e.said!.said))
+    const answers = th.entries.map(e => (relay(e) ? { ...e, said: null } : e))
     const entries: Entry[] = []
     let i = 0
     for (const p of presses) {
@@ -495,7 +538,8 @@ function cueOf(s: Said, r: Reading, sourceRef: string): Cue {
       ...(s.verdict ? { verdict: s.verdict } : {}),
       ...(s.routes.length ? { routes: s.routes } : {}),
       ...(r.origin === 'model_guess' ? { model: r.model ?? null, prompt_rev: CUE_PROMPT_REV } : {}),
-      // A press is his tap on the board: who decided, which document, and for next_week the week it is queued for.
+      // A press is his tap on the board: who decided, which document, and for next_week the Monday the press named, as
+    // context only (the week an idea is queued for is its queue mark's target_week).
       ...(s.board ? {
         via: 'board', decided_by: 'Krish', press: s.board.press, board_week: s.board.week, board_doc: s.board.doc,
         ...(s.board.targetWeek ? { target_week: s.board.targetWeek } : {}),
@@ -692,19 +736,37 @@ export interface CueResult {
   boardWordless: number
   /** His offday presses: Growth's lane, never a cue. */
   offday: number
-  /** His presses whose words could not be filed: no idea id, or longer than a cue holds. A problem for the run. */
+  /** His presses whose words could not be filed: no idea id, or longer than a cue holds. */
   boardUnfiled: number
+  /** Of those, the ones on a live board or saved since the last run that read the board: a problem for the run. */
+  boardUnfiledNew: number
+  /** His queue documents with words but no use this reader knows: counted, never read. */
+  boardUnread: number
   /** The board_documents table is not there: no press is read and none of their cues is withdrawn. */
   boardMissing: boolean
 }
 
-export async function syncCues(db: Db, llm: Llm | null, opts: { write: boolean; cards: boolean }): Promise<CueResult> {
-  const [reg] = await db.query<{ ok: boolean; board: boolean }>(
-    `select to_regclass('public.feedback_cues') is not null as ok, to_regclass('public.board_documents') is not null as board`,
+/**
+ * When the last recorded daily run whose cues stage read the board started, whatever its status (a run this stage
+ * failed must still count, or a press it said once would be said on every run after), or null when none did.
+ */
+async function lastBoardRead(db: Db): Promise<string | null> {
+  const [r] = await db.query<{ at: string | null }>(
+    `select max(started_at)::text as at from public.content_engine_runs where job = 'taste_daily' and counts ? 'cues_board'`,
+  )
+  return r?.at ?? null
+}
+
+export async function syncCues(db: Db, llm: Llm | null, opts: { write: boolean; cards: boolean; now?: Date }): Promise<CueResult> {
+  const [reg] = await db.query<{ ok: boolean; board: boolean; runs: boolean }>(
+    `select to_regclass('public.feedback_cues') is not null as ok, to_regclass('public.board_documents') is not null as board,
+            to_regclass('public.content_engine_runs') is not null as runs`,
   )
   const missing = !reg?.ok
   const boardMissing = !reg?.board
-  const board = boardPresses(boardMissing ? [] : await readBoardRows(db))
+  const board = boardPresses(boardMissing ? [] : await readBoardRows(db), {
+    now: opts.now, since: !boardMissing && reg?.runs ? await lastBoardRead(db) : null,
+  })
   const queued = queueThreads(await readQueueRows(db))
   const queue = mergePresses(queued, board)
   const cards = opts.cards ? cardThreads(await readCardRows(db)) : []
@@ -718,7 +780,8 @@ export async function syncCues(db: Db, llm: Llm | null, opts: { write: boolean; 
   const result: CueResult = {
     inputs: said.length, cues: 0, inserted: 0, updated: 0, withdrawn: 0, superseded: 0,
     guessed: 0, reused: 0, skipped: 0, unclassified: 0, failed: 0, missing,
-    board: board.presses, boardWordless: board.wordless, offday: board.offday, boardUnfiled: board.unfiled, boardMissing,
+    board: board.presses, boardWordless: board.wordless, offday: board.offday, boardUnfiled: board.unfiled,
+    boardUnfiledNew: board.unfiledNew, boardUnread: board.unread, boardMissing,
   }
 
   const readings = new Map<Said, Reading>()
