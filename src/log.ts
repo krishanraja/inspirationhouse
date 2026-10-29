@@ -15,7 +15,7 @@ export function safeFields(fields: Record<string, unknown>): Record<string, unkn
   for (const [k, v] of Object.entries(fields)) {
     // Per-source and per-stage counters are numbers, so they are safe by shape.
     // venture_mismatch is the proof a dry run gives that the code and the backfill agree, so a dry run's log shows it.
-    const counter = /^(seen|new|items|explain|distil|score|evidence|cues|signals|rejections|reports|venture|meter)_[a-z_]+$/.test(k) && typeof v === 'number'
+    const counter = /^(seen|new|items|explain|distil|score|evidence|cues|signals|rejections|reports|venture|meter|retro)_[a-z_]+$/.test(k) && typeof v === 'number'
     if (!ALLOWED.has(k) && !counter) continue
     if (typeof v === 'number' || typeof v === 'boolean') out[k] = v
     else if (typeof v === 'string') out[k] = v.length <= 80 ? v : `${v.slice(0, 77)}...`

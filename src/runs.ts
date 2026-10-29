@@ -2,12 +2,12 @@ import type { Db } from './db.ts'
 
 // Runs are recorded in content-engine's existing ledger, which Control
 // Center's done-check already reads. Jobs: taste_daily, taste_weekly, taste_harness, taste_cards (the quick job for
-// links he pasted) and taste_rejections (the floor, src/rejection/); content_engine_runs allows any job matching
+// links he pasted), taste_rejections (the floor, src/rejection/) and taste_retro (the retrospective, src/retro/); content_engine_runs allows any job matching
 // ^[a-z][a-z0-9_]{1,63}$.
 export type RunStatus = 'ok' | 'skipped' | 'failed'
 
 export interface RunRecord {
-  job: 'taste_daily' | 'taste_weekly' | 'taste_harness' | 'taste_cards' | 'taste_rejections'
+  job: 'taste_daily' | 'taste_weekly' | 'taste_harness' | 'taste_cards' | 'taste_rejections' | 'taste_retro'
   trigger: 'cron' | 'manual'
   status: RunStatus
   reason: string | null

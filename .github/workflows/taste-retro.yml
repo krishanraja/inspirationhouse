@@ -1,0 +1,37 @@
+name: taste-retro
+# The retrospective (src/retro/retro.ts): his scores and engagement joined to how each piece was made, one feature that
+# scored well and one that scored badly put to him as proposals. No model is called, so it costs nothing to run.
+# No timer of its own: Control Center's clock dispatches it (TASTE_JOBS), and the job runs only when a report is due (a
+# month since the last, or four newly scored pieces), skipping otherwise. Never a Claude schedule.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read only, write nothing
+        type: boolean
+        default: true
+      force:
+        description: Report now, even when no report is due
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: taste
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Logs on this public repository carry counts only (src/log.ts).
+      - run: pnpm -s engine retro ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.force && '--force' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
