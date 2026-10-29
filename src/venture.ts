@@ -23,6 +23,11 @@ export const MINDMAKE = 'mindmake'
  * so another's floor can start the day it gets a reader.
  */
 export const FLOOR_VENTURE = MYMU
+/**
+ * The retrospective's venture (src/retro/retro.ts): it reads Make Your Mind Up's pieces (content-engine content_ideas
+ * and his piece_scores), so every claim it puts to him is Make Your Mind Up's.
+ */
+export const RETRO_VENTURE = MYMU
 
 /** How a venture is named in what the engine renders. A slug not listed is shown as itself. */
 export const VENTURE_NAMES: Readonly<Record<string, string>> = {
