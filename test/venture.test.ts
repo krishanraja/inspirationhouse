@@ -59,7 +59,7 @@ describe('Drive folders and cues', () => {
   })
 
   it('files the cues stage\'s cues and the floor under Make Your Mind Up', () => {
-    expect(CUE_VENTURE).toEqual({ idea_queue: 'publication', inspiration_card: 'publication' })
+    expect(CUE_VENTURE).toEqual({ idea_queue: 'publication', inspiration_card: 'publication', week_pick: 'publication' })
     expect(FLOOR_VENTURE).toBe('publication')
   })
 })

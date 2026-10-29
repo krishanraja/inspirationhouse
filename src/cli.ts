@@ -181,9 +181,10 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
 }
 
 /**
- * His feedback on ideas and cards as cues the Sunday session draws on (src/collect/feedbackCues.ts). The cards are read
- * only when the ledger's tables are there. Until content-engine's feedback_cues migration is applied the stage writes
- * nothing and says so in its counts (cues_table_missing), without failing the run. A failure is recorded, never thrown.
+ * His feedback on ideas and cards, and his presses on the publish board, as cues the Sunday session draws on
+ * (src/collect/feedbackCues.ts). The cards are read only when the ledger's tables are there. Until content-engine's
+ * feedback_cues migration is applied the stage writes nothing and says so in its counts (cues_table_missing), without
+ * failing the run. A failure is recorded, never thrown.
  */
 async function cues(ctx: Ctx): Promise<void> {
   const r = await syncCues(ctx.db, ctx.llm, { write: !ctx.dry, cards: ctx.ledger }).catch(err => {
@@ -196,9 +197,13 @@ async function cues(ctx: Ctx): Promise<void> {
     cues_inputs: r.inputs, cues_open: r.cues, cues_inserted: r.inserted, cues_updated: r.updated, cues_withdrawn: r.withdrawn,
     cues_superseded: r.superseded, cues_guessed: r.guessed, cues_reused: r.reused, cues_skipped: r.skipped,
     cues_unclassified: r.unclassified, cues_failed: r.failed, cues_table_missing: r.missing ? 1 : 0,
+    cues_board: r.board, cues_board_wordless: r.boardWordless, cues_offday: r.offday, cues_board_unfiled: r.boardUnfiled,
+    cues_board_missing: r.boardMissing ? 1 : 0,
   }
   Object.assign(ctx.counts, counts)
   if (r.failed) ctx.problems.push(`cues: the model gave no guess for ${r.failed} answer(s)`)
+  // His words on a press are never cut to fit or filed under a guess, so a press that cannot be filed is said.
+  if (r.boardUnfiled) ctx.problems.push(`cues: ${r.boardUnfiled} press(es) of his on the board not filed (no idea id, or words longer than a cue holds)`)
   log({ stage: 'cues', dry_run: ctx.dry, ...counts })
 }
 

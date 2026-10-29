@@ -15,7 +15,7 @@ import { loadFloor, renderFloor } from '../src/rejection/render.ts'
 import { fileQuotes, fileRecords } from '../src/rejection/store.ts'
 import type { RecordRow } from '../src/rejection/file.ts'
 import { FORMATS } from '../src/rejection/vocab.ts'
-import { folderVenture, ventureOf } from '../src/venture.ts'
+import { CUE_VENTURE, folderVenture, ventureOf } from '../src/venture.ts'
 import { VENTURE_STUBS } from './stubs.ts'
 
 // The ledger keyed by venture (content-engine 20261117090000_taste_ventures.sql), against a real Postgres with
@@ -228,13 +228,14 @@ run('the ledger keyed by venture, on a real database', () => {
     await standard('dddddddddddddd02', [cut, heartQuote], ['drive_dump:dump:synthetic-d1', `session_report:report:${REPORT.heart}`])
     await standard('dddddddddddddd03', [heartQuote], [`session_report:report:${REPORT.heart}`])
 
-    // Cues: one a Heartside report became, one from the idea queue.
+    // Cues: one a Heartside report became, one from the idea queue, one from a note on a pick on the publish board.
     const cue = (source: string, ref: string, meta: Record<string, unknown>) => client.query(
       `insert into feedback_cues (source, source_ref, subject_ref, subject, said, said_at, use, use_origin, status, meta)
        values ($1, $2, 'synthetic-subject', 'a synthetic idea', 'synthetic: keep an eye on this', '2026-10-20T09:00:00Z', 'track_over_time', 'krish', 'open', $3)`,
       [source, ref, meta])
     await cue('session_report', `report:${REPORT.heart}`, { repository: 'krishanraja/Heartside' })
     await cue('idea_queue', 'synthetic-idea:track_over_time', {})
+    await cue('week_pick', '2026-11-09:mon', { via: 'board', decided_by: 'Krish' })
     // Captures: one from Heartside's repository, one from a repository that serves several, and one from Heartside's
     // already filed as a record (fileCapture's source, ref and meta), which moves with its capture.
     const capture = (repository: string, key: string, collected = false) => client.query(
@@ -280,7 +281,8 @@ run('the ledger keyed by venture, on a real database', () => {
       { fingerprint: 'dddddddddddddd03', venture: 'heartside', status: 'candidate' },
     ])
     expect((await client.query(`select source, venture from feedback_cues order by source`)).rows)
-      .toEqual([{ source: 'idea_queue', venture: 'publication' }, { source: 'session_report', venture: 'heartside' }])
+      .toEqual([{ source: 'idea_queue', venture: CUE_VENTURE.idea_queue }, { source: 'session_report', venture: 'heartside' },
+        { source: 'week_pick', venture: CUE_VENTURE.week_pick }])
     expect((await client.query(`select repository, venture from taste_rejection_inbox order by repository`)).rows)
       .toEqual([{ repository: 'krishanraja/control-center', venture: null }, { repository: 'krishanraja/heartside', venture: 'heartside' },
         { repository: 'krishanraja/heartside', venture: 'heartside' }])

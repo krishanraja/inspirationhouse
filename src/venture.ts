@@ -88,10 +88,11 @@ export function ventureOf(source: Source, facts: VentureFacts = {}): Venture | n
 }
 
 /**
- * The venture of the cues the cues stage writes (src/collect/feedbackCues.ts): the idea queue and the Inspiration
- * cards are Make Your Mind Up's. A session report's cue takes its report's venture (src/collect/sessionReports.ts).
+ * The venture of the cues the cues stage writes (src/collect/feedbackCues.ts): the idea queue, the Inspiration cards
+ * and his notes on a pick on the publish board (week_pick) are Make Your Mind Up's; his presses on the board's queue
+ * file under idea_queue. A session report's cue takes its report's venture (src/collect/sessionReports.ts).
  */
-export const CUE_VENTURE = { idea_queue: MYMU, inspiration_card: MYMU } as const satisfies Record<string, Venture>
+export const CUE_VENTURE = { idea_queue: MYMU, inspiration_card: MYMU, week_pick: MYMU } as const satisfies Record<string, Venture>
 
 /** The venture of each Drive folder the engine reads. Both Inspiration folders and Rejections are Make Your Mind Up's. */
 export const FOLDER_VENTURE: Readonly<Record<string, Venture>> = {

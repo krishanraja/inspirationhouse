@@ -12,6 +12,7 @@ import { score } from '../src/score/scoreboard.ts'
 import { linkRequests } from '../src/tag/links.ts'
 import { answeredItemEvidence, tagItems, HEAR_TRIES } from '../src/tag/items.ts'
 import { syncReports } from '../src/collect/sessionReports.ts'
+import { syncCues } from '../src/collect/feedbackCues.ts'
 import { extractSignals, SIGNAL_PROMPT_REV } from '../src/signal/extract.ts'
 import type { DriveFile, Google } from '../src/google.ts'
 
@@ -847,6 +848,49 @@ run('which piece each card became', () => {
       { card_id: named, piece_id: p3, basis: 'krish', state: 'drafting', published: false },
       { card_id: picked, piece_id: p1, basis: 'plan', state: 'published', published: true },
     ])
+  })
+})
+
+run('his presses on the publish board, as cues', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => {
+    ({ client, db } = await freshSchema())
+    // content-engine's board_documents (20261019120743_publish_board_web.sql), cut to the columns the stage reads, and
+    // the idea queue's own time column.
+    await client.query(`
+      create table public.board_documents (
+        week date not null check (extract(isodow from week) = 1), collection text not null, doc_id text not null,
+        body jsonb not null check (jsonb_typeof(body) = 'object'), revision bigint not null default 1,
+        updated_at timestamptz not null default now(), updated_by text not null, primary key (week, collection, doc_id));
+      alter table public.content_ideas add column if not exists updated_at timestamptz;`)
+  })
+  afterAll(async () => { await client?.end() })
+
+  it('files his presses under Make Your Mind Up as his, reads no session\'s, and a rerun is a no-op', async () => {
+    // Synthetic ideas, weeks and words only.
+    const idea = async (text: string) => (await client.query(`insert into content_ideas (idea, state) values ($1, 'seeded') returning id::text`, [text])).rows[0].id as string
+    const [later, picked, offday] = [await idea('synthetic idea for next week'), await idea('synthetic picked idea'), await idea('synthetic meme')]
+    const doc = (collection: string, id: string, body: Record<string, unknown>, by = 'Krish') => client.query(
+      `insert into board_documents (week, collection, doc_id, body, updated_by) values ('2026-11-09', $1, $2, $3::jsonb, $4)`,
+      [collection, id, JSON.stringify(body), by])
+    await doc('queue', later, { use: 'next_week', note: 'synthetic: next week, with the new figures', at: '2026-11-01T09:00:00Z' })
+    await doc('queue', offday, { use: 'offday', day: 'sat', approved: true })
+    await doc('picks', 'mon', { pick: 'mon-1', idea_id: picked, story: 'synthetic story', day: 'mon', note: 'synthetic: open on the price' })
+    // A session's relay is never his tap.
+    await doc('picks', 'wed', { pick: 'wed-1', idea_id: picked, story: 'synthetic story', day: 'wed', note: 'synthetic: not his' }, 'engine_operator')
+    const r = await syncCues(db, null, { write: true, cards: false })
+    expect(r).toMatchObject({ board: 2, offday: 1, boardUnfiled: 0, boardMissing: false, inserted: 2, missing: false })
+    const rows = (await client.query(
+      `select source, source_ref, subject_ref, subject, use, use_origin, venture, meta->>'decided_by' as decided_by, meta->>'target_week' as target_week
+       from feedback_cues order by source`)).rows
+    expect(rows).toEqual([
+      { source: 'idea_queue', source_ref: `${later}:future_piece`, subject_ref: later, subject: 'synthetic idea for next week', use: 'future_piece',
+        use_origin: 'krish', venture: 'publication', decided_by: 'Krish', target_week: '2026-11-16' },
+      { source: 'week_pick', source_ref: '2026-11-09:mon', subject_ref: picked, subject: 'synthetic picked idea', use: 'brief',
+        use_origin: 'krish', venture: 'publication', decided_by: 'Krish', target_week: null },
+    ])
+    expect(await syncCues(db, null, { write: true, cards: false })).toMatchObject({ inserted: 0, updated: 0, withdrawn: 0 })
   })
 })
 
