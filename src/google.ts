@@ -20,6 +20,16 @@ export interface Google {
   // A large file (a master) streamed to a local path, never held in memory, with the sha256 of what arrived. Stops,
   // and throws, the moment it passes the cap.
   downloadTo(fileId: string, path: string, maxBytes: number): Promise<{ bytes: number; sha256: string }>
+  // Who owns a file and who last changed it, by Drive permission id, and who made each of its revisions where Drive
+  // shows them (null when it does not, as for a viewer of a file some accounts cannot list): what the Rejections inbox
+  // reads to tell his typing from a machine's (src/rejection/dropzone.ts). Optional, so a test's stand-in may leave it out.
+  authorship?(fileId: string): Promise<Authorship | null>
+}
+
+export interface Authorship {
+  owners: string[]
+  lastModifier: string | null
+  revisionAuthors: string[] | null
 }
 
 export const FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -187,6 +197,32 @@ export async function connectGoogle(cfg: Config): Promise<Google> {
       if (!res.ok) throw new Error(`google read failed: HTTP ${res.status}`)
       const f = await res.json() as DriveFile & { trashed?: boolean }
       return f.trashed ? null : f
+    },
+    async authorship(fileId) {
+      const id = encodeURIComponent(fileId)
+      const fields = encodeURIComponent('owners(permissionId),lastModifyingUser(permissionId)')
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=${fields}&supportsAllDrives=true`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+      if (res.status === 404 || res.status === 403) return null
+      if (!res.ok) throw new Error(`google read failed: HTTP ${res.status}`)
+      const f = await res.json() as { owners?: Array<{ permissionId?: string }>; lastModifyingUser?: { permissionId?: string } }
+      const owners = (f.owners ?? []).map(o => o.permissionId).filter((p): p is string => Boolean(p))
+      // Revisions: every page, or null when Drive will not list them to this account.
+      let revisionAuthors: string[] | null = []
+      let pageToken: string | undefined
+      do {
+        const rf = encodeURIComponent('nextPageToken,revisions(lastModifyingUser(permissionId))')
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files/${id}/revisions?fields=${rf}&pageSize=200${pageToken ? `&pageToken=${pageToken}` : ''}`, {
+          headers: { authorization: `Bearer ${token}` },
+        })
+        if (r.status === 403 || r.status === 404) { revisionAuthors = null; break }
+        if (!r.ok) throw new Error(`google read failed: HTTP ${r.status}`)
+        const page = await r.json() as { revisions?: Array<{ lastModifyingUser?: { permissionId?: string } }>; nextPageToken?: string }
+        for (const rev of page.revisions ?? []) revisionAuthors.push(rev.lastModifyingUser?.permissionId ?? '')
+        pageToken = page.nextPageToken
+      } while (pageToken)
+      return { owners, lastModifier: f.lastModifyingUser?.permissionId ?? null, revisionAuthors }
     },
     async downloadTo(fileId, path, maxBytes) {
       const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {

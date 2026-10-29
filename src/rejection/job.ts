@@ -7,6 +7,7 @@ import { judgeRun } from '../runs.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { fileCapture, fileReportDislike, markCollected, reportedDislikes, uncollectedInbox, type InboxRow } from './arrivals.ts'
 import { distilFloor, recountStandards } from './distil.ts'
+import { fileDrop, readDropZone, type DropFile } from './dropzone.ts'
 import { readDump, type Dump } from './dump.ts'
 import { fileDump, holdQuote, nearOf, type QuoteRow, type RecordRow } from './file.ts'
 import { attachMedia, insertMedia, keepMedia } from './keep.ts'
@@ -123,11 +124,33 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
       if (read.unassigned) problems.push(`rejections inbox: ${read.unassigned} capture(s) held with no venture`)
     } catch (err) { problem('inbox', err) }
   }
-  const input = records.length + reported.length + captured.length
+  // The drop zone, Rejections/Inbox/ (src/rejection/dropzone.ts): a file is his words only when it is provably his
+  // typing; anything else is an observation, kept as context and never counted.
+  const dropped: RecordRow[] = []
+  const dropFiles = new Map<string, DropFile['file']>()
+  try {
+    const z = await readDropZone(d.google)
+    counts.rejections_drop_files = z.files.length
+    counts.rejections_drop_waiting = z.more
+    counts.rejections_drop_owner_unseen = z.files.length && !z.owner ? 1 : 0
+    let skipped = 0
+    for (const f of z.files) {
+      dropFiles.set(f.path, f.file)
+      counts[`rejections_drop_${f.proof}`] = Number(counts[`rejections_drop_${f.proof}`] ?? 0) + 1
+      const x = fileDrop(f)
+      if (!x) { skipped++; continue }
+      if (x.quote) holdQuote(quotes, x.quote)
+      dropped.push(x.record)
+    }
+    counts.rejections_drop_words = dropped.filter(r => r.attribution === 'krish_words').length
+    counts.rejections_drop_observations = dropped.filter(r => r.attribution === 'observation').length
+    counts.rejections_drop_empty = skipped
+  } catch (err) { problem('drop', err) }
+  const input = records.length + reported.length + captured.length + dropped.length
 
   // 3. Filed: his quotes, then each record, then what he liked nearby.
   let standing = 0
-  if (tables && (quotes.size || reportsRead)) {
+  if (tables && (quotes.size || reportsRead || dropped.length)) {
     try {
       // What a capture filed as his words stays his words, whatever a later read of the same words says.
       for (const q of await capturedWords(d.db, [...quotes.keys()])) holdQuote(quotes, q)
@@ -145,6 +168,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
         ['dump', records, dump ? { source: 'drive_dump', kinds: dump.whole } : null, false],
         ['reports', reported, reportsRead ? { source: 'session_report', kinds: ['rejected'] } : null, reportsRead],
         ['inbox', captured, null, false],
+        ['drop', dropped, null, false],
       ]
       if (dump) counts.rejections_read_whole = dump.whole.length
       for (const [name, rows, whole, emptyIsWhole] of sources) {
@@ -172,9 +196,9 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
 
   // 4. What is kept of each asset. A capture's master is reached by its Drive id, so it is cut even on a day the folder
   // could not be read.
-  if (records.length || captured.length) {
+  if (records.length || captured.length || dropped.length) {
     try {
-      const m = await keepMedia(d.db, d.google, [...records, ...captured], dump?.files ?? new Map(), write)
+      const m = await keepMedia(d.db, d.google, [...records, ...captured, ...dropped], new Map([...dropFiles, ...(dump?.files ?? new Map())]), write)
       for (const [k, v] of Object.entries(m)) if (typeof v === 'number') counts[`rejections_media_${snake(k)}`] = v
       if (m.failed) problems.push(`rejections media: ${m.failed} failed (${Object.keys(m.failures).join(', ')})`)
       if (m.rootsUnseen) problems.push(`rejections media: ${m.unresolvedPaths} master path(s) not found, and ${m.rootsUnseen} of the 3 Posts and Archive folders are not shared with the engine`)

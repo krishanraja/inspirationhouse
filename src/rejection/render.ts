@@ -2,6 +2,7 @@ import type { Db } from '../db.ts'
 import { contentHash, stableJson } from '../hash.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { FORMATS, THEMES, type FormatSlug } from './vocab.ts'
+import { NEVERS, SORT_REV, sortStandard } from './layers.ts'
 
 // The floor as one file, config/rejection-floor.json in content-engine, where every production session reads it
 // (scripts/floor.py prints it by format). Krish, 2026-10-28: "The text records alone are under 1 MB, small enough to
@@ -185,9 +186,23 @@ export function renderFloor(input: RenderInput): string {
   const ordered = input.standards.map(s => ({ s, n: productionsOf(s) }))
     .sort((a, b) => b.n - a.n || b.s.support_n - a.s.support_n || a.s.fingerprint.localeCompare(b.s.fingerprint))
 
+  // Each standard in his three layers (src/rejection/layers.ts): the floor (one of his eight nevers), an aim, or a dated
+  // example. Only a floor standard he approved or reworded may refuse work.
   const standards: Record<string, unknown> = {}
+  const layerOf = new Map<string, { layer: string; never: string | null; blocks: boolean }>()
   for (const { s, n } of ordered) {
-    standards[`s${s.fingerprint.slice(0, 10)}`] = {
+    const key = `s${s.fingerprint.slice(0, 10)}`
+    const sorted = sortStandard(s)
+    const blocks = sorted.layer === 'floor' && s.standing !== 'draft'
+    layerOf.set(key, { layer: sorted.layer, never: sorted.never, blocks })
+    const recs = recordsOf(s)
+    const lastDay = recs.map(ref => recordByRef.get(ref)?.rejected_at ?? '').sort().pop() ?? ''
+    standards[key] = {
+      // Which of his three layers it sits in; layer, below, is the craft layer it is about.
+      taste_layer: sorted.layer,
+      ...(sorted.never ? { never: sorted.never } : {}),
+      blocks,
+      ...(sorted.layer === 'example' && lastDay ? { on: day(lastDay) } : {}),
       weight: n >= FLOOR_PATTERN_MIN ? 'pattern' : 'one_off',
       productions: n,
       standing: s.standing,
@@ -202,9 +217,19 @@ export function renderFloor(input: RenderInput): string {
       support: s.support_n,
       ...(s.krish ? { in_his_words: scrub(s.krish) } : {}),
       his_words: words(s.quote_ids).filter(w => w.is === 'his words').slice(0, 6),
-      records: recordsOf(s),
+      records: recs,
       boundary: words(s.boundary_quote_ids).map(w => ({ said: w.said, on: w.on })),
     }
+  }
+  const keysIn = (layer: string) => [...layerOf].filter(([, l]) => l.layer === layer).map(([k]) => k)
+  const floor = {
+    sort_rev: SORT_REV,
+    sorted_by: 'the engine, by fixed rules on each standard\'s theme, layer and words: a proposal he confirms in one sitting with this file\'s pull request',
+    nevers: NEVERS.map(nv => ({
+      id: nv.id, listed: nv.listed,
+      standards: [...layerOf].filter(([, l]) => l.never === nv.id).map(([k]) => k),
+      blocking: [...layerOf].filter(([, l]) => l.never === nv.id && l.blocks).map(([k]) => k),
+    })),
   }
 
   const byFormat: Record<string, unknown> = {}
@@ -218,6 +243,10 @@ export function renderFloor(input: RenderInput): string {
       maker: FORMATS[f],
       approved: own.filter(([, s]) => (s as { standing: string }).standing !== 'draft').map(([k]) => k),
       draft: own.filter(([, s]) => (s as { standing: string }).standing === 'draft').map(([k]) => k),
+      blocking: own.filter(([k]) => layerOf.get(k)?.blocks).map(([k]) => k),
+      floor: own.filter(([k]) => layerOf.get(k)?.layer === 'floor').map(([k]) => k),
+      aims: own.filter(([k]) => layerOf.get(k)?.layer === 'aim').map(([k]) => k),
+      examples: own.filter(([k]) => layerOf.get(k)?.layer === 'example').map(([k]) => k),
       rejected: recs,
     }
   }
@@ -225,6 +254,7 @@ export function renderFloor(input: RenderInput): string {
   const latest = [...input.records.map(r => r.rejected_at), ...input.standards.map(s => s.decided_at ?? '')].sort().pop() ?? ''
   const body = {
     themes: Object.fromEntries(Object.entries(THEMES).map(([k, t]) => [k, t.label])),
+    floor, aims: keysIn('aim'), examples: keysIn('example'),
     formats: byFormat, standards, records,
   }
   const doc = {
@@ -234,6 +264,7 @@ export function renderFloor(input: RenderInput): string {
       'Read it for the format you are making (python3 scripts/floor.py --format <format>) before the brief, and check the finished file against it before delivery.',
       "his_words are his, verbatim, except that a link, path, id or email inside them is shown as [link], [path], [id] or [email]; the floor database keeps them whole. what, piece and wanted_instead are a session's description, never his words.",
       'A standard is approved or reworded by him, or a draft the engine read into his rejections. Reviewers and pre-delivery checks may test work against approved and reworded standards and his words, for craft and process only, never subject (Ruling, Krish, 2026-10-28).',
+      "Every standard sits in one of his three layers, its taste_layer (Krish, 2026-10-29: \"I would much rather the engine know what kind of thing doesn't fly with me, rather than implement incredibly specific rules everywhere\"): floor, one of the eight nevers he confirmed that day, listed under floor.nevers by the ids of content-engine's config/reference-cuts.json; aim, what great looks like, which guides and never blocks; or example, a dated example of the kind of thing that does not fly, never a new rule. Only a standard with blocks true may refuse work: a floor standard he approved or reworded. The engine sorted them (floor.sorted_by); he confirms the sort.",
       'The engine wrote every check_before_delivery; check_by says whether he approved it with the statement, or it is still a draft.',
       `weight is pattern when he raised it about ${FLOOR_PATTERN_MIN} or more productions (productions says how many), one_off when about one. A pattern is more critical to follow than a one-off, and comes first (Krish, 2026-10-28).`,
       'Media are kept in the floor database (content-engine taste_rejection_media) by sha256: a still, a six-frame strip or a 4 s clip, never a master.',
@@ -244,6 +275,10 @@ export function renderFloor(input: RenderInput): string {
       standards: input.standards.length,
       approved: input.standards.filter(s => s.standing !== 'draft').length,
       patterns: ordered.filter(o => o.n >= FLOOR_PATTERN_MIN).length,
+      floor: keysIn('floor').length,
+      aims: keysIn('aim').length,
+      examples: keysIn('example').length,
+      blocking: [...layerOf.values()].filter(l => l.blocks).length,
       records: input.records.filter(r => r.kind !== 'liked').length,
       liked_nearby: input.records.filter(r => r.kind === 'liked').length,
     },
