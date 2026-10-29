@@ -12,7 +12,8 @@ import { collectInstagram } from './collect/instagram.ts'
 import { syncCues } from './collect/feedbackCues.ts'
 import { syncReports } from './collect/sessionReports.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
-import { anthropicLlm, type Llm } from './llm.ts'
+import { anthropicLlm, staged, type Llm } from './llm.ts'
+import { Meter } from './meter.ts'
 import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
 import { linkRequests } from './tag/links.ts'
 import type { DriveFile } from './google.ts'
@@ -153,7 +154,7 @@ async function link(ctx: Ctx, files: Map<string, DriveFile>): Promise<number> {
 async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linked: boolean): Promise<TagResult | null> {
   if (!ctx.google || !ctx.llm) return null
   // The class only: an error's message can quote a row.
-  const t = await tagItems(ctx.db, ctx.google, ctx.llm, files, limit, !ctx.dry, linked ? { linked, budgetMs: CARDS_BUDGET_MS } : {}).catch(err => {
+  const t = await tagItems(ctx.db, ctx.google, staged(ctx.llm, 'tag'), files, limit, !ctx.dry, linked ? { linked, budgetMs: CARDS_BUDGET_MS } : {}).catch(err => {
     ctx.problems.push(`tagging stopped: ${(err as Error).name}`)
     log({ stage: 'tag', status: 'failed', error_class: (err as Error).name })
     return null
@@ -188,7 +189,7 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
  * is how the next run knows when the board was last read.
  */
 async function cues(ctx: Ctx): Promise<void> {
-  const r = await syncCues(ctx.db, ctx.llm, { write: !ctx.dry, cards: ctx.ledger }).catch(err => {
+  const r = await syncCues(ctx.db, staged(ctx.llm, 'cues'), { write: !ctx.dry, cards: ctx.ledger }).catch(err => {
     ctx.problems.push(`cues: ${(err as Error).name}`)
     log({ stage: 'cues', status: 'failed', error_class: (err as Error).name })
     return null
@@ -258,14 +259,14 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
     }
   }
   if (ctx.llm) {
-    const ex = await explainPending(ctx.db, ctx.llm, ctx.runId, { write: !ctx.dry })
+    const ex = await explainPending(ctx.db, staged(ctx.llm, 'explain'), ctx.runId, { write: !ctx.dry })
     ctx.counts.explain_items = ex.items
     ctx.counts.whys = ex.whys
     ctx.counts.explain_repaired = ex.repaired
     if (ex.failed) ctx.problems.push(`explain failed on ${ex.failed} item(s)`)
     const judged = judgeRun(ex.items, ex.whys)
     if (judged.status === 'failed') ctx.problems.push(judged.reason!)
-    await signals(ctx, ctx.llm)
+    await signals(ctx, staged(ctx.llm, 'signals'))
   }
   const s = await syncDecisions(ctx.db, !ctx.dry)
   ctx.counts.retired = s.retired
@@ -277,7 +278,7 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
   const s = await syncDecisions(ctx.db, !ctx.dry)
   ctx.counts.retired = s.retired
   if (ctx.llm) {
-    const d = await distil(ctx.db, ctx.llm, ctx.runId, !ctx.dry)
+    const d = await distil(ctx.db, staged(ctx.llm, 'distil'), ctx.runId, !ctx.dry)
     Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written, distil_repaired: d.repaired,
       distil_ventures: d.ventures, distil_ventures_skipped: d.skipped })
     if (d.failed) ctx.problems.push('distil: the model answer was refused, cut off or unparsed')
@@ -349,7 +350,7 @@ async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ 
 // report and the capture inbox, filed with a frame, strip or clip kept and never a master; the standards drafted and,
 // with --propose, put to him; the floor rendered and proposed to content-engine by pull request.
 async function rejections(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, now: Date, propose: boolean): Promise<{ status: RunStatus; reason: string | null }> {
-  const r = await runRejections({ db: ctx.db, google: ctx.google, llm: ctx.llm, cfg, runId: ctx.runId, write: !ctx.dry, propose, now })
+  const r = await runRejections({ db: ctx.db, google: ctx.google, llm: staged(ctx.llm, 'rejections'), cfg, runId: ctx.runId, write: !ctx.dry, propose, now })
   Object.assign(ctx.counts, r.counts)
   ctx.problems.push(...r.problems)
   if (ctx.dry) Object.assign(ctx.preview, r.preview)
@@ -380,6 +381,8 @@ async function main(): Promise<void> {
   const started = new Date()
   const raw = await connect(cfg)
   const db = dry ? readOnly(raw) : raw
+  // Every model call of the run, posted to Control Center's usage meter at the end (src/meter.ts).
+  const meter = new Meter()
   const ctx: Ctx = {
     db, dry, runId: randomUUID(), google: null, llm: null, counts: { dry_run: dry }, ledger: false, problems: [], preview: {},
   }
@@ -395,7 +398,7 @@ async function main(): Promise<void> {
   if (job !== 'harness') {
     if (googleConfigured(cfg)) ctx.google = await connectGoogle(cfg)
     else if (!dry) ctx.problems.push('Google service account not configured: Drive and Inspiration cards skipped')
-    if (cfg.ANTHROPIC_API_KEY && !noModel) ctx.llm = anthropicLlm(cfg)
+    if (cfg.ANTHROPIC_API_KEY && !noModel) ctx.llm = anthropicLlm(cfg, meter, job)
     else if (!dry) ctx.problems.push(noModel ? 'run with --no-model: tagging and explaining skipped' : 'ANTHROPIC_API_KEY not configured: tagging and explaining skipped')
   }
 
@@ -407,9 +410,26 @@ async function main(): Promise<void> {
     outcome = { status: 'failed', reason: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 600) }
   }
 
+  // What the run's model calls cost, on the meter that holds the chain to $15 a week. A dry run's calls cost the same,
+  // so they are counted here too, but only a real run writes. A meter that cannot be written fails the run: a cost
+  // that never reaches the figure is the gap this closes.
+  const m = meter.totals()
+  Object.assign(ctx.counts, { meter_calls: m.calls, meter_failed: m.failed, meter_usd: Math.round(m.usd * 1e4) / 1e4,
+    meter_usd_uncached: Math.round(m.usdUncached * 1e4) / 1e4, meter_cache_read_tokens: m.cacheRead, meter_cache_write_tokens: m.cacheWrite })
+  if (!dry) {
+    try {
+      ctx.counts.meter_rows = await meter.flush(raw, started.toISOString().slice(0, 10))
+    } catch (err) {
+      ctx.counts.meter_rows = 0
+      const reason = `meter: ${(err as Error).name}`
+      outcome = { status: 'failed', reason: [outcome.reason, reason].filter(Boolean).join('; ').slice(0, 600) }
+      ctx.problems.push(reason)
+    }
+  }
+
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model|meter)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })

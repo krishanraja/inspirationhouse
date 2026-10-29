@@ -4,3 +4,6 @@ node_modules/
 # Local previews can contain Krish's words. They never leave this machine.
 preview/
 *.log
+# The chat backstop keeps his flagged lines here (scripts/taste_backstop.py). They never leave this machine in git.
+.scratch/
+__pycache__/

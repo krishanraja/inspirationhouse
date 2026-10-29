@@ -49,6 +49,7 @@ It also reads what **content-watcher** leaves behind. When Krish pastes a link i
 - **Taste shapes form, never subject** (anti-echo). Readers only see `taste_profile_form`.
 - **Each venture's taste is its own.** A row's venture is set in code (`src/venture.ts`) and never changes; every compiling step reads one venture, and every reader filters by its own. The floor is Make Your Mind Up's only for now: every venture's rejections are filed under their venture, and only Make Your Mind Up's are distilled, proposed and rendered, since only it has a floor reader. Each run counts `venture_mismatch`, the stored rows whose venture differs from what the code gives them now, and fails on one.
 - **A model answer is read here, never by the SDK.** The API never receives a schema's length or count limits, so an answer that runs over one is repaired and counted (`src/repair.ts`), never thrown away; an answer that is the wrong shape still fails that one item.
+- **Every model call is metered.** Each call's tokens are recorded under the stage that made it and posted at the end of the run to Control Center's usage meter (`meter_daily`, through `meter_add`), one row a day per stage and model, keyed `inspirationhouse-<stage>` (`src/meter.ts`), so the Make Your Mind Up chain's $15 a week counts this engine too (Krish, 2026-10-29: "happy with $15 a week"). A refused or cut-off answer was still billed and is counted; the run's counts carry `meter_calls` and `meter_usd`, and a meter that cannot be written fails the run. A dry run counts but never writes.
 - **Numbers are computed, never emitted by a model.** Support, confidence and every score come from SQL.
 - **Silence is not feedback.** An unanswered proposal stays proposed, and a quiet week scores as no reading, never zero.
 - **This repository is public.** Nothing Krish said is committed or logged; logs carry counts only (`src/log.ts`). Fixtures are synthetic.
@@ -84,6 +85,10 @@ A daily dry run with the model on shows the signals stage's work in its preview:
 ### The cards job
 
 `pnpm -s engine cards [--dry-run] [--no-model]` (workflow `taste-cards.yml`, run by hand or by Control Center's knock, which starts it when a pasted link has been filed or read and has no card yet) is the quick path for a pasted link. It makes the missing cards, links the requests, and tags at most 10 linked cards, from their reading only, in a job of at most 15 minutes with no ffmpeg and no Python. Its 10 places go only to linked cards whose reading has arrived, so newer cards still waiting never crowd out an older one that is ready. A linked card whose reading has not arrived yet is left for the daily job and counted as `waiting_for_reading`. The daily job does the same linking, so a link never depends on the knock.
+
+### The chat backstop
+
+A Claude Code `SessionEnd` hook (`.claude/settings.json`, `scripts/taste_backstop.py`, copied from growth-makeyourmindup) reads a session's transcript when it ends and keeps only Krish's own typed lines that a local filter flags as a correction or a rejection, scrubbed with secret-guard patterns, in the ignored `.scratch/taste/backstop.jsonl`, once each. It sends nothing and never keeps a whole chat: the runner posts them on to `taste_reports` (Krish, 2026-10-29: "Local file, runner posts"). This repository serves several ventures, so its lines carry no venture and are held until he names one (AGENTS.md rule 10). `python3 scripts/taste_backstop.py --dry-run <transcript>` prints what it would keep.
 
 Runs are recorded in `content_engine_runs` as `taste_daily`, `taste_weekly`, `taste_harness`, `taste_cards` and `taste_rejections`, where Control Center's done-check reads them.
 
