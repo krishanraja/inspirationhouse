@@ -158,10 +158,33 @@ which piece a card became. Each proved by a test that fails without the change a
   stored for a future trend OR queue it for next week OR reject it." The daily `cues` stage reads the board documents
   he wrote himself (content-engine `board_documents`, `updated_by` 'Krish'). A queue press that names a use is his tap,
   so its cue is `use_origin` 'krish' with `decided_by` 'Krish' in meta, never a rule or a guess; `next_week` is filed as
-  `future_piece` with `meta.target_week`, the week it is queued for. A press joins its idea's queue answers, so the
-  answer in the queue that relays the same words is never read again by the verdict rules: one press, one cue. A note
-  on a pick is a `week_pick` cue (the source the cues migration reserved), his brief for the piece he picked. An
-  `offday` press is Growth's and only counted. Proved by `test/feedback-cues.test.ts` ("his presses on the publish
-  board", "the stage with the board") and, on a real database, `test/pipeline.int.test.ts` ("his presses on the
-  publish board, as cues"). Still to land in content-engine: the Sunday gather
-  (`apps/control-plane/api/_feedbackCues.ts`) reads `meta.target_week` and lists the cues queued for that week first.
+  `future_piece`. A press joins its idea's queue answers, so the answer in the queue that relays the same words, written
+  after the press, is never read again by the verdict rules: one press, one cue. A note on a pick is a `week_pick` cue
+  (the source the cues migration reserved); the tap names a day, not a use, so reading the note as his brief is a rule
+  (`use_origin` 'rule', `decided_by` 'Krish'). Every pick of his also joins the idea's queue answers as a yes, so it
+  retires a `not_for_us` cue before it. An `offday` press is Growth's and only counted. A press that cannot be filed (no
+  idea id, or words longer than a cue holds) fails the run while its board is this week's or next week's, or once when
+  it is saved since the last run that read the board; after that it is counted (`cues_board_unfiled`). Proved by
+  `test/feedback-cues.test.ts` ("his presses on the publish board", "the stage with the board") and, on a real
+  database, `test/pipeline.int.test.ts` ("his presses on the publish board, as cues").
+
+  **Which week a "Next week" idea is for has one home:** `target_week` on the idea's queue mark (content-engine
+  `apps/control-plane/api/_ideaQueue.ts`, `content_ideas.meta.queue`), as plan W1 sets it. The Sunday gather orders by
+  that. The cue's `meta.target_week` is context only: the Monday the press that carried his words named, kept only when
+  it is a Monday and never guessed, and a later re-queue with no words does not change it. The gather must never order
+  by it.
+
+  Still to land in content-engine, built against what this reader expects:
+  - The board package writes his presses in this shape. `queue/<idea id>` (the document id is the idea's `content_ideas`
+    id, or the body carries it as `idea_id`): `use`, one of `wider_piece_context`, `track_over_time`, `next_week`,
+    `not_for_us`, `offday`; optional `note` and `reason`, his words, whole (together at most 4000 characters, which a
+    cue holds; a longer one is never cut, it is counted unfiled); `target_week`, a Monday, `next_week` only; `day`
+    (`tue`, `thu`, `sat` or `sun`) and `approved` (boolean), `offday` only; `at`, when he pressed. `picks/<day>`: the
+    pick as today, plus `idea_id` (the idea's `content_ideas` id) and an optional `note`. A queue document of his with a
+    note or a reason but no `use` this reader knows is counted (`cues_board_unread`) and never read, so a renamed field
+    shows in the run's counts.
+  - Both are his-only writes: `hisOnlyRefusal` (`apps/control-plane/api/board/_contracts.ts`) refuses a queue document
+    with a `use` and a pick with a `note` from any writer but Krish. Today it covers neither, so an `engine_operator`
+    write over his document would set `updated_by` to the operator and withdraw the cue his press made.
+  - The board's Next week press writes `target_week` onto the queue mark too, and the Sunday gather
+    (`apps/control-plane/api/_feedbackCues.ts`) lists the ideas whose queue mark is for that week first.
