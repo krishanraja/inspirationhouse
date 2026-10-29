@@ -16,6 +16,7 @@ import { anthropicLlm, staged, type Llm } from './llm.ts'
 import { Meter } from './meter.ts'
 import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
 import { linkRequests } from './tag/links.ts'
+import { machineStillShas, understandCards } from './tag/understand.ts'
 import type { DriveFile } from './google.ts'
 import { explainPending } from './explain/whys.ts'
 import { extractSignals, patternsOf } from './signal/extract.ts'
@@ -41,6 +42,8 @@ interface Ctx {
   ledger: boolean
   problems: string[]
   preview: Record<string, unknown>
+  // Every machine still's sha256 (src/tag/understand.ts): bytes that are never his, so never a card or his action.
+  machine: Set<string>
 }
 
 // What a real run would write, and how many rows already stored under the same identity carry another venture than
@@ -71,7 +74,7 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
   if (ctx.ledger) groups.push(['inspiration_page', () => answeredItemEvidence(ctx.db)])
   if (ctx.google) {
     const g = ctx.google
-    groups.push(['drive', () => collectDrive(g)])
+    groups.push(['drive', () => collectDrive(g, ctx.machine)])
     groups.push(['what_i_like_sheet', async () => sheetEvidence(await g.readSheet(DRIVE.whatILikeSheet, 'A1:J500'), new Date().toISOString())])
     groups.push(['instagram', () => collectInstagram(g, new Date().toISOString())])
   }
@@ -181,6 +184,18 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
   return t
 }
 
+/** The understanding pass (src/tag/understand.ts): measured production tags and machine stills on each card. No model. */
+async function understand(ctx: Ctx, files: Map<string, DriveFile>): Promise<void> {
+  const u = await understandCards(ctx.db, files, !ctx.dry).catch(err => {
+    ctx.problems.push(`understand: ${(err as Error).name}`)
+    log({ stage: 'understand', status: 'failed', error_class: (err as Error).name })
+    return null
+  })
+  if (!u) return
+  Object.assign(ctx.counts, { items_understood_read: u.read, items_understood: u.understood, items_machine_stills: u.stills })
+  log({ stage: 'understand', dry_run: ctx.dry, items: u.read, written: u.understood })
+}
+
 /**
  * His feedback on ideas and cards, and his presses on the publish board, as cues the Sunday session draws on
  * (src/collect/feedbackCues.ts). The cards are read only when the ledger's tables are there. Until content-engine's
@@ -248,14 +263,17 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
   await cues(ctx)
   if (!ctx.ledger) return finish(ctx, Number(ctx.counts.seen ?? 0))
   if (ctx.google) {
-    const items = await syncItems(ctx.db, ctx.google, !ctx.dry).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
+    const items = await syncItems(ctx.db, ctx.google, !ctx.dry, ctx.machine).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
     if (items) {
       ctx.counts.items_seen = items.seen
       ctx.counts.items_new = items.written
+      ctx.counts.items_machine_skipped = items.machine
+      ctx.counts.items_duplicates = items.duplicates
       // The same linking the cards job does, so no pasted link depends on Control Center's knock.
       await link(ctx, items.files)
       // His evidence is read either way, so the run still explains when tagging stops.
       await tag(ctx, items.files, 60, false)
+      await understand(ctx, items.files)
     }
   }
   if (ctx.llm) {
@@ -327,12 +345,13 @@ const CARDS_BUDGET_MS = 8 * 60_000
 async function cards(ctx: Ctx): Promise<{ status: RunStatus; reason: string | null }> {
   if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
   if (!ctx.google) return finish(ctx, 0)
-  const items = await syncItems(ctx.db, ctx.google, !ctx.dry).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
+  const items = await syncItems(ctx.db, ctx.google, !ctx.dry, ctx.machine).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
   if (!items) return finish(ctx, 0)
   ctx.counts.items_seen = items.seen
   ctx.counts.items_new = items.written
   const linked = await link(ctx, items.files)
   const t = await tag(ctx, items.files, CARDS_LIMIT, true)
+  await understand(ctx, items.files)
   return finish(ctx, linked + (t ? t.tagged + t.failed + t.rehead + t.waitingForReading : 0))
 }
 
@@ -384,12 +403,18 @@ async function main(): Promise<void> {
   // Every model call of the run, posted to Control Center's usage meter at the end (src/meter.ts).
   const meter = new Meter()
   const ctx: Ctx = {
-    db, dry, runId: randomUUID(), google: null, llm: null, counts: { dry_run: dry }, ledger: false, problems: [], preview: {},
+    db, dry, runId: randomUUID(), google: null, llm: null, counts: { dry_run: dry }, ledger: false, problems: [], preview: {}, machine: new Set(),
   }
   const [reg] = await db.query<{ ok: boolean }>(
     `select to_regclass('public.taste_evidence') is not null and to_regclass('public.inspiration_items') is not null as ok`,
   )
   ctx.ledger = Boolean(reg?.ok)
+  // Machine stills are never his, wherever a copy turns up. A read that fails is a problem, and the run goes on: the
+  // stills sit outside his tree by design, so this is the second guard, not the first.
+  if (job === 'daily' || job === 'cards') {
+    try { ctx.machine = await machineStillShas(db) } catch (err) { ctx.problems.push(`items: machine stills unread (${(err as Error).name})`) }
+    ctx.counts.machine_stills_known = ctx.machine.size
+  }
   // The rejections job has its own tables (src/rejection/store.ts) and needs the ledger only for session reports.
   if (!ctx.ledger && !dry && job !== 'rejections') ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration')
 
@@ -429,7 +454,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model|meter)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|understand|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model|meter)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
