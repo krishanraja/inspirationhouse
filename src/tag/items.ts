@@ -5,6 +5,7 @@ import type { Db } from '../db.ts'
 import type { Evidence } from '../evidence.ts'
 import type { DriveFile, Google } from '../google.ts'
 import type { Llm, Structured } from '../llm.ts'
+import { inspirationTree } from '../collect/drive.ts'
 import { FORMATS, PLATFORMS, filenameHints, mediaOf, type Hints } from './hints.ts'
 import { WATCH_FRAMES, watchVideo, type Watched } from './watch.ts'
 import { DOC_KINDS, KIND_MEANS, VIDEO_REASONS, ruleKind, type Kind } from './kinds.ts'
@@ -66,20 +67,20 @@ const isFolder = (f: DriveFile) => f.mimeType === 'application/vnd.google-apps.f
 
 /** Make sure every file in both folders has a card. New cards start untagged. */
 // A dry run counts the cards it would add and writes nothing.
-export async function syncItems(db: Db, google: Google, write = true): Promise<{ seen: number; written: number; files: Map<string, DriveFile> }> {
-  const [cold, video] = await Promise.all([google.listFolder(DRIVE.coldIdeas), google.listFolder(DRIVE.videoInspiration)])
-  const rows = [
-    ...cold.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => ({ f, folder: 'cold_ideas', lane: 'strategy' })),
-    ...video.filter(f => !isFolder(f) && f.id !== DRIVE.whatILikeSheet).map(f => ({ f, folder: 'video_inspiration', lane: 'production' })),
-  ]
+// His whole Inspiration tree (inspirationTree, src/collect/drive.ts), so a file he filed in a subfolder is a card too, a
+// machine still never is, and a second copy of the same bytes is not a second card.
+export async function syncItems(db: Db, google: Google, write = true, machine: ReadonlySet<string> = new Set()): Promise<{ seen: number; written: number; files: Map<string, DriveFile>; machine: number; duplicates: number }> {
+  const tree = await inspirationTree(google, machine)
+  const rows = tree.files
   const files = new Map(rows.map(r => [r.f.id, r.f]))
-  if (!rows.length) return { seen: 0, written: 0, files }
+  const skipped = { machine: tree.machine, duplicates: tree.duplicates }
+  if (!rows.length) return { seen: 0, written: 0, files, ...skipped }
   if (!write) {
     const [known] = await db.query<{ n: number }>(
       `select count(*)::int as n from public.inspiration_items where drive_file_id = any(select jsonb_array_elements_text($1::jsonb))`,
       [JSON.stringify(rows.map(r => r.f.id))],
     )
-    return { seen: rows.length, written: rows.length - Number(known?.n ?? 0), files }
+    return { seen: rows.length, written: rows.length - Number(known?.n ?? 0), files, ...skipped }
   }
   const res = await db.query<{ n: number }>(
     `with ins as (
@@ -96,7 +97,7 @@ export async function syncItems(db: Db, google: Google, write = true): Promise<{
     })))],
     { write: true },
   )
-  return { seen: rows.length, written: Number(res[0]?.n ?? 0), files }
+  return { seen: rows.length, written: Number(res[0]?.n ?? 0), files, ...skipped }
 }
 
 export function tagSystemPrompt(profile: string[], recentAnswers: string[]): string {
