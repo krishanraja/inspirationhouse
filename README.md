@@ -92,7 +92,7 @@ A daily dry run with the model on shows the signals stage's work in its preview:
 
 ### The chat backstop
 
-A Claude Code `SessionEnd` hook (`.claude/settings.json`, `scripts/taste_backstop.py`, copied from growth-makeyourmindup) reads a session's transcript when it ends and keeps only Krish's own typed lines that a local filter flags as a correction or a rejection, scrubbed with secret-guard patterns, in the ignored `.scratch/taste/backstop.jsonl`, once each. It sends nothing and never keeps a whole chat: the runner posts them on to `taste_reports` (Krish, 2026-10-29: "Local file, runner posts"). This repository serves several ventures, so its lines carry no venture and are held until he names one (AGENTS.md rule 10). `python3 scripts/taste_backstop.py --dry-run <transcript>` prints what it would keep.
+A Claude Code `SessionEnd` hook (`.claude/settings.json`, `scripts/taste_backstop.py`, copied from growth-makeyourmindup) reads a session's transcript when it ends and keeps only Krish's own typed lines that a local filter flags as a correction or a rejection, scrubbed with secret-guard patterns, in the ignored `.scratch/taste/backstop.jsonl`, once each. It sends nothing and never keeps a whole chat: the runner posts them on to `taste_reports` (Krish, 2026-10-29: "Local file, runner posts"). Its lines file under `publication`, Make Your Mind Up's slug (Ruling, Krish, 2026-10-29). `python3 scripts/taste_backstop.py --dry-run <transcript>` prints what it would keep.
 
 Runs are recorded in `content_engine_runs` as `taste_daily`, `taste_weekly`, `taste_harness`, `taste_cards` and `taste_rejections`, where Control Center's done-check reads them.
 
