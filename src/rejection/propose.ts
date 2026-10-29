@@ -2,6 +2,7 @@ import type { Db } from '../db.ts'
 import { mondayOf } from '../publish/propose.ts'
 import { FLOOR_VENTURE } from '../venture.ts'
 import { FLOOR_PATTERN_MIN } from './render.ts'
+import { NEVERS, SORT_REV, sortStandard } from './layers.ts'
 
 // Putting the floor's standards to Krish, through the learning proposals door that already exists
 // (mindmake_studio_learning_proposals, class taste), where Control Center's waiting list shows every proposed row. He
@@ -21,11 +22,11 @@ import { FLOOR_PATTERN_MIN } from './render.ts'
 
 export interface FloorEligible {
   id: string; fingerprint: string; statement: string; how_to_check: string; formats: string[]; theme: string
-  kind: string; krish: string | null; quote_ids: string[]; support_n: number; days: number; productions: number
+  layer: string | null; kind: string; krish: string | null; quote_ids: string[]; support_n: number; days: number; productions: number
 }
 
 export const FLOOR_ELIGIBLE_SQL = `
-  select s.id::text, s.fingerprint, s.statement, s.how_to_check, s.formats, s.theme, s.kind,
+  select s.id::text, s.fingerprint, s.statement, s.how_to_check, s.formats, s.theme, s.layer, s.kind,
          -- His quote goes to him only while a standing record of the standard's venture cites it and it is still his
          -- words, as the taste_floor view.
          case when exists (select 1 from public.taste_rejections r
@@ -66,10 +67,15 @@ export async function proposeFloor(db: Db, now: Date, write: boolean, patternMin
   if (!write) return { ...result, proposed: eligible.length }
   for (const s of eligible) {
     const makers = s.formats.join(', ')
+    // Each goes to him with the layer the engine sorted it into (src/rejection/layers.ts), so one sitting confirms the
+    // sort and the words together: a never he confirmed, which may block once approved; an aim; or an example.
+    const sorted = sortStandard({ theme: s.theme, layer: s.layer, kind: s.kind, statement: s.statement, how_to_check: s.how_to_check })
+    const never = sorted.never ? NEVERS.find(n => n.id === sorted.never) : null
+    const layerLine = never ? `Floor, never "${never.listed}" (may block once you approve)` : sorted.layer === 'aim' ? 'Aim (guides, never blocks)' : 'Example of what does not fly (never a rule)'
     // The check goes to him with the statement, so a check that binds once he approves is one he saw. It comes after his
     // words, so that if the whole runs past the field, the engine's check is what is cut, never his words (AGENTS.md
     // rule 9); the whole check is kept in proposed_change.
-    const assertion = `Floor for ${makers} (raised about ${s.productions} production${s.productions === 1 ? '' : 's'}): ${s.statement}${s.krish ? ` (In his words: "${s.krish}")` : ''} Check before delivery: ${s.how_to_check}`
+    const assertion = `${layerLine}. For ${makers} (raised about ${s.productions} production${s.productions === 1 ? '' : 's'}): ${s.statement}${s.krish ? ` (In his words: "${s.krish}")` : ''} Check before delivery: ${s.how_to_check}`
     await db.query(
       `with p as (
          insert into public.mindmake_studio_learning_proposals
@@ -83,7 +89,8 @@ export async function proposeFloor(db: Db, now: Date, write: boolean, patternMin
         batch,
         assertion.slice(0, 1600),
         JSON.stringify({ key: `floor:${s.formats[0] ?? 'all'}`, level: 'global', source: 'rejections', standard_id: s.id, formats: s.formats,
-          theme: s.theme, kind: s.kind, venture: FLOOR_VENTURE, weight: 'pattern', productions: s.productions }),
+          theme: s.theme, kind: s.kind, venture: FLOOR_VENTURE, weight: 'pattern', productions: s.productions,
+          taste_layer: sorted.layer, never: sorted.never, sort_rev: SORT_REV }),
         s.quote_ids.slice(0, 100),
         Math.max(1, s.days),
         JSON.stringify([{ how_to_check: s.how_to_check }]),
