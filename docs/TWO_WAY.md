@@ -174,7 +174,12 @@ which piece a card became. Each proved by a test that fails without the change a
   it is a Monday and never guessed, and a later re-queue with no words does not change it. The gather must never order
   by it.
 
-  Still to land in content-engine, built against what this reader expects:
+  Read again on 2026-10-29 against content-engine's session branch (`claude/fervent-brown-d8e55b`, going to main by
+  pull request): the board's presses write `idea_id`, `note`, `reason` and, on Next week, `target_week` (a Monday,
+  checked in `validBody`), and `hisOnlyRefusal` refuses a queue document with a `use` (`press_is_his`) and a pick with a
+  `note` (`pick_note_is_his`) from any writer but Krish, so the first two items below are built there. The third is not
+  found in its code: no writer sets `target_week` on the queue mark, and the Sunday room (plan-week) reads the Next week
+  presses from last week's board. The list as it was written, against what this reader expects:
   - The board package writes his presses in this shape. `queue/<idea id>` (the document id is the idea's `content_ideas`
     id, or the body carries it as `idea_id`): `use`, one of `wider_piece_context`, `track_over_time`, `next_week`,
     `not_for_us`, `offday`; optional `note` and `reason`, his words, whole (together at most 4000 characters, which a
