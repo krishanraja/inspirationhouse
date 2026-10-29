@@ -65,3 +65,19 @@ describe('anthropicLlm.structured', () => {
     expect((await ask())).toMatchObject({ data: null, failure: 'unparsed' })
   })
 })
+
+describe('anthropicLlm meters every call', () => {
+  it('records the tokens of each call under its stage and the model that answered, used or not', async () => {
+    const { Meter } = await import('../src/meter.ts')
+    const meter = new Meter()
+    const base = anthropicLlm({ ANTHROPIC_API_KEY: 'test-key-not-real', TASTE_MODEL: 'asked-model' } as Config, meter, 'daily')
+    answer = card(2); stop = 'end_turn'
+    await base.forStage!('tag').structured({ schema: TagSchema, system: 's', content: [{ type: 'text', text: 'x' }] })
+    answer = 'refused'; stop = 'refusal'
+    await base.forStage!('tag').structured({ schema: TagSchema, system: 's', content: [{ type: 'text', text: 'x' }] })
+    const rows = meter.rows('2026-10-29')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ unit_key: 'inspirationhouse-tag', bucket: 'served-model', runs: 2, failed: 1, units: 12,
+      category: 'unpriced-model', usd: 0 })
+  })
+})

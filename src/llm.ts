@@ -3,6 +3,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import type { z } from 'zod'
 import type { Config } from './config.ts'
 import { repairToSchema } from './repair.ts'
+import { readUsage, NO_USAGE, type Meter, type Usage } from './meter.ts'
 
 export interface Structured<T> {
   data: T | null
@@ -16,6 +17,8 @@ export interface Structured<T> {
 
 export interface Llm {
   readonly model: string
+  // The same model, its calls metered under another stage's name (src/meter.ts). A test's stand-in may leave it out.
+  forStage?(stage: string): Llm
   structured<S extends z.ZodType>(args: {
     schema: S
     system: string
@@ -24,13 +27,26 @@ export interface Llm {
   }): Promise<Structured<z.infer<S>>>
 }
 
-export function anthropicLlm(cfg: Config): Llm {
+/** The stage-named view of a model, or the model itself when it has none (a test's stand-in). */
+export function staged(llm: Llm, stage: string): Llm
+export function staged(llm: Llm | null, stage: string): Llm | null
+export function staged(llm: Llm | null, stage: string): Llm | null {
+  return llm?.forStage ? llm.forStage(stage) : llm
+}
+
+// Every call's tokens go to the meter, under the stage it was made for, whether the answer was used or not: a refused,
+// cut-off or unparsed answer was still billed, and a call that throws after the stream began is counted as failed.
+export function anthropicLlm(cfg: Config, meter?: Meter, stage = 'unstaged'): Llm {
   if (!cfg.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set')
   // logLevel off: the SDK's own warnings can print a raw stream chunk, which may be model text, into the public log.
   const client = new Anthropic({ apiKey: cfg.ANTHROPIC_API_KEY, logLevel: 'off' })
-  const model = cfg.TASTE_MODEL
+  return bound(client, cfg.TASTE_MODEL, meter, stage)
+}
+
+function bound(client: Anthropic, model: string, meter: Meter | undefined, stage: string): Llm {
   return {
     model,
+    forStage: next => bound(client, model, meter, next),
     async structured({ schema, system, content, maxTokens = 16000 }) {
       // Streamed as raw events, read here: the SDK refuses a non-streaming call whose max_tokens could run past ten
       // minutes (the weekly distil asks for 32000), and its own reader enforces limits the API never sent
@@ -48,11 +64,19 @@ export function anthropicLlm(cfg: Config): Llm {
       let text = ''
       let stop: string | null = null
       let served = model
-      for await (const ev of events) {
-        if (ev.type === 'message_start') served = ev.message.model
-        else if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') text += ev.delta.text
-        else if (ev.type === 'message_delta') stop = ev.delta.stop_reason ?? stop
+      // message_start carries the input side, message_delta the output (cumulative, and any field it repeats wins).
+      let usage: Usage = { ...NO_USAGE }
+      try {
+        for await (const ev of events) {
+          if (ev.type === 'message_start') { served = ev.message.model; usage = { ...usage, ...readUsage(ev.message.usage) } }
+          else if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') text += ev.delta.text
+          else if (ev.type === 'message_delta') { stop = ev.delta.stop_reason ?? stop; usage = { ...usage, ...readUsage(ev.usage) } }
+        }
+      } catch (err) {
+        meter?.record(stage, served, usage, true)
+        throw err
       }
+      meter?.record(stage, served, usage, stop === 'refusal' || stop === 'max_tokens')
       // The stop reason first, always: a refused or cut-off answer is not data.
       if (stop === 'refusal') return { data: null, failure: 'refusal', model: served }
       if (stop === 'max_tokens') return { data: null, failure: 'max_tokens', model: served }
