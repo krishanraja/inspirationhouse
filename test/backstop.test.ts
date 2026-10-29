@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 // scripts/taste_backstop.py, the SessionEnd hook (W3.3), run for real on a synthetic transcript: only his flagged lines
-// are kept, scrubbed, locally, once, with no venture. Synthetic lines only.
+// are kept, scrubbed, locally, once, under publication. Synthetic lines only.
 const hasPython = (() => { try { execFileSync('python3', ['--version'], { stdio: 'ignore' }); return true } catch { return false } })()
 const script = join(process.cwd(), 'scripts', 'taste_backstop.py')
 
@@ -35,7 +35,7 @@ describe.skipIf(!hasPython)('taste_backstop.py', () => {
     }
   })
 
-  it('as the hook it keeps them in the ignored local file, once, under this repository and no venture', () => {
+  it('as the hook it keeps them in the ignored local file, once, under this repository and publication', () => {
     const root = mkdtempSync(join(tmpdir(), 'taste-backstop-root-'))
     // The script writes under its own repository root; run a copy from a scratch root so the real one is untouched.
     const copy = join(root, 'scripts')
@@ -49,7 +49,7 @@ describe.skipIf(!hasPython)('taste_backstop.py', () => {
     expect(existsSync(file)).toBe(true)
     const rows = readFileSync(file, 'utf8').trim().split('\n').map(l => JSON.parse(l))
     expect(rows).toHaveLength(3)
-    for (const r of rows) expect(r).toMatchObject({ repository: 'krishanraja/inspirationhouse', venture: null, posted: false })
+    for (const r of rows) expect(r).toMatchObject({ repository: 'krishanraja/inspirationhouse', venture: 'publication', posted: false })
   })
 
   it('never fails the end of a session, whatever it is given', () => {

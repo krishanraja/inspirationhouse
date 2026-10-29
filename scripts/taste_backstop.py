@@ -1,7 +1,7 @@
 """The filtered chat backstop (Wave 3, W3.3): a Claude Code SessionEnd hook.
 
 Copied from growth-makeyourmindup's scripts/taste_backstop.py and adapted to
-this repository: its REPO, and its VENTURE, which is None (below).
+this repository: its REPO, and its VENTURE (below).
 
 At the end of a session in this repository it reads the session's transcript
 and keeps only Krish's own typed lines that a local filter flags as a
@@ -29,11 +29,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTBOX = Path('.scratch') / 'taste' / 'backstop.jsonl'
-# This repository serves several ventures (README, "Each venture reads only its own taste"), so it has no row in
-# content-engine's taste_venture_repositories and no venture of its own. AGENTS.md rule 10: a report with no venture is
-# held and counted, never filed under a guess. So each line is kept with venture null, for the runner to hold until
-# Krish names one; set it here only when he does.
-VENTURE = None
+# This repository serves several ventures, and its sessions' corrections are about the chain's taste engine, so they
+# file under Make Your Mind Up's slug (Ruling, Krish, 2026-10-29, relayed by the Wave 2 and 3 orchestrator: Q20 "yes").
+VENTURE = 'publication'
 REPO = 'krishanraja/inspirationhouse'
 MAX_LINE = 600
 MAX_TRANSCRIPT = 50 * 1024 * 1024
