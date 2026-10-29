@@ -2,9 +2,9 @@
 
 Status: Built. All six steps landed on 2026-10-26; Progress, at the end, says what each one is and how it was proved. This file is kept as the design record. Everything before Progress is the original brief: it is in the future tense and describes the world on 2026-10-26, not now.
 
-Changed on 2026-10-28: the read is per venture, no longer shared. Every repository still reads and reports through the same two tools, but it reads only its own venture's approved rules, and what it reports is filed under its own venture. The last entry in Progress says how, and which part is still to land in Control Center.
+Changed on 2026-10-28: the read is per venture, no longer shared. Every repository still reads and reports through the same two tools, but it reads only its own venture's approved rules, and what it reports is filed under its own venture. The last entries in Progress say how; Control Center's half landed the same day (commit c705983 on its main).
 
-Last verified: 2026-10-27 against this repository's code and the Control Center and ai-harness checkouts (the files cited exist). content-engine, and the pull requests cited in other repositories, were not re-read.
+Last verified: 2026-10-28 against this repository's code, Control Center's main (commit c705983, `api/harness/_taste-mcp.ts`) and a read-only read of the live database: every migration this engine reads is applied, through `taste_ventures`; `feedback_cues` holds 15 rows, all Make Your Mind Up's (`publication`); `taste_reports` holds 16 (12 Make Your Mind Up's, 4 Heartside's); approved rules are still none (`taste_profile_current` 0 rows; 36 taste proposals wait on him, among them 3 of the 22 claims and 30 floor standards). The pull requests cited in other repositories were not re-read.
 
 Handover for the build, written 2026-10-26 by the session that ran the audit. Krish, 2026-10-26: "start the two-way
 build in a fresh session". This file is the whole brief: read it, then `README.md` and `AGENTS.md`, then each
@@ -53,8 +53,8 @@ repository could do both. The state it found, corrected on 2026-10-26 for what h
 ## What landed since the audit (build on these, never beside them)
 
 - **Feedback cues** (another session, 2026-10-26; inspirationhouse PR 11, content-engine PR 175). Table
-  `feedback_cues` (content-engine migration `20261111090000_feedback_cues.sql`, live, no rows yet). This repository's
-  daily `cues` stage (`src/collect/feedbackCues.ts`) turns his decisions on ideas and his card answers into cues for
+  `feedback_cues` (content-engine migration `20261111090000_feedback_cues.sql`, live; no rows then, 15 on 2026-10-28).
+  This repository's daily `cues` stage (`src/collect/feedbackCues.ts`) turns his decisions on ideas and his card answers into cues for
   future pieces; the Sunday gather reads open cues. It is already one path back into the engine: the report tool must
   feed or extend it where the fact is the same, never start a second home for the same fact.
 - **Approved rules hold** (inspirationhouse PR 12, content-engine PR 176, migration
@@ -145,8 +145,51 @@ which piece a card became. Each proved by a test that fails without the change a
   (`taste_venture_repositories`), or takes the one the session named from a repository that serves several. This
   repository decides every other row's venture in code (`src/venture.ts`), distils claims per venture, renders the
   harness files with one section per venture, and reads only Make Your Mind Up's rules for the tagger and only its
-  floor. A report with no venture is held and fails the run until it has one. Still to land in Control Center, and
-  not built yet: `get_approved_taste` returning only the caller's venture's rules, with no fallback to another's, and
-  `report_to_taste_engine` naming the venture. This repository's part is proved by `test/venture.int.test.ts`,
-  which applies the migration over synthetic rows of every class it moves and then runs the engine's own stages on
-  the migrated schema.
+  floor. A report with no venture is held and fails the run until it has one. Control Center's half is built (commit
+  c705983 on its main, 2026-10-28): `report_to_taste_engine` files a report under its repository's venture, or the one
+  a session names from a repository that serves several, and refuses a contradiction or an unknown venture;
+  `get_approved_taste` takes the repository and returns only that venture's rules, never another's as a fallback; the
+  growth engines, mail in his name and the content loaders each pass the venture they serve. The migration is applied
+  live (2026-10-28). This repository's part is proved by `test/venture.int.test.ts`, which applies the migration over
+  synthetic rows of every class it moves and then runs the engine's own stages on the migrated schema; Control
+  Center's by its `tests/api/tasteMcp.test.ts`.
+- **His presses on the publish board (2026-10-28).** Krish, 2026-10-28, the board's presses: "pick an idea for a
+  specific day AND add any optional comments easily ... OR mark an idea as being useful in a future wider piece OR ...
+  stored for a future trend OR queue it for next week OR reject it." The daily `cues` stage reads the board documents
+  he wrote himself (content-engine `board_documents`, `updated_by` 'Krish'). A queue press that names a use is his tap,
+  so its cue is `use_origin` 'krish' with `decided_by` 'Krish' in meta, never a rule or a guess; `next_week` is filed as
+  `future_piece`. A press joins its idea's queue answers, so the answer in the queue that relays the same words, written
+  after the press, is never read again by the verdict rules: one press, one cue. A note on a pick is a `week_pick` cue
+  (the source the cues migration reserved); the tap names a day, not a use, so reading the note as his brief is a rule
+  (`use_origin` 'rule', `decided_by` 'Krish'). Every pick of his also joins the idea's queue answers as a yes, so it
+  retires a `not_for_us` cue before it. An `offday` press is Growth's and only counted. A press that cannot be filed (no
+  idea id, or words longer than a cue holds) fails the run while its board is this week's or next week's, or once when
+  it is saved since the last run that read the board; after that it is counted (`cues_board_unfiled`). Proved by
+  `test/feedback-cues.test.ts` ("his presses on the publish board", "the stage with the board") and, on a real
+  database, `test/pipeline.int.test.ts` ("his presses on the publish board, as cues").
+
+  **Which week a "Next week" idea is for has one home:** `target_week` on the idea's queue mark (content-engine
+  `apps/control-plane/api/_ideaQueue.ts`, `content_ideas.meta.queue`), as plan W1 sets it. The Sunday gather orders by
+  that. The cue's `meta.target_week` is context only: the Monday the press that carried his words named, kept only when
+  it is a Monday and never guessed, and a later re-queue with no words does not change it. The gather must never order
+  by it.
+
+  Read again on 2026-10-29 against content-engine's session branch (`claude/fervent-brown-d8e55b`, going to main by
+  pull request): the board's presses write `idea_id`, `note`, `reason` and, on Next week, `target_week` (a Monday,
+  checked in `validBody`), and `hisOnlyRefusal` refuses a queue document with a `use` (`press_is_his`) and a pick with a
+  `note` (`pick_note_is_his`) from any writer but Krish, so the first two items below are built there. The third is not
+  found in its code: no writer sets `target_week` on the queue mark, and the Sunday room (plan-week) reads the Next week
+  presses from last week's board. The list as it was written, against what this reader expects:
+  - The board package writes his presses in this shape. `queue/<idea id>` (the document id is the idea's `content_ideas`
+    id, or the body carries it as `idea_id`): `use`, one of `wider_piece_context`, `track_over_time`, `next_week`,
+    `not_for_us`, `offday`; optional `note` and `reason`, his words, whole (together at most 4000 characters, which a
+    cue holds; a longer one is never cut, it is counted unfiled); `target_week`, a Monday, `next_week` only; `day`
+    (`tue`, `thu`, `sat` or `sun`) and `approved` (boolean), `offday` only; `at`, when he pressed. `picks/<day>`: the
+    pick as today, plus `idea_id` (the idea's `content_ideas` id) and an optional `note`. A queue document of his with a
+    note or a reason but no `use` this reader knows is counted (`cues_board_unread`) and never read, so a renamed field
+    shows in the run's counts.
+  - Both are his-only writes: `hisOnlyRefusal` (`apps/control-plane/api/board/_contracts.ts`) refuses a queue document
+    with a `use` and a pick with a `note` from any writer but Krish. Today it covers neither, so an `engine_operator`
+    write over his document would set `updated_by` to the operator and withdraw the cue his press made.
+  - The board's Next week press writes `target_week` onto the queue mark too, and the Sunday gather
+    (`apps/control-plane/api/_feedbackCues.ts`) lists the ideas whose queue mark is for that week first.
