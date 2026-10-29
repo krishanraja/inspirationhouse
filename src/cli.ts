@@ -26,6 +26,7 @@ import { score } from './score/scoreboard.ts'
 import { githubApi, syncHarness } from './publish/harness.ts'
 import { recordRun, judgeRun, type RunStatus } from './runs.ts'
 import { runRejections } from './rejection/job.ts'
+import { due, proposeRetro, readPieces, retro as retroReport, sinceLast } from './retro/retro.ts'
 import { log } from './log.ts'
 
 type Counts = Record<string, number | boolean | string>
@@ -377,6 +378,30 @@ async function rejections(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, now: Dat
   return finish(ctx, r.input)
 }
 
+// The retrospective (src/retro/retro.ts): his scores and engagement joined to how each piece was made, one feature that
+// scored well and one that scored badly put to him as proposals. No model is called. It runs when it is due (a month,
+// or four newly scored pieces), so Control Center's clock may dispatch it daily; --force runs it regardless.
+async function retroJob(ctx: Ctx, now: Date, force: boolean): Promise<{ status: RunStatus; reason: string | null }> {
+  const read = await readPieces(ctx.db)
+  if (read.scoresMissing) {
+    ctx.counts.retro_scores_missing = 1
+    if (!ctx.dry) ctx.problems.push('retro: piece_scores is missing: apply the piece_scores migration')
+    return finish(ctx, 0)
+  }
+  const since = await sinceLast(ctx.db)
+  const when = due(now, since.last, since.newlyScored)
+  Object.assign(ctx.counts, { retro_pieces: read.pieces.length, retro_newly_scored: since.newlyScored, retro_due: when.due,
+    retro_engagement_read: read.engagementRead ? 1 : 0 })
+  if (!when.due && !force) return { status: 'skipped', reason: when.why }
+  const report = retroReport(read.pieces)
+  Object.assign(ctx.counts, { retro_scored: report.scored, retro_engaged: report.engaged, retro_features: report.stats.length,
+    retro_claims: report.claims.length, retro_held: report.held.length })
+  ctx.counts.retro_proposed = await proposeRetro(ctx.db, report, now, !ctx.dry)
+  if (ctx.dry) ctx.preview.retro = report
+  log({ stage: 'retro', dry_run: ctx.dry, retro_scored: report.scored, retro_claims: report.claims.length })
+  return finish(ctx, report.scored)
+}
+
 function finish(ctx: Ctx, input: number): { status: RunStatus; reason: string | null } {
   if (ctx.problems.length) return { status: 'failed', reason: ctx.problems.join('; ').slice(0, 600) }
   if (input === 0) return { status: 'skipped', reason: 'no input' }
@@ -392,8 +417,8 @@ async function main(): Promise<void> {
   const trigger = args.includes('--cron') ? 'cron' : 'manual'
   // Put the floor's standards to him (rejections only). Off unless asked: his yes comes before the first batch.
   const proposeFloor = args.includes('--propose')
-  if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards' && job !== 'rejections') {
-    console.error('usage: engine daily|weekly|harness|cards|rejections [--dry-run] [--no-model] [--cron] [--preview] [--propose]')
+  if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards' && job !== 'rejections' && job !== 'retro') {
+    console.error('usage: engine daily|weekly|harness|cards|rejections|retro [--dry-run] [--no-model] [--cron] [--preview] [--propose] [--force]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -416,11 +441,12 @@ async function main(): Promise<void> {
     ctx.counts.machine_stills_known = ctx.machine.size
   }
   // The rejections job has its own tables (src/rejection/store.ts) and needs the ledger only for session reports.
-  if (!ctx.ledger && !dry && job !== 'rejections') ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration')
+  if (!ctx.ledger && !dry && job !== 'rejections' && job !== 'retro') ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration')
 
   // A scheduled run without its credentials is a broken run, not a quiet one.
   // The harness job reads the database and GitHub only: no Google, no model.
-  if (job !== 'harness') {
+  // The retrospective reads the database only: no Google, no model.
+  if (job !== 'harness' && job !== 'retro') {
     if (googleConfigured(cfg)) ctx.google = await connectGoogle(cfg)
     else if (!dry) ctx.problems.push('Google service account not configured: Drive and Inspiration cards skipped')
     if (cfg.ANTHROPIC_API_KEY && !noModel) ctx.llm = anthropicLlm(cfg, meter, job)
@@ -430,7 +456,8 @@ async function main(): Promise<void> {
   let outcome: { status: RunStatus; reason: string | null }
   try {
     outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx)
-      : job === 'rejections' ? await rejections(ctx, cfg, started, proposeFloor) : await harness(ctx, cfg)
+      : job === 'rejections' ? await rejections(ctx, cfg, started, proposeFloor) : job === 'retro' ? await retroJob(ctx, started, args.includes('--force'))
+      : await harness(ctx, cfg)
   } catch (err) {
     outcome = { status: 'failed', reason: `${(err as Error).name}: ${(err as Error).message}`.slice(0, 600) }
   }
@@ -454,7 +481,7 @@ async function main(): Promise<void> {
 
   log({ stage: 'run', job: `taste_${job}`, status: outcome.status, dry_run: dry, ...ctx.counts })
   // Which stages had a problem, by their fixed names only; the messages stay out of the public log.
-  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|understand|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model|meter)/.exec(p)?.[1] ?? 'other'))] }))
+  if (outcome.reason) console.log(JSON.stringify({ reason_class: outcome.status, problems: ctx.problems.length, problem_at: [...new Set(ctx.problems.map(p => /^(collect \w+|withdraw \w+|reports venture|items|link|understand|cues|tagging|no words heard|explain|signals|distil|harness|rejections \w+|rejections|taste ledger|Google|ANTHROPIC_API_KEY|run with --no-model|meter|retro)/.exec(p)?.[1] ?? 'other'))] }))
   if (dry && args.includes('--preview')) {
     // Readable, so local only: preview/ is gitignored and never uploaded.
     mkdirSync('preview', { recursive: true })
