@@ -553,6 +553,9 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
         schema: TagSchema, system,
         content: tagContent(f, full ?? thumb, text, hints, watched, item.note_for_claude, { kind: settled, pieces: list }, item.read_as, read?.read_md),
         maxTokens: 8000,
+        // One system prompt for every card of the run (tagSystemPrompt above), so each card after the first reads it
+        // from the cache at a tenth of the price (W2.12).
+        cache: true,
       })
     } catch (err) {
       fail(apiFailureClass(err))

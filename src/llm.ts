@@ -24,6 +24,9 @@ export interface Llm {
     system: string
     content: Anthropic.ContentBlockParam[]
     maxTokens?: number
+    // Cache the system prompt for the calls after this one: set by a stage that asks many times with one system prompt
+    // in a run (the tagger). Below the model's minimum length it silently caches nothing; the meter shows which.
+    cache?: boolean
   }): Promise<Structured<z.infer<S>>>
 }
 
@@ -47,7 +50,7 @@ function bound(client: Anthropic, model: string, meter: Meter | undefined, stage
   return {
     model,
     forStage: next => bound(client, model, meter, next),
-    async structured({ schema, system, content, maxTokens = 16000 }) {
+    async structured({ schema, system, content, maxTokens = 16000, cache = false }) {
       // Streamed as raw events, read here: the SDK refuses a non-streaming call whose max_tokens could run past ten
       // minutes (the weekly distil asks for 32000), and its own reader enforces limits the API never sent
       // (src/repair.ts), so one tag too many used to throw away the card (2026-10-24), and it parses before the stop
@@ -56,7 +59,7 @@ function bound(client: Anthropic, model: string, meter: Meter | undefined, stage
       const events = await client.messages.create({
         model,
         max_tokens: maxTokens,
-        system,
+        system: cache ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system,
         messages: [{ role: 'user', content }],
         output_config: { format: { type: 'json_schema', schema: jsonSchema } },
         stream: true,

@@ -9,6 +9,7 @@ import type { Config } from '../src/config.ts'
 let answer = ''
 let stop = 'end_turn'
 let server: Server
+let lastBody: Record<string, unknown> = {}
 let baseURL = ''
 const savedBase = process.env.ANTHROPIC_BASE_URL
 
@@ -26,8 +27,9 @@ function sse(text: string, stopReason: string): string {
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    req.resume()
-    req.on('end', () => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end(sse(answer, stop)) })
+    let body = ''
+    req.on('data', c => { body += c })
+    req.on('end', () => { lastBody = JSON.parse(body || '{}'); res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end(sse(answer, stop)) })
   })
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r))
   baseURL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -79,5 +81,15 @@ describe('anthropicLlm meters every call', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ unit_key: 'inspirationhouse-tag', bucket: 'served-model', runs: 2, failed: 1, units: 12,
       category: 'unpriced-model', usd: 0 })
+  })
+})
+
+describe('anthropicLlm caches the system prompt when asked', () => {
+  it('marks the system prompt for the cache only for a stage that asks, and meters the cache reads', async () => {
+    answer = card(2); stop = 'end_turn'
+    await ask()
+    expect(lastBody.system).toBe('s')
+    await llm().structured({ schema: TagSchema, system: 's', content: [{ type: 'text', text: 'x' }], cache: true })
+    expect(lastBody.system).toEqual([{ type: 'text', text: 's', cache_control: { type: 'ephemeral' } }])
   })
 })
