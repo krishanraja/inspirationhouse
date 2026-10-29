@@ -943,8 +943,10 @@ runJob('the drop zone, Rejections/Inbox/, filed by a scheduled run on a real dat
     if (existsSync(floorPy)) {
       const dir = mkdtempSync(join(tmpdir(), 'floor-file-'))
       writeFileSync(join(dir, 'rejection-floor.json'), text)
-      expect(execFileSync('python3', [floorPy, '--check', '--file', join(dir, 'rejection-floor.json')], { encoding: 'utf8' })).toBeDefined()
-      const shown = execFileSync('python3', [floorPy, '--format', 'short_video', '--file', join(dir, 'rejection-floor.json')], { encoding: 'utf8' })
+      // The floor alone: the bar beside it (config/reference-cuts.json and its page) is content-engine's, checked there.
+      const alone = ['--file', join(dir, 'rejection-floor.json'), '--bar-file', join(dir, 'no-bar.json')]
+      expect(execFileSync('python3', [floorPy, '--check', ...alone], { encoding: 'utf8' })).toBeDefined()
+      const shown = execFileSync('python3', [floorPy, '--format', 'short_video', ...alone], { encoding: 'utf8' })
       expect(shown).toContain(words)
       rmSync(dir, { recursive: true, force: true })
     } else if (process.env.REQUIRE_DB_TESTS && process.env.CI) {

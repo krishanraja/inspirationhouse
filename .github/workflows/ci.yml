@@ -32,12 +32,11 @@ jobs:
           repository: krishanraja/content-engine
           ref: main
           path: .content-engine
-          # And the floor's reader with the file it reads beside it, so the rejections suite prints the rendered floor the way
-          # every session does (python3 scripts/floor.py --format short_video).
+          # And the floor's reader, so the rejections suite prints the rendered floor the way every session does
+          # (python3 scripts/floor.py --format short_video).
           sparse-checkout: |
             supabase/migrations/
             scripts/floor.py
-            config/reference-cuts.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: pnpm/action-setup@v4
