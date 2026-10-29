@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import pg from 'pg'
@@ -14,7 +14,7 @@ import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts
 import { INBOX_WAIT_DAYS, runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
 import { keepMedia } from '../src/rejection/keep.ts'
 import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
-import { FLOOR_PATTERN_MIN } from '../src/rejection/render.ts'
+import { FLOOR_PATTERN_MIN, loadFloor, renderFloor } from '../src/rejection/render.ts'
 
 // The Rejections floor against a real Postgres with content-engine's real migrations (supabase/migrations/), and
 // stubs in place of Drive and the model. Synthetic rows only: nothing here is anything Krish said or any file in his
@@ -615,7 +615,7 @@ runJob('the rejections job, end to end, on a real database', () => {
     }
     // He decides on the check with the statement, so the check that binds once he approves is one he saw.
     const assertions = (await client.query(`select assertion from mindmake_studio_learning_proposals order by assertion collate "C"`)).rows.map(r => r.assertion)
-    expect(assertions[0]).toBe('Floor for short_video (raised about 1 production): synthetic: always leave a title card room at the caption band. (In his words: "give it room") '
+    expect(assertions[0]).toBe('Aim (guides, never blocks). For short_video (raised about 1 production): synthetic: always leave a title card room at the caption band. (In his words: "give it room") '
       + 'Check before delivery: synthetic: scrub to each title card and look at the caption band.')
     // Written as candidates first: every standard went in before any proposal did, and the database refuses a proposed
     // standard with no proposal, so each one stood as a candidate until its proposal was made.
@@ -874,6 +874,82 @@ runJob('the rejections job, end to end, on a real database', () => {
     const r = await job(drive(dump({ rejected: 'synthetic: not a record\n{"synthetic": "nor this"}\n' })))
     expect(r.problems).toContain('rejections read: Error')
     expect(await tally()).toEqual(before)
+  })
+})
+
+runJob('the drop zone, Rejections/Inbox/, filed by a scheduled run on a real database', () => {
+  let client: pg.Client
+  let db: Db
+  const runId = '44444444-4444-4444-4444-444444444444'
+  const now = new Date('2026-10-30T06:11:00Z')
+  const OWNER = 'perm-synthetic-owner'
+  const DOC = 'application/vnd.google-apps.document'
+  const words = 'synthetic test reject: the cut opens twice, keep one opening'
+  const note = 'synthetic: a session noted that the outro ran three screens'
+  const f = (id: string, name: string, mimeType: string): DriveFile =>
+    ({ id, name, mimeType, modifiedTime: '2026-10-29T21:00:00Z', createdTime: '2026-10-29T20:00:00Z' })
+  const ids = { data: '1SYNTHETICdropzone0000000001', rejected: '1SYNTHETICdropzone0000000002', inbox: '1SYNTHETICdropzone0000000003',
+    doc: '1SYNTHETICdropzone0000000004', md: '1SYNTHETICdropzone0000000005', theirs: '1SYNTHETICdropzone0000000006' }
+  const one = { id: 'syn-900', date: '2026-10-20', piece: 'synthetic piece nine', format: 'Script', category: 'Copy',
+    theme: "Copy a stranger can't follow", item: 'synthetic: a line nobody outside knows',
+    quotes: [{ text: 'synthetic: nobody outside knows that line', when: '2026-10-20', source: 'codex' }], strength: 'Rejected', confidence: 'direct quote' }
+  const drive: Google = {
+    listFolder: async (id: string) => ({
+      [DRIVE.rejections]: [f(ids.data, 'data', FOLDER_MIME), f(ids.inbox, 'Inbox', FOLDER_MIME)],
+      [ids.data]: [f(ids.rejected, 'rejections.jsonl', 'application/x-ndjson')],
+      [ids.inbox]: [f(ids.doc, 'short cut test reject', DOC), f(ids.md, 'short cut note.md', 'text/markdown'), f(ids.theirs, 'short cut, edited', DOC)],
+    } as Record<string, DriveFile[]>)[id] ?? [],
+    download: async (id: string) => { if (id !== ids.rejected) throw new Error('google download failed: HTTP 404'); return Buffer.from(`${JSON.stringify(one)}\n`) },
+    text: async (file: DriveFile) => file.id === ids.doc ? words : file.id === ids.md ? note : 'synthetic: someone else changed this doc',
+    authorship: async (id: string) => id === DRIVE.rejections || id === ids.doc
+      ? { owners: [OWNER], lastModifier: OWNER, revisionAuthors: id === ids.doc ? [OWNER, OWNER] : null }
+      : { owners: [OWNER], lastModifier: 'perm-synthetic-other', revisionAuthors: [OWNER, 'perm-synthetic-other'] },
+    file: async () => null,
+    downloadTo: async () => { throw new Error('synthetic: no master is fetched in this suite') },
+  } as unknown as Google
+
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  it('files his typed Doc as his words and every other file as an observation, and the floor shows his test reject', async () => {
+    // As taste-rejections.yml runs it on its clock: a real run, no model, nothing put to him (FLOOR_PROPOSE_ENABLED off).
+    const r = await runRejections({ db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh: null })
+    expect(r.problems).toEqual([])
+    expect(r.counts).toMatchObject({ rejections_drop_files: 3, rejections_drop_his_typing: 1, rejections_drop_not_a_doc: 1,
+      rejections_drop_touched_by_another: 1, rejections_drop_words: 1, rejections_drop_observations: 2 })
+    const rows = (await client.query(
+      `select source_ref, attribution, item, capture, cardinality(quote_ids)::int as quotes, formats, venture
+       from taste_rejections where source = 'inbox' order by source_ref`)).rows
+    expect(rows).toEqual([
+      { source_ref: `drop:${ids.doc}`, attribution: 'krish_words', item: null, capture: 'words', quotes: 1, formats: ['short_video'], venture: 'publication' },
+      { source_ref: `drop:${ids.md}`, attribution: 'observation', item: note, capture: 'words', quotes: 0, formats: expect.arrayContaining(['short_video']), venture: 'publication' },
+      { source_ref: `drop:${ids.theirs}`, attribution: 'observation', item: 'synthetic: someone else changed this doc', capture: 'words', quotes: 0, formats: expect.any(Array), venture: 'publication' },
+    ])
+    // His words are kept whole, said when he left the Doc.
+    expect(await client.query(`select text, attribution, said_at, said_precision from taste_rejection_quotes where text = $1`, [words]).then(q => q.rows))
+      .toEqual([{ text: words, attribution: 'krish_words', said_at: new Date('2026-10-29T21:00:00Z'), said_precision: 'second' }])
+    // A second run files nothing again.
+    const again = await runRejections({ db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh: null })
+    expect(again.counts).toMatchObject({ rejections_records_new: 0, rejections_quotes_new: 0 })
+
+    // The floor file every session reads holds it, and scripts/floor.py --format short_video shows it.
+    const text = renderFloor(await loadFloor(db))
+    const floor = JSON.parse(text)
+    const ref = Object.entries(floor.records as Record<string, { his_words: Array<{ said: string }> }>).find(([, rec]) => rec.his_words.some(w => w.said === words))?.[0]
+    expect(ref).toBeTruthy()
+    expect(floor.formats.short_video.rejected).toContain(ref)
+    expect(floor.floor.nevers).toHaveLength(8)
+    const floorPy = process.env.FLOOR_PY ?? join(process.cwd(), '.content-engine', 'scripts', 'floor.py')
+    if (existsSync(floorPy)) {
+      const dir = mkdtempSync(join(tmpdir(), 'floor-file-'))
+      writeFileSync(join(dir, 'rejection-floor.json'), text)
+      expect(execFileSync('python3', [floorPy, '--check', '--file', join(dir, 'rejection-floor.json')], { encoding: 'utf8' })).toBeDefined()
+      const shown = execFileSync('python3', [floorPy, '--format', 'short_video', '--file', join(dir, 'rejection-floor.json')], { encoding: 'utf8' })
+      expect(shown).toContain(words)
+      rmSync(dir, { recursive: true, force: true })
+    } else if (process.env.REQUIRE_DB_TESTS && process.env.CI) {
+      throw new Error('content-engine scripts/floor.py is not checked out beside the migrations')
+    }
   })
 })
 
