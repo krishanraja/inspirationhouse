@@ -58,8 +58,9 @@ export function renderApproved(rules: ApprovedRule[], skill: string, lanes: read
   const head = [
     `# Approved taste rules for ${skill}`,
     '',
-    'Krish approved or reworded each of these himself, from what the taste ledger (`krishanraja/inspirationhouse`) read of',
-    'his taste. They arrive here only by a pull request he merges.',
+    'Krish approved or reworded each of these himself, on the board or in Control Center, from a claim the taste ledger',
+    '(`krishanraja/inspirationhouse`) built only from his own words and actions. Each names that claim (`taste_claims.id`).',
+    'They arrive here only by a pull request he merges.',
     'They are about how a piece is made, never what it is about: apply them to form, never to choose a topic.',
     "The skill's own truth, privacy and safety rules rank above them; when one conflicts, follow the skill and name the conflict.",
     `Each venture's rules are its own. ${VENTURE_RULE}`,
@@ -80,7 +81,7 @@ export function renderApproved(rules: ApprovedRule[], skill: string, lanes: read
         const layer = r.layer ? ` (${r.layer})` : ''
         // A rule he reworded is his words alone: the engine's own "So:" line was written for the wording he replaced.
         const means = !r.reworded && r.means?.trim() ? ` So: ${r.means.trim()}` : ''
-        return `- [${r.lane}${layer}, approved ${r.decided_at.slice(0, 10)}] ${r.statement.trim()}${means}`
+        return `- [${r.lane}${layer}, approved ${r.decided_at.slice(0, 10)}, claim ${r.id}] ${r.statement.trim()}${means}`
       }),
       '',
     ]
