@@ -83,7 +83,7 @@ repository could do both. The state it found, corrected on 2026-10-26 for what h
 6. **AEO-Engine and the growth engines** read approved voice rules through the doors they already use.
 
 Each step is its own pull request in its own repository, reviewed by fresh readers before merge, with CI green. Read
-each repository's rules on merging (content-engine has no required checks: wait for green, then merge). Record any
+each repository's rules on merging (content-engine's pull requests merge themselves on green CI; nobody merges by hand: Ruling, Krish, 2026-11-03). Record any
 ruling in the commit body as `Ruling (Krish, YYYY-MM-DD): ...`, and update that repository's `NOW.md`.
 
 ## Walls
