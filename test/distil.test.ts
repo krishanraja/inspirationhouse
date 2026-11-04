@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveClaim, claimFingerprint, type WhyRow, type DraftClaim } from '../src/distil/claims.ts'
+import { resolveClaim, claimFingerprint, DISTIL_SYSTEM, type WhyRow, type DraftClaim } from '../src/distil/claims.ts'
 
 const why = (i: number, over: Partial<WhyRow> = {}): WhyRow => ({
   id: `w${i}`, evidence_id: `00000000-0000-0000-0000-00000000000${i}`, statement: `why ${i}`, kind: 'form', layer: 'packaging',
@@ -45,6 +45,10 @@ describe('turning a drafted claim into one the database will hold', () => {
 
   it('refuses a form claim with no craft layer', () => {
     expect(resolveClaim(draft({ layer: null }), whys)).toBeNull()
+  })
+
+  it('keeps how the engine works out of taste (Krish, 2026-11-03: "the taste ledger is a mess with loads of random stuff")', () => {
+    expect(DISTIL_SYSTEM).toMatch(/How the engine, its tools, its files, its boards or a session should work is never a claim/)
   })
 
   it('fingerprints the same claim the same way through punctuation and case', () => {

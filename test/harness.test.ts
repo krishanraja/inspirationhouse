@@ -89,6 +89,16 @@ describe('renderApproved', () => {
     const head = renderApproved([], 'krish-voice', ['voice'])
     expect(head).not.toMatch(/publish board|Inspiration page/)
   })
+  // ai-harness's judge panel (pull request 189) found the header no longer said how a rule came to exist, so an
+  // inferred rule could sit beside an approved one with the same standing.
+  it('says how each rule was approved and names the claim each one came from', () => {
+    const head = renderApproved([], 'krish-voice', ['voice'])
+    expect(head).toMatch(/approved or reworded each of these himself, on the board or in Control Center/)
+    expect(head).toMatch(/built only from his own words and actions/)
+    const voice = renderApproved(rules, 'krish-voice', ['voice', 'strategy'])
+    expect(voice).toContain('- [voice (opening), approved 2026-10-25, claim a] Open on the concrete thing.')
+    expect(voice).toContain('- [strategy, approved 2026-10-27, claim c] Name the trade-off.')
+  })
 })
 
 describe('syncHarness', () => {
