@@ -679,5 +679,42 @@ export async function answeredItemEvidence(db: Db): Promise<Evidence[]> {
                 and coalesce(cardinality(picked_likes), 0) = 0 and coalesce(jsonb_array_length(confirmed_tags), 0) = 0
                 and coalesce(routes, '{}') <@ array['make_piece']::text[] and coalesce(route, 'make_piece') = 'make_piece')`,
   )
-  return rows.map(answerEvidence)
+  return [...rows.map(answerEvidence), ...await saidCardEvidence(db)]
+}
+
+/** A "Say it" card's row (content-engine 20261118093200_inspiration_said_cards): his words as Control Center filed them. */
+export interface SaidCardRow { id: string; said: Record<string, unknown> | null; said_at: string }
+
+/**
+ * An idea he said through Control Center's "Say it" (W3.2) is his words from the moment he said it: the card holds them
+ * exactly (facets.said.excerpt, else its title), so it counts as his like the note he typed with a link. It has its own
+ * source_ref (said:<card>), so the answer he may later give on the same card stands beside it and never replaces it.
+ * A card with no words files nothing. A said card has no Drive file, so no Drive-keyed stage (tagging, linking, the
+ * understanding pass) ever reads it.
+ */
+export function saidEvidence(r: SaidCardRow): Evidence | null {
+  const text = (k: string) => (typeof r.said?.[k] === 'string' ? r.said[k] as string : null)
+  const words = filled(text('excerpt')) ?? filled(text('title'))
+  if (!words) return null
+  return {
+    source: 'inspiration_page', sourceRef: `said:${r.id}`, occurredAt: r.said_at,
+    attribution: 'krish_words', polarity: 'likes', lane: 'strategy', layer: null,
+    title: text('title'), excerpt: words,
+    meta: { said: true, kind: 'idea', kind_source: 'rule', landed_table: text('landed_table') },
+    venture: SOURCE_VENTURE.inspiration_page,
+  }
+}
+
+/** Every standing "Say it" card as his words, once its migration is applied; nothing before it. */
+export async function saidCardEvidence(db: Db): Promise<Evidence[]> {
+  const [col] = await db.query<{ ok: boolean }>(
+    `select exists (select 1 from information_schema.columns
+                    where table_schema = 'public' and table_name = 'inspiration_items' and column_name = 'said_part_id') as ok`,
+  )
+  if (!col?.ok) return []
+  const rows = await db.query<SaidCardRow>(
+    `select id::text, facets->'said' as said, drive_created_at::text as said_at
+     from public.inspiration_items where said_part_id is not null and dismissed_at is null`,
+  )
+  return rows.map(saidEvidence).filter((e): e is Evidence => e !== null)
 }

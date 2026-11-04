@@ -536,6 +536,8 @@ describe('answeredItemEvidence and a note he typed when he pasted a link', () =>
   it('collects a card whose why_here came from his paste note as his words, from when he pasted it', async () => {
     let sql = ''
     const db = { query: async (q: string) => {
+      // The answers' query; the "Say it" cards are read after it, and find no said_part_id column here.
+      if (/information_schema/.test(q)) return [{ ok: false }]
       sql = q
       return [{ id: 'card-1', lane: 'production', name: 'clip.mp4', why_here: 'the pacing in the first three seconds', why_like: null, why_like_source: null,
         would_do: null, route: null, confirmed_tags: [], answered_at: '2026-10-24T09:00:00+00:00', read_as: null, note_for_claude: null,
