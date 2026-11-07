@@ -51,7 +51,9 @@ describe('Drive folders and cues', () => {
     expect(folderVenture(DRIVE.coldIdeas)).toBe(ventureOf('drive_cold'))
     expect(folderVenture(DRIVE.videoInspiration)).toBe(ventureOf('drive_video'))
     expect(folderVenture(DRIVE.rejections)).toBe('publication')
-    expect(Object.keys(FOLDER_VENTURE).sort()).toEqual([DRIVE.coldIdeas, DRIVE.videoInspiration, DRIVE.rejections].sort())
+    expect(Object.keys(FOLDER_VENTURE).sort()).toEqual([DRIVE.coldIdeas, DRIVE.videoInspiration, DRIVE.rejections, DRIVE.voiceInspiration].sort())
+    // His voice folder is words in his own name, Mindmake's (Krish, 2026-11-07).
+    expect(folderVenture(DRIVE.voiceInspiration)).toBe('mindmake')
   })
 
   it('refuses a folder no one has said the venture of', () => {

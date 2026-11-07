@@ -67,6 +67,9 @@ export const DRIVE = {
   // makeyourmindup > 3 Posts, and Video Engine > Archive (content-engine docs/DRIVE.md).
   posts: '17KdbFrZXKmGXkCaMpmntRD9rrAhnWkcT',
   archive: '1h8Ia7iUCEXK8u2iqep4YhLPWC0-WNnjJ',
+  // His voice folder (Krish, 2026-11-07): "the new place that I put anyone whose voice I find inspiring", screenshots
+  // of their posts. Read as lane voice by src/collect/voiceFolder.ts, never a card on the Inspiration page.
+  voiceInspiration: '17KrJJKbGp193ZndMDxhcdfkxy0dhYiEk',
 } as const
 
 // Read-only, and nothing else. CI fails if a write scope appears in the repo.
