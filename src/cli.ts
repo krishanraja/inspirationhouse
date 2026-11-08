@@ -8,6 +8,7 @@ import {
   collectIdeaTriage, collectVisibility, collectCreatorMoves, collectDriveArtifacts, collectFeedbackHistory,
 } from './collect/supabaseSources.ts'
 import { collectDrive, sheetEvidence } from './collect/drive.ts'
+import { collectVoiceFolder, VOICE_REF } from './collect/voiceFolder.ts'
 import { collectInstagram } from './collect/instagram.ts'
 import { syncCues } from './collect/feedbackCues.ts'
 import { syncReports } from './collect/sessionReports.ts'
@@ -78,6 +79,13 @@ async function collect(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<vo
     groups.push(['drive', () => collectDrive(g, ctx.machine)])
     groups.push(['what_i_like_sheet', async () => sheetEvidence(await g.readSheet(DRIVE.whatILikeSheet, 'A1:J500'), new Date().toISOString())])
     groups.push(['instagram', () => collectInstagram(g, new Date().toISOString())])
+    // His voice folder: each screenshot transcribed once, so a run reads only what is new.
+    groups.push(['voice_folder', async () => {
+      const known = ctx.ledger
+        ? new Set((await ctx.db.query<{ source_ref: string }>(`select source_ref from public.taste_evidence where source = 'drive_cold' and source_ref like $1`, [`${VOICE_REF}%`])).map(r => r.source_ref))
+        : new Set<string>()
+      return collectVoiceFolder(g, { known, llm: ctx.llm ? staged(ctx.llm, 'voice_folder') : null })
+    }])
   }
   let seen = 0
   let written = 0

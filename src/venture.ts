@@ -99,11 +99,13 @@ export function ventureOf(source: Source, facts: VentureFacts = {}): Venture | n
  */
 export const CUE_VENTURE = { idea_queue: MYMU, inspiration_card: MYMU, week_pick: MYMU } as const satisfies Record<string, Venture>
 
-/** The venture of each Drive folder the engine reads. Both Inspiration folders and Rejections are Make Your Mind Up's. */
+/** The venture of each Drive folder the engine reads. Both Inspiration folders and Rejections are Make Your Mind Up's.
+ *  His voice folder is Mindmake's: words in his own name are Mindmake's, as Control Center's mailVenture reads them. */
 export const FOLDER_VENTURE: Readonly<Record<string, Venture>> = {
   [DRIVE.coldIdeas]: MYMU,
   [DRIVE.videoInspiration]: MYMU,
   [DRIVE.rejections]: MYMU,
+  [DRIVE.voiceInspiration]: MINDMAKE,
 }
 
 export function folderVenture(folderId: string): Venture {
