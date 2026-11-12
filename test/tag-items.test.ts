@@ -552,3 +552,40 @@ describe('answeredItemEvidence and a note he typed when he pasted a link', () =>
     expect(flat).toContain(`case when answered_at is not null then answered_at::text else coalesce(facets->'link'->>'requested_at', updated_at::text) end as answered_at`)
   })
 })
+
+describe('tagItems on an image the API refuses at full size', () => {
+  const png = (id: string, size = '2000000') => file(id, { name: `still-${id}.png`, mimeType: 'image/png', size })
+  const bad = () => Object.assign(new Error('image refused'), { status: 400 })
+
+  it('asks once more with the Drive thumbnail after a 400, and tags the card', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'p', note_for_claude: null, healing: false, facets: {} }], { throwOn: (n) => n === 1 ? bad() : undefined })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['p', png('p')]]))
+    expect(r).toMatchObject({ tagged: 1, failed: 0, fullRefused: 1 })
+    expect(h.calls()).toBe(2)
+    expect(h.prompts[0]).toContain(Buffer.from('bytes').toString('base64'))
+    expect(h.prompts[1]).toContain(Buffer.from('thumb').toString('base64'))
+    expect(h.prompts[1]).not.toContain(Buffer.from('bytes').toString('base64'))
+  })
+
+  it('fails the card as before when the thumbnail is refused too', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'p', note_for_claude: null, healing: false, facets: {} }], { throwOn: () => bad() })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['p', png('p')]]))
+    expect(r).toMatchObject({ tagged: 0, failed: 1, failures: { api_400: 1 }, fullRefused: 0 })
+    expect(h.calls()).toBe(2)
+  })
+
+  it('does not retry any other refusal', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'p', note_for_claude: null, healing: false, facets: {} }], { throwOn: () => Object.assign(new Error('overloaded'), { status: 529 }) })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['p', png('p')]]))
+    expect(r).toMatchObject({ tagged: 0, failed: 1, failures: { api_529: 1 } })
+    expect(h.calls()).toBe(1)
+  })
+
+  it('sends an image too big for the API image limit as its thumbnail, without downloading it', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'p', note_for_claude: null, healing: false, facets: {} }])
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['p', png('p', '4400000')]]))
+    expect(r).toMatchObject({ tagged: 1, failed: 0 })
+    expect(h.downloads).toEqual([])
+    expect(h.prompts[0]).toContain(Buffer.from('thumb').toString('base64'))
+  })
+})

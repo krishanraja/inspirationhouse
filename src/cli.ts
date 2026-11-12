@@ -184,6 +184,7 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
   ctx.counts.items_feeds = t.feeds
   ctx.counts.items_parts = t.parts
   ctx.counts.items_from_reading = t.fromReading
+  ctx.counts.items_full_refused = t.fullRefused
   ctx.counts.items_tag_failed = t.failed
   if (linked) ctx.counts.waiting_for_reading = t.waitingForReading
   if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)

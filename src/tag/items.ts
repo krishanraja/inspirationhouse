@@ -224,7 +224,11 @@ export function needsTags(rev: number): string {
 }
 
 const VIDEO_MAX_BYTES = 150_000_000
-const IMAGE_MAX_BYTES = 4_500_000
+/**
+ * An image is sent at full size only when its base64 text fits the API's 5 MB image limit: base64 is 4/3 of the bytes,
+ * so 4.5 MB of bytes became about 6 MB of text and was refused with a 400. Anything larger goes as the Drive thumbnail.
+ */
+export const IMAGE_MAX_BYTES = 3_900_000
 /**
  * Tagging stops starting new cards after this long, so explaining and the run's own record always get their turn. A card
  * started just inside it can still take one whole watch (WATCH_WORST_MS) and its model call, and explaining comes after,
@@ -253,6 +257,8 @@ export interface TagResult {
   fromReading: number
   /** Linked cards whose reading has not arrived yet, left for the daily job (`linked` only). */
   waitingForReading: number
+  /** Images the API refused at full size (a 400) and tagged again from the Drive thumbnail. */
+  fullRefused: number
   failures: Record<string, number>
   unheard: Record<string, number>
 }
@@ -313,7 +319,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
   const now = deps.now ?? Date.now
   const started = now()
   const result: TagResult = { tagged: 0, failed: 0, watched: 0, heard: 0, repaired: 0, rehead: 0, tooBig: 0, gaveUp: 0, deferred: 0, kinded: 0, feeds: 0,
-    parts: 0, fromReading: 0, waitingForReading: 0, failures: {}, unheard: {} }
+    parts: 0, fromReading: 0, waitingForReading: 0, fullRefused: 0, failures: {}, unheard: {} }
 
   // Every card's kind that its file settles, on every run and with no model call: the feed by its id, a video or an
   // image by its type, a corpus or a seed by its name. A kind Krish set on the page is his and never overwritten.
@@ -499,7 +505,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
           hearing = { heard: fresh!.heard, heard_tries: priorTries }
         }
       }
-    } else if (media === 'image' && /^image\/(jpeg|png|webp)$/.test(f.mimeType)) {
+    } else if (media === 'image' && /^image\/(jpeg|png|webp)$/.test(f.mimeType) && !(Number(f.size) > IMAGE_MAX_BYTES)) {
       const bytes = await google.download(f.id, IMAGE_MAX_BYTES).catch(() => null)
       if (bytes) full = { bytes, mime: f.mimeType }
     }
@@ -549,19 +555,25 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     // One card's model error (a 400 for one bad image, a 529) fails that card only, counted by its status, and the
     // run goes on to the next card and to explaining.
     let out: Structured<Tagging>
+    const ask = (img: Img | null) => llm.structured({
+      schema: TagSchema, system,
+      content: tagContent(f, img, text, hints, watched, item.note_for_claude, { kind: settled, pieces: list }, item.read_as, read?.read_md),
+      maxTokens: 8000,
+      // One system prompt for every card of the run (tagSystemPrompt above), so each card after the first reads it
+      // from the cache at a tenth of the price (W2.12).
+      cache: true,
+    })
     try {
-      out = await llm.structured({
-        schema: TagSchema, system,
-        content: tagContent(f, full ?? thumb, text, hints, watched, item.note_for_claude, { kind: settled, pieces: list }, item.read_as, read?.read_md),
-        maxTokens: 8000,
-        // One system prompt for every card of the run (tagSystemPrompt above), so each card after the first reads it
-        // from the cache at a tenth of the price (W2.12).
-        cache: true,
-      })
+      out = await ask(full ?? thumb)
     } catch (err) {
-      fail(apiFailureClass(err))
-      await keepWords()
-      continue
+      // A 400 on a full-size image is the API refusing that picture (its size or its dimensions): the card is asked
+      // once more with the Drive thumbnail, as a larger image always was. Any other refusal fails the card as before.
+      let retried: Structured<Tagging> | null = null
+      if (full && apiFailureClass(err) === 'api_400') {
+        try { retried = await ask(thumb); result.fullRefused++ } catch (again) { fail(apiFailureClass(again)); await keepWords(); continue }
+      }
+      if (!retried) { fail(apiFailureClass(err)); await keepWords(); continue }
+      out = retried
     }
     if (!out.data) { fail(out.failure ?? 'unparsed'); await keepWords(); continue }
     result.repaired += out.repairs ?? 0

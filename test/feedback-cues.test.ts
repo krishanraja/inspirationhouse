@@ -264,6 +264,17 @@ describe('his presses on the publish board', () => {
     }
   })
 
+  it('files an Improve press as a piece for later, with his note whole (the ideas gate\'s fifth outcome)', () => {
+    const b = boardPresses([doc({ use: 'improve', note: 'Synthetic: needs a second source and a sharper number.' })])
+    const s = b.queue.get(IDEA)![0]!.said!
+    expect(b.unread).toBe(0)
+    expect(s.said).toBe('Synthetic: needs a second source and a sharper number.')
+    expect(classify(s)).toMatchObject({ use: 'future_piece', origin: 'krish', rule: 'board_improve' })
+    const [cue] = assemble(mergePresses([], b), readAll([s]))
+    expect(cue).toMatchObject({ source: 'idea_queue', sourceRef: `${IDEA}:future_piece`, use: 'future_piece', useOrigin: 'krish' })
+    expect(cue!.meta).toMatchObject({ via: 'board', decided_by: 'Krish', press: 'improve' })
+  })
+
   it('files a reject with his reason, and keeps a note and a reason whole together', () => {
     const b = boardPresses([doc({ use: 'not_for_us', reason: 'Synthetic: too thin.', note: 'Synthetic: seen it everywhere.' })])
     const s = b.queue.get(IDEA)![0]!.said!
