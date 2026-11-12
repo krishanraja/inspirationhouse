@@ -31,7 +31,8 @@ import { CUE_VENTURE, type Venture } from '../venture.ts'
 //                     for a future trend OR queue it for next week OR reject it." A queue document with an explicit
 //                     `use` is his tap naming the use, so its cue is use_origin 'krish', decided_by Krish, never a rule
 //                     or a guess: wider_piece_context and track_over_time as they are, next_week as a future_piece,
-//                     not_for_us as it is. It joins its idea's queue thread, so one idea keeps one cue per use, and the
+//                     improve (his note on what would make it a piece later, the fifth outcome of the ideas gate;
+//                     Ruling, Krish, 2026-11-11) as a future_piece, not_for_us as it is. It joins its idea's queue thread, so one idea keeps one cue per use, and the
 //                     answer in the queue that relays the same words (written after the press) is not read again by the
 //                     verdict rules. An offday press is Growth's (its approvals are not cues) and is only counted. A
 //                     pick with a note is a week_pick cue, one per week and day: the tap names a day, so reading the
@@ -64,7 +65,7 @@ export type CueSource = 'idea_queue' | 'inspiration_card' | 'week_pick'
 export type UseOrigin = 'krish' | 'rule' | 'model_guess'
 
 /** The uses a press on the board's queue can name (content-engine board API, queue/<idea id> documents). */
-export const BOARD_USES = ['wider_piece_context', 'track_over_time', 'next_week', 'not_for_us', 'offday'] as const
+export const BOARD_USES = ['wider_piece_context', 'track_over_time', 'next_week', 'improve', 'not_for_us', 'offday'] as const
 export type BoardUse = typeof BOARD_USES[number]
 /** A press that can become a cue: a queue press other than offday, or a pick. */
 export type BoardPress = Exclude<BoardUse, 'offday'> | 'pick'
@@ -169,6 +170,7 @@ export function pressReading(press: BoardPress, said: string): Reading {
     case 'wider_piece_context': return { use: 'wider_piece_context', theme: themeOf(said), origin: 'krish', rule: 'board_wider' }
     case 'track_over_time': return { use: 'track_over_time', theme: null, origin: 'krish', rule: 'board_track' }
     case 'next_week': return { use: 'future_piece', theme: null, origin: 'krish', rule: 'board_next_week' }
+    case 'improve': return { use: 'future_piece', theme: null, origin: 'krish', rule: 'board_improve' }
     case 'not_for_us': return { use: 'not_for_us', theme: null, origin: 'krish', rule: 'board_not_for_us' }
     case 'pick': return { use: 'brief', theme: null, origin: 'rule', rule: 'board_pick_note' }
   }
