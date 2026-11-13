@@ -122,12 +122,21 @@ describe('syncHarness', () => {
     expect(calls).toEqual(['update 12'])
     expect(bodies).toEqual([pullBody(setHash(rules))])
   })
-  it('rebuilds an open pull request whose set changed, and names the new set in its body', async () => {
+  it('writes a changed set onto an open pull request without ever resetting its branch, and names the new set', async () => {
+    // A reset makes the head equal main, and GitHub closes the pull request: the machine's close then read as his
+    // decline (ai-harness #193). So an open pull request's branch only ever gains commits.
     const older = rules.slice(0, 1)
     const { gh, calls, bodies } = fakeGitHub({}, 12, { branch: rendered(older) })
-    expect((await syncHarness(db(rules), gh, true)).pull).toBe(12)
-    expect(calls).toEqual([`reset ${SYNC_BRANCH}`, ...HARNESS_FILES.map(f => `write ${f.path}`), 'update 12'])
+    expect(await syncHarness(db(rules), gh, true)).toEqual({ rules: 3, changed: 2, written: 2, pull: 12, declined: null })
+    expect(calls).toEqual([...HARNESS_FILES.map(f => `write ${f.path}`), 'update 12'])
+    expect(calls.some(c => c.startsWith('reset'))).toBe(false)
     expect(bodies).toEqual([pullBody(setHash(rules))])
+  })
+  it('writes only the file that changed onto an open pull request', async () => {
+    const voiceOnly = rules.filter(r => r.lane !== 'strategy')
+    const { gh, calls } = fakeGitHub({}, 12, { branch: rendered(voiceOnly) })
+    expect((await syncHarness(db(rules), gh, true)).written).toBe(1)
+    expect(calls).toEqual([`write ${HARNESS_FILES[0]!.path}`, 'update 12'])
   })
   it('never opens again a set he closed without merging', async () => {
     const closed: Closed = [{ number: 9, merged: false, body: pullBody(setHash(rules)) }]

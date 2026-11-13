@@ -101,6 +101,8 @@ export interface GitHubApi {
   closedPulls(branch: string): Promise<Array<{ number: number; merged: boolean; body: string }>>
   createPull(branch: string, base: string, title: string, body: string): Promise<number>
   updatePull(pull: number, body: string): Promise<void>
+  /** Send a repository_dispatch event. Optional: only the ai-harness client sends one (src/publish/repeats.ts). */
+  dispatch?(eventType: string, payload: Record<string, unknown>): Promise<void>
 }
 
 export interface HarnessSyncResult {
@@ -180,13 +182,25 @@ export async function syncPull(gh: GitHubApi, opts: {
       await gh.updatePull(pull, opts.body(hash))
       return { ...result, pull }
     }
+    // The set changed while the pull request is open: write the new set on top of its branch. Never reset an open pull
+    // request's branch to the default branch: GitHub closes a pull request whose head equals its base, and the body
+    // then named a set he never saw, so the next run read the machine's close as his decline (ai-harness #193, closed
+    // 2026-11-05 05:47:21 by the reset, ruled not a decline by Krish on 2026-11-13).
+    let written = 0
+    for (const [i, f] of wanted.entries()) {
+      if (onBranch[i]?.text === f.text) continue
+      await gh.writeFile(f.path, branch, f.text, onBranch[i]?.sha ?? null, f.message)
+      written++
+    }
+    await gh.updatePull(pull, opts.body(hash))
+    return { ...result, written, pull }
   } else {
     // He closed a pull request with this same set without merging it: he declined it, so it is not opened again.
     const declined = (await gh.closedPulls(branch)).find(p => !p.merged && p.body.includes(hashLine(hash)))
     if (declined) return { ...result, declined: declined.number }
   }
 
-  // A pull request is rebuilt from the default branch each time the set changes, so it always shows the whole set.
+  // With no pull request open, one is rebuilt from the default branch, so it always shows the whole set.
   await gh.resetBranch(branch, base)
   for (const f of changed) {
     const cur = await gh.readFile(f.path, branch)
@@ -242,6 +256,11 @@ export function githubApi(repo: string, token: string, fetcher: typeof fetch = f
     },
     async updatePull(pull, body) {
       await call('PATCH', `/pulls/${pull}`, { body })
+    },
+    async dispatch(eventType, payload) {
+      // A 404 here is a token that cannot dispatch, never a missing thing: it fails the run like any other refusal.
+      const res = await fetcher(`${api}/dispatches`, { method: 'POST', headers, body: JSON.stringify({ event_type: eventType, client_payload: payload }) })
+      if (!res.ok) throw new Error(`harness POST /dispatches failed: HTTP ${res.status}`)
     },
   }
 }
