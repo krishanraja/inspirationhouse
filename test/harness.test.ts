@@ -95,6 +95,10 @@ describe('renderApproved', () => {
     const head = renderApproved([], 'krish-voice', ['voice'])
     expect(head).toMatch(/approved or reworded each of these himself, on the board or in Control Center/)
     expect(head).toMatch(/built only from his own words and actions/)
+    // The judge panel on ai-harness pull request 193 asked who asked for this path: the header names his written asks.
+    expect(head).toContain('Ruling, Krish, 2026-10-24: "Rules arrive by PR"')
+    expect(head).toContain('Krish, 2026-10-26:\n"start the two-way build"')
+    expect(head).toContain('Krish, 2026-10-28: "The ledger is keyed by venture not repository"')
     const voice = renderApproved(rules, 'krish-voice', ['voice', 'strategy'])
     expect(voice).toContain('- [voice (opening), approved 2026-10-25, claim a] Open on the concrete thing.')
     expect(voice).toContain('- [strategy, approved 2026-10-27, claim c] Name the trade-off.')
