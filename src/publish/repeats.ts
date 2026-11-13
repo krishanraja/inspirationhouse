@@ -1,5 +1,6 @@
 import type { Db } from '../db.ts'
 import type { Venture } from '../venture.ts'
+import type { GitHubApi } from './harness.ts'
 
 // The harness's North Star counts "corrections Krish had to give twice in a week, across the fleet" (ai-harness
 // docs/NORTH_STAR.md). Its own ledger never measured it: NOW.md read "U4, not measured yet" on 2026-11-12. This
@@ -19,12 +20,12 @@ import type { Venture } from '../venture.ts'
 
 export const CORRECTION_SOURCES = ['session_report', 'title_verdicts', 'learnings_json', 'rejected_lines', 'idea_triage'] as const
 
-/** One slug's evidence count in one venture and week. */
-export interface SlugWeek { venture: Venture; attribute: string; week: string; evidence: number }
+/** One slug's evidence count in one venture and week, with the lane most of that evidence was filed in. */
+export interface SlugWeek { venture: Venture; attribute: string; week: string; evidence: number; lane?: string | null; kind?: string | null }
 
 export const REPEATS_SQL = `
   select e.venture, s.attribute, to_char(date_trunc('week', e.occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as week,
-         count(distinct e.id)::int as evidence
+         count(distinct e.id)::int as evidence, mode() within group (order by e.lane) as lane, min(s.kind) as kind
   from public.taste_signals s
   join public.taste_evidence e on e.id = s.evidence_id
   where s.superseded_at is null and s.origin = 'krish' and s.polarity = 'dislikes' and s.kind <> 'subject'
@@ -54,6 +55,8 @@ export interface RepeatReading {
   byVenture: Record<Venture, number>
   /** The repeated slugs, most evidence first, as "venture:slug=n". */
   slugs: string[]
+  /** The repeated rows themselves, most evidence first. */
+  repeats: SlugWeek[]
 }
 
 /** Count the repeated corrections of one week from per-slug rows. Pure. */
@@ -62,7 +65,7 @@ export function readRepeats(rows: SlugWeek[], week: string): RepeatReading {
     .sort((a, b) => b.evidence - a.evidence || a.venture.localeCompare(b.venture) || a.attribute.localeCompare(b.attribute))
   const byVenture: Record<Venture, number> = {}
   for (const r of repeated) byVenture[r.venture] = (byVenture[r.venture] ?? 0) + 1
-  return { week, total: repeated.length, byVenture, slugs: repeated.map(r => `${r.venture}:${r.attribute}=${r.evidence}`) }
+  return { week, total: repeated.length, byVenture, slugs: repeated.map(r => `${r.venture}:${r.attribute}=${r.evidence}`), repeats: repeated }
 }
 
 /** The last whole week's reading: Monday to Sunday, ending before the Monday of the week that holds now. */
@@ -79,5 +82,48 @@ export function repeatCounts(r: RepeatReading): Record<string, number | string> 
     repeated_corrections: r.total,
     ...Object.fromEntries(Object.entries(r.byVenture).map(([v, n]) => [`repeated_corrections_${v}`, n])),
     ...(r.slugs.length ? { repeated_correction_slugs: r.slugs.slice(0, 20).join(', ') } : {}),
+  }
+}
+
+// Each repeat goes to ai-harness's observation ledger, so the harness counts it toward its North Star and its weekly
+// proposer (scripts/propose.mjs) can turn it into a change to the skill that owns it. It goes as one redacted envelope
+// per repeated slug, by a repository_dispatch of type harness-observations (ai-harness scripts/intake-observations.mjs).
+// The skill is the one that reads this lane's approved rules (HARNESS_FILES in ./harness.ts): voice and strategy are
+// krish-voice's, production and visibility krish-design's, and how he wants the system to work with him is
+// krish-principles'. The envelope carries the slug, the venture and the counts: never his words.
+
+export function owningSkill(lane: string | null | undefined, kind: string | null | undefined): string {
+  if (kind === 'workflow') return 'krish-principles'
+  if (lane === 'production' || lane === 'visibility') return 'krish-design'
+  return 'krish-voice'
+}
+
+export interface HarnessEnvelope {
+  event_id: string; occurred_at: string; surface: 'github-actions'; kind: 'explicit_correction'
+  summary: string; evidence_ref: string; related_skill_or_rule: string
+  outcome: 'corrected'; severity: 'medium'; confidence: 'high'
+}
+
+/** One envelope per repeated slug. Its id is fixed by week, venture and slug, so a resend is recorded once. Pure. */
+export function repeatEnvelopes(r: RepeatReading): HarnessEnvelope[] {
+  return r.repeats.map(x => ({
+    event_id: `taste-ledger:${r.week}:${x.venture}:${x.attribute}`,
+    occurred_at: `${r.week}T00:00:00Z`,
+    surface: 'github-actions',
+    kind: 'explicit_correction',
+    summary: `Krish gave the same correction (${x.attribute}) in ${x.evidence} pieces of evidence in the week of ${r.week} (venture ${x.venture}), counted by the taste ledger.`,
+    evidence_ref: `inspirationhouse:taste_signals:${r.week}:${x.venture}:${x.attribute}`,
+    related_skill_or_rule: owningSkill(x.lane, x.kind),
+    outcome: 'corrected', severity: 'medium', confidence: 'high',
+  }))
+}
+
+/** ai-harness's intake takes at most 100 envelopes a dispatch (scripts/intake-observations.mjs MAX_EVENTS). */
+export const DISPATCH_MAX = 100
+
+export async function sendRepeats(gh: GitHubApi, envelopes: HarnessEnvelope[]): Promise<void> {
+  if (!gh.dispatch) throw new Error('this GitHub client cannot dispatch')
+  for (let i = 0; i < envelopes.length; i += DISPATCH_MAX) {
+    await gh.dispatch('harness-observations', { events: envelopes.slice(i, i + DISPATCH_MAX) })
   }
 }

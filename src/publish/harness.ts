@@ -101,6 +101,8 @@ export interface GitHubApi {
   closedPulls(branch: string): Promise<Array<{ number: number; merged: boolean; body: string }>>
   createPull(branch: string, base: string, title: string, body: string): Promise<number>
   updatePull(pull: number, body: string): Promise<void>
+  /** Send a repository_dispatch event. Optional: only the ai-harness client sends one (src/publish/repeats.ts). */
+  dispatch?(eventType: string, payload: Record<string, unknown>): Promise<void>
 }
 
 export interface HarnessSyncResult {
@@ -242,6 +244,11 @@ export function githubApi(repo: string, token: string, fetcher: typeof fetch = f
     },
     async updatePull(pull, body) {
       await call('PATCH', `/pulls/${pull}`, { body })
+    },
+    async dispatch(eventType, payload) {
+      // A 404 here is a token that cannot dispatch, never a missing thing: it fails the run like any other refusal.
+      const res = await fetcher(`${api}/dispatches`, { method: 'POST', headers, body: JSON.stringify({ event_type: eventType, client_payload: payload }) })
+      if (!res.ok) throw new Error(`harness POST /dispatches failed: HTTP ${res.status}`)
     },
   }
 }

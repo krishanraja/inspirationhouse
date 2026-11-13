@@ -25,7 +25,7 @@ import { distil } from './distil/claims.ts'
 import { propose, syncDecisions } from './publish/propose.ts'
 import { score } from './score/scoreboard.ts'
 import { githubApi, syncHarness } from './publish/harness.ts'
-import { repeatedCorrections, repeatCounts } from './publish/repeats.ts'
+import { repeatedCorrections, repeatCounts, repeatEnvelopes, sendRepeats } from './publish/repeats.ts'
 import { recordRun, judgeRun, type RunStatus } from './runs.ts'
 import { runRejections } from './rejection/job.ts'
 import { due, proposeRetro, readPieces, retro as retroReport, sinceLast } from './retro/retro.ts'
@@ -371,9 +371,20 @@ async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ 
   if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
   // The harness's North Star reading (src/publish/repeats.ts): read from the database alone, so it is counted even
   // when the pull request half cannot run.
-  Object.assign(ctx.counts, repeatCounts(await repeatedCorrections(ctx.db, new Date())))
+  const reading = await repeatedCorrections(ctx.db, new Date())
+  Object.assign(ctx.counts, repeatCounts(reading))
   if (!cfg.HARNESS_SYNC_TOKEN) { ctx.problems.push('harness: HARNESS_SYNC_TOKEN not configured'); return finish(ctx, 0) }
-  const r = await syncHarness(ctx.db, githubApi(cfg.HARNESS_REPO, cfg.HARNESS_SYNC_TOKEN), !ctx.dry)
+  const gh = githubApi(cfg.HARNESS_REPO, cfg.HARNESS_SYNC_TOKEN)
+  // Each repeat goes to the harness's own ledger, where its North Star and weekly proposer read it. Resending a week
+  // is harmless: the event ids are fixed, and ai-harness records each once.
+  const envelopes = repeatEnvelopes(reading)
+  if (envelopes.length && !ctx.dry) {
+    try {
+      await sendRepeats(gh, envelopes)
+      ctx.counts.repeat_envelopes_sent = envelopes.length
+    } catch (e) { ctx.problems.push(`harness: repeats not sent to the harness ledger: ${(e as Error).message}`) }
+  } else ctx.counts.repeat_envelopes_sent = 0
+  const r = await syncHarness(ctx.db, gh, !ctx.dry)
   Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, files_written: r.written,
     ...(r.pull ? { pull: r.pull } : {}), ...(r.declined ? { declined_pull: r.declined } : {}) })
   return finish(ctx, 1)
