@@ -1,0 +1,3 @@
+Status: the daily run reads content-engine's chain cap verdict (job `chain_cap` in `content_engine_runs`, written by its 03:00 UTC triage sweep) and skips its tagging while this week's newest verdict is `skipped` and names `skip_inspirationhouse_tag` (Ruling, Krish, 2026-11-14: the chain cap as proposed, approved as written); no verdict, a failed one or an unreadable ledger skips nothing.
+Next: read the 15 Nov 05:17 UTC `taste_daily` run: `items_tag_skipped_chain_cap` 1 and no `inspirationhouse-tag` row on the meter that day, while content-engine's `chain_cap` row says skipped.
+North Star check (2026-11-14): holds.
