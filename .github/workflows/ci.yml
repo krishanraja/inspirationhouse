@@ -33,10 +33,13 @@ jobs:
           ref: main
           path: .content-engine
           # And the floor's reader, so the rejections suite prints the rendered floor the way every session does
-          # (python3 scripts/floor.py --format short_video).
+          # (python3 scripts/floor.py --format short_video), with the rulings module it imports and the rulings it
+          # applies (content-engine #701: scripts/floor_rulings.py, config/floor-rulings.json).
           sparse-checkout: |
             supabase/migrations/
             scripts/floor.py
+            scripts/floor_rulings.py
+            config/floor-rulings.json
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: pnpm/action-setup@v4
