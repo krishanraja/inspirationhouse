@@ -1,3 +1,4 @@
+import { githubFetcher } from '../collect/gitTaste.ts'
 import { DRIVE, type Config } from '../config.ts'
 import type { Db } from '../db.ts'
 import type { Google } from '../google.ts'
@@ -14,7 +15,7 @@ import { attachMedia, insertMedia, keepMedia } from './keep.ts'
 import { keepStill } from './media.ts'
 import { proposeFloor, syncFloorDecisions } from './propose.ts'
 import { publishFloor } from './publish.ts'
-import { loadFloor, renderFloor, type RenderInput } from './render.ts'
+import { loadFloor, readFloorRulings, renderFloorReport, type FloorRulings, type RenderInput } from './render.ts'
 import { capturedWords, fileNear, fileQuotes, fileRecords, rejectionTablesExist, type WholeRead } from './store.ts'
 
 // The Rejections job (`pnpm engine rejections`): the floor beside the ceiling. Krish, 2026-10-28: "I want this
@@ -40,6 +41,9 @@ export interface RejectionsDeps {
   gh?: GitHubApi | null
   /** For tests whose fixture holds one production: how many productions make a pattern (FLOOR_PATTERN_MIN otherwise). */
   floorPatternMin?: number
+  /** For tests: where his rulings on the floor's wording come from (content-engine config/floor-rulings.json through the
+   *  GitHub API otherwise, src/rejection/render.ts). */
+  floorRulings?: () => Promise<FloorRulings>
 }
 
 export interface RejectionsResult {
@@ -265,14 +269,28 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     }
   }
 
-  // 6. The floor, rendered and proposed to content-engine.
+  // 6. The floor, rendered with his rulings on its wording (content-engine config/floor-rulings.json), and proposed to
+  // content-engine. Without the rulings the floor would put a wording he overruled back, so a failed read proposes nothing.
   try {
+    let rulings: FloorRulings | null = null
+    try {
+      rulings = await (d.floorRulings ?? (() => readFloorRulings(githubFetcher(d.cfg))))()
+    } catch (err) {
+      problem('rulings', err)
+      counts.rejections_rulings_unread = 1
+    }
     const input: RenderInput = tables ? await loadFloor(d.db) : inMemory(records, quotes)
-    const text = renderFloor(input)
+    const { text, rulings: ruled } = renderFloorReport(input, rulings ?? undefined)
+    Object.assign(counts, { rejections_rulings_applied: ruled.applied, rejections_rulings_kept: ruled.kept,
+      rejections_rulings_waiting: ruled.waiting.length, rejections_rulings_idle: ruled.idle.length })
+    // A ruled field holding a wording the ruling does not name is left as sent and waits on him (content-engine's
+    // floor.py --check refuses it too). Record keys only: the wording stays out of the log.
+    if (ruled.waiting.length) problems.push(`rejections rulings: ${ruled.waiting.length} ruled record(s) hold a new wording that waits on Krish (${ruled.waiting.join(', ')})`)
     counts.rejections_floor_bytes = Buffer.byteLength(text)
     if (!d.write) preview.floor = JSON.parse(text)
     const gh = d.gh !== undefined ? d.gh : d.cfg.FLOOR_SYNC_TOKEN ? githubApi(d.cfg.FLOOR_REPO, d.cfg.FLOOR_SYNC_TOKEN) : null
     if (!gh) counts.rejections_floor_token_missing = 1
+    else if (!rulings) counts.rejections_floor_held = 1
     else if (tables) {
       const p = await publishFloor(gh, text, write)
       counts.rejections_floor_changed = p.changed

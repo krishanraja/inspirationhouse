@@ -1,0 +1,3 @@
+Status: the rejections engine reads Krish's rulings on the floor's wording from content-engine `config/floor-rulings.json` through the GitHub API and applies each to the line it names before it renders `config/rejection-floor.json`, so its floor pull requests carry "two to five" words a caption page (Ruling, Krish, 2026-11-14), matching content-engine #701; a new wording on a ruled record fails the run and waits on him, and a failed read proposes nothing.
+Next: read the next real `taste_rejections` run: `rejections_rulings_kept` or `rejections_rulings_applied` 1, `rejections_rulings_waiting` 0, and any floor pull request saying "Two to five words per caption".
+North Star check (2026-11-14): holds.
