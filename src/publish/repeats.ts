@@ -99,13 +99,37 @@ export function owningSkill(lane: string | null | undefined, kind: string | null
 }
 
 export interface HarnessEnvelope {
-  event_id: string; occurred_at: string; surface: 'github-actions'; kind: 'explicit_correction'
+  event_id: string; occurred_at: string; surface: 'github-actions'; kind: 'explicit_correction' | 'successful_pattern'
   summary: string; evidence_ref: string; related_skill_or_rule: string
-  outcome: 'corrected'; severity: 'medium'; confidence: 'high'
+  outcome: 'corrected' | 'succeeded'; severity: 'medium' | 'low'; confidence: 'high'
 }
 
-/** One envelope per repeated slug. Its id is fixed by week, venture and slug, so a resend is recorded once. Pure. */
+// A week with no repeat sent nothing, so the harness could not tell "0 repeats" from "not read yet" and its North
+// Star read a false 0 (fleet integration audit harness-1, 2026-11-14). One reading marker a week now says the week
+// was read and how many repeats it holds, also when that is 0. ai-harness scripts/north-star.mjs reads the week as
+// "not measured" without it, or when fewer repeats arrived than its total. It is a receipt, not a correction.
+
+/** The week's reading marker: its evidence_ref ends in the total. Pure. */
+export function readingMarker(r: RepeatReading): HarnessEnvelope {
+  return {
+    event_id: `taste-ledger:${r.week}:reading`,
+    occurred_at: `${r.week}T00:00:00Z`,
+    surface: 'github-actions',
+    kind: 'successful_pattern',
+    summary: `The taste ledger read the week of ${r.week}: ${r.total} repeated corrections across ventures.`,
+    evidence_ref: `inspirationhouse:taste_signals:${r.week}:reading:${r.total}`,
+    related_skill_or_rule: 'krish-principles',
+    outcome: 'succeeded', severity: 'low', confidence: 'high',
+  }
+}
+
+/** One envelope per repeated slug, then the week's reading marker last, so it arrives with or after every repeat.
+ *  Each id is fixed by week (and venture and slug), so a resend is recorded once. Pure. */
 export function repeatEnvelopes(r: RepeatReading): HarnessEnvelope[] {
+  return [...repeatEnvelopesOnly(r), readingMarker(r)]
+}
+
+function repeatEnvelopesOnly(r: RepeatReading): HarnessEnvelope[] {
   return r.repeats.map(x => ({
     event_id: `taste-ledger:${r.week}:${x.venture}:${x.attribute}`,
     occurred_at: `${r.week}T00:00:00Z`,

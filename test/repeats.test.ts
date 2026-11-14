@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readRepeats, repeatedCorrections, repeatCounts, mondayOf, REPEATS_SQL, CORRECTION_SOURCES, owningSkill, repeatEnvelopes, sendRepeats, DISPATCH_MAX, type SlugWeek } from '../src/publish/repeats.ts'
+import { readRepeats, repeatedCorrections, repeatCounts, mondayOf, REPEATS_SQL, CORRECTION_SOURCES, owningSkill, repeatEnvelopes, readingMarker, sendRepeats, DISPATCH_MAX, type SlugWeek } from '../src/publish/repeats.ts'
 import { githubApi, type GitHubApi } from '../src/publish/harness.ts'
 import type { Db } from '../src/db.ts'
 
@@ -73,7 +73,7 @@ describe('the envelopes for the harness ledger', () => {
   })
   it('sends one envelope per repeat, with a fixed id, in the shape ai-harness intake accepts', () => {
     const env = repeatEnvelopes(readRepeats(rows, W))
-    expect(env).toHaveLength(2)
+    expect(env).toHaveLength(3)
     expect(env[1]).toEqual({
       event_id: 'taste-ledger:2026-11-02:heartside:production.polished_finish', occurred_at: '2026-11-02T00:00:00Z',
       surface: 'github-actions', kind: 'explicit_correction',
@@ -88,6 +88,15 @@ describe('the envelopes for the harness ledger', () => {
       expect(e.summary.length).toBeLessThanOrEqual(800)
       expect(e.evidence_ref.length).toBeLessThanOrEqual(300)
     }
+  })
+  it('always ends with the week\'s reading marker, carrying the total, also when the week has no repeat', () => {
+    const env = repeatEnvelopes(readRepeats(rows, W))
+    expect(env[env.length - 1]).toEqual(readingMarker(readRepeats(rows, W)))
+    expect(env[env.length - 1]).toMatchObject({ event_id: 'taste-ledger:2026-11-02:reading', kind: 'successful_pattern', outcome: 'succeeded', evidence_ref: 'inspirationhouse:taste_signals:2026-11-02:reading:2' })
+    const none = repeatEnvelopes(readRepeats([], W))
+    expect(none).toEqual([readingMarker(readRepeats([], W))])
+    expect(none[0]!.evidence_ref).toBe('inspirationhouse:taste_signals:2026-11-02:reading:0')
+    expect(none[0]!.event_id).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/)
   })
   it('dispatches in batches of at most the intake cap, and refuses a client that cannot dispatch', async () => {
     const sent: unknown[][] = []
