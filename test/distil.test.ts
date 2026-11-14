@@ -109,3 +109,106 @@ describe('distil against the database', () => {
     expect(w2.params[8]).toBe('00000000-0000-0000-0000-000000000001')
   })
 })
+
+describe('a venture whose answer runs out of room is read again in halves', () => {
+  // Heartside's weekly answer was cut off at max_tokens on 7 and 14 Nov 2026 (counts.distil_failures
+  // heartside:max_tokens) while its 49 whys of 31 Oct answered: too many whys for one answer, as the floor found.
+  const many = (n: number): WhyRow[] => Array.from({ length: n }, (_, i) => ({
+    id: `w${i}`, evidence_id: `00000000-0000-0000-0000-${String(i).padStart(12, '0')}`, statement: `why ${i}`, kind: 'form',
+    layer: 'packaging', lane: 'voice', polarity: 'likes', source: 'title_verdicts', attribution: 'krish_words',
+    excerpt: `he said plain words ${i}`, occurred_at: '2026-11-01T00:00:00Z',
+  }))
+  function fakeDb(rows: WhyRow[]) {
+    const calls: Array<{ sql: string; params: unknown[] }> = []
+    const db: Db = {
+      async query<T>(sql: string, params: unknown[] = []) {
+        calls.push({ sql, params })
+        if (/select distinct e\.venture/.test(sql)) return [{ venture: 'heartside' }] as T[]
+        if (/from public\.taste_whys/.test(sql)) return rows as T[]
+        if (/with prior as/.test(sql)) return [{ n: 1 }] as T[]
+        return [] as T[]
+      },
+      close: async () => {},
+    }
+    return { db, calls }
+  }
+  /** A model that runs out of room above `room` whys, and otherwise drafts one claim (or the one it is told) citing
+   *  the part's first three whys. It keeps each prompt it was sent. */
+  function roomy(room: number, statementFor: (call: number) => string = () => 'Titles should say what happens in plain words.') {
+    const prompts: string[] = []
+    const llm: Llm = {
+      model: 'stub',
+      structured: async ({ content }) => {
+        const text = (content[0] as { text: string }).text
+        prompts.push(text)
+        const n = (text.match(/<why ref=/g) ?? []).length
+        if (n > room) return { data: null, failure: 'max_tokens', model: 'stub' }
+        return { data: { claims: [draft({ statement: statementFor(prompts.length), support: [0, 1, 2], counter: [], krish_quote: null, krish_quote_ref: null })] } as never, failure: null, model: 'stub' }
+      },
+    }
+    return { llm, prompts }
+  }
+
+  it('reads a cut-off venture again as two halves, keeps both answers and records no failure', async () => {
+    const rows = many(40)
+    const { db } = fakeDb(rows)
+    const { llm, prompts } = roomy(25, call => `Claim number ${call} says what happens in plain words.`)
+    const r = await distil(db, llm, 'run', false)
+    expect(prompts).toHaveLength(3)
+    expect((prompts[1]!.match(/<why ref=/g) ?? []).length).toBe(20)
+    expect((prompts[2]!.match(/<why ref=/g) ?? []).length).toBe(20)
+    expect(r.failed).toBe(false)
+    expect(r.failures).toEqual([])
+    expect(r.splits).toBe(1)
+    expect(r.calls).toBe(3)
+    expect(r.drafted).toBe(2)
+    expect(r.resolved).toBe(2)
+  })
+
+  it('resolves each half against its own whys, and shows the second half what the first drafted', async () => {
+    const rows = many(40)
+    const { db, calls } = fakeDb(rows)
+    const { llm, prompts } = roomy(25, call => `Claim number ${call} says what happens in plain words.`)
+    await distil(db, llm, 'run', true)
+    expect(prompts[2]).toContain('- Claim number 2 says what happens in plain words.')
+    const writes = calls.filter(c => /with prior as/.test(c.sql))
+    expect(writes).toHaveLength(2)
+    expect(JSON.parse(writes[0]!.params[1] as string)).toEqual(rows.slice(0, 3).map(w => w.evidence_id))
+    expect(JSON.parse(writes[1]!.params[1] as string)).toEqual(rows.slice(20, 23).map(w => w.evidence_id))
+  })
+
+  it('writes a claim both halves drafted once, on the evidence of both', async () => {
+    const rows = many(40)
+    const { db, calls } = fakeDb(rows)
+    const { llm } = roomy(25)
+    const r = await distil(db, llm, 'run', true)
+    expect(r.resolved).toBe(1)
+    const writes = calls.filter(c => /with prior as/.test(c.sql))
+    expect(writes).toHaveLength(1)
+    expect(JSON.parse(writes[0]!.params[1] as string)).toEqual([...rows.slice(0, 3), ...rows.slice(20, 23)].map(w => w.evidence_id))
+  })
+
+  it('splits again while a half is still too big, and fails only a part too small to split', async () => {
+    const { db } = fakeDb(many(80))
+    const deep = roomy(25)
+    const r = await distil(db, deep.llm, 'run', false)
+    expect(r.failed).toBe(false)
+    expect(r.splits).toBe(3)
+    const small = fakeDb(many(20))
+    const never = roomy(5)
+    const s = await distil(small.db, never.llm, 'run', false)
+    expect(never.prompts).toHaveLength(1)
+    expect(s.failed).toBe(true)
+    expect(s.failures).toEqual(['heartside:max_tokens'])
+  })
+
+  it('keeps one item’s whys in one half, so no item is cut in two', async () => {
+    const rows = many(40).map((w, i) => ({ ...w, evidence_id: `00000000-0000-0000-0000-${String(Math.floor(i / 3)).padStart(12, '0')}` }))
+    const { db } = fakeDb(rows)
+    const { llm, prompts } = roomy(25, call => `Claim number ${call} says what happens in plain words.`)
+    await distil(db, llm, 'run', false)
+    // 40 whys in items of three: the middle, row 20, is the last of item 6 (rows 18 to 20), so the first half ends there.
+    expect((prompts[1]!.match(/<why ref=/g) ?? []).length).toBe(21)
+    expect((prompts[2]!.match(/<why ref=/g) ?? []).length).toBe(19)
+  })
+})

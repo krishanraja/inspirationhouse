@@ -93,6 +93,33 @@ export interface DistilResult {
   failures: string[]
   /** Ventures distilled, and those skipped for resting on fewer than three of his rows (a claim needs three). */
   ventures: number; skipped: number
+  /** Model calls made, and how many times a part whose answer ran out of room was read again as two halves. */
+  calls: number; splits: number
+}
+
+/**
+ * When one answer runs out of room. Heartside's weekly answer was cut off at max_tokens on 7 and 14 Nov 2026 with 148
+ * and 185 whys, where its 49 whys of 31 Oct had answered: too many whys for one answer to hold, as the floor found
+ * (src/rejection/distil.ts). So a part whose answer is cut off is read again as two halves, each told the claims already
+ * drafted for its venture, while each half keeps at least DISTIL_SPLIT_MIN whys; a smaller part that is still cut off
+ * fails, and the run says so (AGENTS.md rule 8).
+ */
+export const DISTIL_SPLIT_MIN = 12
+const DISTIL_MAX_TOKENS = 32000
+
+/** Two halves of a part, cut between items so all of one item's whys stay together (they arrive side by side). */
+export function halve(part: WhyRow[]): [WhyRow[], WhyRow[]] {
+  let mid = Math.ceil(part.length / 2)
+  while (mid < part.length && part[mid]!.evidence_id === part[mid - 1]!.evidence_id) mid++
+  if (mid >= part.length) mid = Math.ceil(part.length / 2)
+  return [part.slice(0, mid), part.slice(mid)]
+}
+
+/** One claim drafted in two halves is one claim: on the evidence of both, with the first quote that resolved. */
+function merge(into: Resolved, more: Resolved): void {
+  into.evidenceIds = [...new Set([...into.evidenceIds, ...more.evidenceIds])]
+  into.counterIds = [...new Set([...into.counterIds, ...more.counterIds])].filter(id => !into.evidenceIds.includes(id))
+  if (!into.krish && more.krish) { into.krish = more.krish; into.krishSourceId = more.krishSourceId }
 }
 
 /** The whys a claim may rest on: his standing evidence of the last year, newest first. */
@@ -109,7 +136,7 @@ const WHYS_SQL = `
  * model sees only that venture's whys and existing claims, with its name, so no venture's pattern is read as another's.
  */
 export async function distil(db: Db, llm: Llm, runId: string, write = true): Promise<DistilResult> {
-  const result: DistilResult = { whys: 0, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0, ventures: 0, skipped: 0, failures: [] }
+  const result: DistilResult = { whys: 0, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0, ventures: 0, skipped: 0, failures: [], calls: 0, splits: 0 }
   const ventures = (await db.query<{ venture: Venture }>(
     `select distinct e.venture from public.taste_whys w join public.taste_evidence e on e.id = w.evidence_id
      where e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null`,
@@ -123,24 +150,50 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
       `select statement from public.taste_claims where venture = $1 and status in ('candidate', 'proposed') order by updated_at desc limit 40`,
       [venture],
     )
-    const out = await llm.structured({
-      schema: ClaimSchema,
-      system: DISTIL_SYSTEM,
-      content: [{
-        type: 'text',
-        text: [
-          `Venture: ${ventureName(venture)}\n`,
-          existing.length ? `Existing claims for ${ventureName(venture)}:\n${existing.map(e => `- ${e.statement}`).join('\n')}\n` : '',
-          whys.map((w, ref) => renderWhy(ref, w)).join('\n'),
-        ].join('\n'),
-      }],
-      maxTokens: 32000,
-    })
-    // One venture's answer refused or cut off leaves the others to be distilled.
-    if (!out.data) { result.failed = true; result.failures.push(`${venture}:${out.failure ?? 'unparsed'}`); continue }
-    result.repaired += out.repairs ?? 0
-    result.drafted += out.data.claims.length
-    const resolved = out.data.claims.map(c => resolveClaim(c, whys)).filter((r): r is Resolved => r !== null)
+    // What this venture has drafted so far, by fingerprint; each later half is shown its statements, so one claim keeps
+    // one statement across halves.
+    const drafted = new Map<string, Resolved>()
+    const read = async (part: WhyRow[]): Promise<void> => {
+      const shown = [...existing.map(e => e.statement), ...[...drafted.values()].map(r => r.claim.statement)]
+      result.calls++
+      const out = await llm.structured({
+        schema: ClaimSchema,
+        system: DISTIL_SYSTEM,
+        content: [{
+          type: 'text',
+          text: [
+            `Venture: ${ventureName(venture)}\n`,
+            shown.length ? `Existing claims for ${ventureName(venture)}:\n${shown.map(st => `- ${st}`).join('\n')}\n` : '',
+            part.map((w, ref) => renderWhy(ref, w)).join('\n'),
+          ].join('\n'),
+        }],
+        maxTokens: DISTIL_MAX_TOKENS,
+      })
+      if (!out.data) {
+        if (out.failure === 'max_tokens' && part.length >= DISTIL_SPLIT_MIN * 2) {
+          result.splits++
+          const [a, b] = halve(part)
+          await read(a)
+          await read(b)
+          return
+        }
+        // One venture's answer refused or cut off leaves the others to be distilled.
+        result.failed = true
+        const why = `${venture}:${out.failure ?? 'unparsed'}`
+        if (!result.failures.includes(why)) result.failures.push(why)
+        return
+      }
+      result.repaired += out.repairs ?? 0
+      result.drafted += out.data.claims.length
+      // Each half's refs are its own: a claim resolves against the whys that half was shown.
+      for (const r of out.data.claims.map(c => resolveClaim(c, part)).filter((x): x is Resolved => x !== null)) {
+        const prior = drafted.get(r.fingerprint)
+        if (prior) merge(prior, r)
+        else drafted.set(r.fingerprint, r)
+      }
+    }
+    await read(whys)
+    const resolved = [...drafted.values()]
     result.resolved += resolved.length
     if (write) result.written += await writeClaims(db, venture, resolved, runId)
   }
