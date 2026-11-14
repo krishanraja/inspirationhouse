@@ -89,6 +89,8 @@ export function resolveClaim(c: DraftClaim, whys: WhyRow[]): Resolved | null {
 
 export interface DistilResult {
   whys: number; drafted: number; resolved: number; written: number; failed: boolean; repaired: number
+  /** Each failed venture with why its answer was not data (refusal, max_tokens or unparsed), so a failure can be told apart. */
+  failures: string[]
   /** Ventures distilled, and those skipped for resting on fewer than three of his rows (a claim needs three). */
   ventures: number; skipped: number
 }
@@ -107,7 +109,7 @@ const WHYS_SQL = `
  * model sees only that venture's whys and existing claims, with its name, so no venture's pattern is read as another's.
  */
 export async function distil(db: Db, llm: Llm, runId: string, write = true): Promise<DistilResult> {
-  const result: DistilResult = { whys: 0, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0, ventures: 0, skipped: 0 }
+  const result: DistilResult = { whys: 0, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0, ventures: 0, skipped: 0, failures: [] }
   const ventures = (await db.query<{ venture: Venture }>(
     `select distinct e.venture from public.taste_whys w join public.taste_evidence e on e.id = w.evidence_id
      where e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null`,
@@ -135,7 +137,7 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
       maxTokens: 32000,
     })
     // One venture's answer refused or cut off leaves the others to be distilled.
-    if (!out.data) { result.failed = true; continue }
+    if (!out.data) { result.failed = true; result.failures.push(`${venture}:${out.failure ?? 'unparsed'}`); continue }
     result.repaired += out.repairs ?? 0
     result.drafted += out.data.claims.length
     const resolved = out.data.claims.map(c => resolveClaim(c, whys)).filter((r): r is Resolved => r !== null)

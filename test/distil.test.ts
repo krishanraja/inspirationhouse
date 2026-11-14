@@ -78,6 +78,14 @@ describe('distil against the database', () => {
   }
   const llm = (claim: DraftClaim): Llm => ({ model: 'stub', structured: async () => ({ data: { claims: [claim] } as never, failure: null, model: 'stub' }) })
 
+  it('names the venture and the kind of each failed answer, so a failed run can be diagnosed', async () => {
+    const { db } = fake()
+    const cut: Llm = { model: 'stub', structured: async () => ({ data: null, failure: 'max_tokens', model: 'stub' }) }
+    const r = await distil(db, cut, 'run', false)
+    expect(r.failed).toBe(true)
+    expect(r.failures).toEqual(['publication:max_tokens'])
+  })
+
   it('reads only evidence still standing, one venture at a time', async () => {
     const { db, calls } = fake()
     await distil(db, llm(draft()), 'run', false)
