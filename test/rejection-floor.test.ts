@@ -4,7 +4,7 @@ import {
   type DraftStandard, type FloorQuote, type FloorRecord,
 } from '../src/rejection/distil.ts'
 import {
-  scrub, assertPublic, renderFloor, loadFloor, FLOOR_FILE,
+  scrub, assertPublic, renderFloor, loadFloor, FLOOR_FILE, renderFloorReport, applyFloorRulings, readFloorRulings, FLOOR_RULINGS_FILE, NO_FLOOR_RULINGS,
   type MediaViewRow, type QuoteViewRow, type RecordViewRow, type RenderInput, type StandardRow, productionOf } from '../src/rejection/render.ts'
 import { floorPullBody, publishFloor, FLOOR_BRANCH, FLOOR_CLOSEOUT_LINE } from '../src/rejection/publish.ts'
 import { fileCapture, fileReportDislike, type InboxRow, type ReportEvidence } from '../src/rejection/arrivals.ts'
@@ -880,5 +880,67 @@ describe('the rejections counters in the public log', () => {
   it('keeps a rejections_ counter and drops any text', () => {
     expect(safeFields({ rejections_floor_bytes: 2048, rejections_distil_failed: 0 })).toEqual({ rejections_floor_bytes: 2048, rejections_distil_failed: 0 })
     expect(safeFields({ rejections_statement: 'synthetic: a standard', rejections_said: 'synthetic: his words', statement: 'synthetic: a claim' })).toEqual({})
+  })
+})
+
+// Krish ruled the caption record's wording (Ruling, Krish, 2026-11-14: a caption page holds two to five words, and the
+// rejections engine keeps the ruled wording). content-engine keeps the ruling in config/floor-rulings.json (#701), and
+// the floor this engine rebuilds from the unchanged record must carry it, not "two to four".
+const CAPTION_FOUR = 'Two to four words per caption in sentence case (Archivo), at most one punch word per beat in Anton capitals with the mint swipe.'
+const CAPTION_FIVE = 'Two to five words per caption in sentence case (Archivo), at most one punch word per beat in Anton capitals with the mint swipe. Ruling (Krish, 2026-11-14): synthetic ruled line.'
+const captionInput = (): RenderInput => {
+  const input = floorInput()
+  input.records[0] = { ...input.records[0]!, wanted_instead: CAPTION_FOUR }
+  return input
+}
+const captionRef = () => keyOf(parse(renderFloor(captionInput())), 'synthetic: a stock robot on the card')
+const captionRulings = (ref: string) => ({
+  about: 'synthetic: the shape of content-engine config/floor-rulings.json',
+  records: { [ref]: { field: 'wanted_instead', ruled: CAPTION_FIVE, replaces: [CAPTION_FOUR], ruling: 'Ruling (Krish, 2026-11-14): synthetic', his_words: [{ said: 'synthetic', on: '2026-11-14', where: 'synthetic' }] } },
+})
+
+describe('his rulings on the floor’s wording', () => {
+  it('writes the ruled caption wording, two to five, over the record’s two to four', () => {
+    const ref = captionRef()
+    const text = renderFloor(captionInput(), captionRulings(ref) as never)
+    const doc = JSON.parse(text) as { records: Record<string, { wanted_instead: string | null }> }
+    expect(doc.records[ref]!.wanted_instead).toBe(CAPTION_FIVE)
+    expect(text).not.toContain('Two to four')
+  })
+
+  it('hashes the ruled file, so its version is the version of what is sent, the same every time', () => {
+    const rulings = captionRulings(captionRef()) as never
+    const ruled = parse(renderFloor(captionInput(), rulings))
+    expect(renderFloor(captionInput(), rulings)).toBe(renderFloor(captionInput(), rulings))
+    expect(ruled.version).not.toBe(parse(renderFloor(captionInput())).version)
+    // A record that already holds the ruled wording renders as the ruled file does.
+    const already = captionInput()
+    already.records[0] = { ...already.records[0]!, wanted_instead: CAPTION_FIVE }
+    expect(renderFloor(already, rulings)).toBe(renderFloor(captionInput(), rulings))
+  })
+
+  it('leaves a new wording from the engine as sent and reports it, and reports a ruling with no record', () => {
+    const ref = captionRef()
+    const changed = captionInput()
+    changed.records[0] = { ...changed.records[0]!, wanted_instead: 'Three words per caption.' }
+    const r = renderFloorReport(changed, { records: { ...captionRulings(ref).records, rmissing0000: { field: 'wanted_instead', ruled: 'x', replaces: [], ruling: '' } } })
+    expect((JSON.parse(r.text) as { records: Record<string, { wanted_instead: string }> }).records[ref]!.wanted_instead).toBe('Three words per caption.')
+    expect(r.rulings).toEqual({ applied: 0, kept: 0, waiting: [ref], idle: ['rmissing0000'] })
+    expect(renderFloorReport(captionInput(), captionRulings(ref) as never).rulings).toEqual({ applied: 1, kept: 0, waiting: [], idle: [] })
+    const records: Record<string, Record<string, unknown>> = { [ref]: { wanted_instead: CAPTION_FIVE } }
+    expect(applyFloorRulings(records, captionRulings(ref) as never)).toEqual({ applied: 0, kept: 1, waiting: [], idle: [] })
+  })
+
+  it('reads content-engine config/floor-rulings.json through the GitHub read path: none when it is not there, any other failure thrown', async () => {
+    const asked: string[] = []
+    const ok = await readFloorRulings(async path => { asked.push(path); return captionRulings('r0000000001') })
+    expect(asked).toEqual([FLOOR_RULINGS_FILE])
+    expect(FLOOR_RULINGS_FILE).toBe('config/floor-rulings.json')
+    expect(ok.records.r0000000001).toMatchObject({ field: 'wanted_instead', ruled: CAPTION_FIVE, replaces: [CAPTION_FOUR] })
+    const missing = Object.assign(new Error('github read failed for config/floor-rulings.json: HTTP 404'), { status: 404 })
+    expect(await readFloorRulings(async () => { throw missing })).toEqual(NO_FLOOR_RULINGS)
+    const down = Object.assign(new Error('github read failed for config/floor-rulings.json: HTTP 503'), { status: 503 })
+    await expect(readFloorRulings(async () => { throw down })).rejects.toThrow(/HTTP 503/)
+    await expect(readFloorRulings(async () => ({ records: { r1: { field: 'wanted_instead' } } }))).rejects.toThrow()
   })
 })

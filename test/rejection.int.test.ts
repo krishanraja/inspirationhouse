@@ -14,7 +14,10 @@ import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts
 import { INBOX_WAIT_DAYS, runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
 import { keepMedia } from '../src/rejection/keep.ts'
 import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
-import { FLOOR_PATTERN_MIN, loadFloor, renderFloor } from '../src/rejection/render.ts'
+import { FLOOR_PATTERN_MIN, NO_FLOOR_RULINGS, loadFloor, renderFloor, type FloorRulings } from '../src/rejection/render.ts'
+import type { GitHubApi } from '../src/publish/harness.ts'
+// No test reads content-engine's rulings over the network: each run is handed them.
+const noRulings = async (): Promise<FloorRulings> => NO_FLOOR_RULINGS
 
 // The Rejections floor against a real Postgres with content-engine's real migrations (supabase/migrations/), and
 // stubs in place of Drive and the model. Synthetic rows only: nothing here is anything Krish said or any file in his
@@ -547,7 +550,7 @@ runJob('the rejections job, end to end, on a real database', () => {
     writes = []
     // The fixture holds one production per maker, so a single one makes a pattern here; the pattern bar itself is held
     // by "puts only a pattern to him" above.
-    const r = await runRejections({ db: watched, google, llm, cfg: loadConfig({}), runId, write: true, propose: true, now, gh: null, floorPatternMin: 1, ...over })
+    const r = await runRejections({ db: watched, google, llm, cfg: loadConfig({}), runId, write: true, propose: true, now, gh: null, floorPatternMin: 1, floorRulings: noRulings, ...over })
     results.push(r)
     return r
   }
@@ -913,7 +916,7 @@ runJob('the drop zone, Rejections/Inbox/, filed by a scheduled run on a real dat
 
   it('files his typed Doc as his words and every other file as an observation, and the floor shows his test reject', async () => {
     // As taste-rejections.yml runs it on its clock: a real run, no model, nothing put to him (FLOOR_PROPOSE_ENABLED off).
-    const r = await runRejections({ db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh: null })
+    const r = await runRejections({ db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh: null, floorRulings: noRulings })
     expect(r.problems).toEqual([])
     expect(r.counts).toMatchObject({ rejections_drop_files: 3, rejections_drop_his_typing: 1, rejections_drop_not_a_doc: 1,
       rejections_drop_touched_by_another: 1, rejections_drop_words: 1, rejections_drop_observations: 2 })
@@ -929,7 +932,7 @@ runJob('the drop zone, Rejections/Inbox/, filed by a scheduled run on a real dat
     expect(await client.query(`select text, attribution, said_at, said_precision from taste_rejection_quotes where text = $1`, [words]).then(q => q.rows))
       .toEqual([{ text: words, attribution: 'krish_words', said_at: new Date('2026-10-29T21:00:00Z'), said_precision: 'second' }])
     // A second run files nothing again.
-    const again = await runRejections({ db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh: null })
+    const again = await runRejections({ db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh: null, floorRulings: noRulings })
     expect(again.counts).toMatchObject({ rejections_records_new: 0, rejections_quotes_new: 0 })
 
     // The floor file every session reads holds it, and scripts/floor.py --format short_video shows it.
@@ -952,6 +955,34 @@ runJob('the drop zone, Rejections/Inbox/, filed by a scheduled run on a real dat
     } else if (process.env.REQUIRE_DB_TESTS && process.env.CI) {
       throw new Error('content-engine scripts/floor.py is not checked out beside the migrations')
     }
+  })
+
+  it('proposes the floor with his rulings on its wording applied, and proposes nothing when they cannot be read', async () => {
+    // Ruling (Krish, 2026-11-14): the rejections engine keeps the ruled wording. Ruled here on the record's what, the
+    // one string field this fixture's record carries.
+    const before = JSON.parse(renderFloor(await loadFloor(db))) as { records: Record<string, { what: string | null }> }
+    const ref = Object.entries(before.records).find(([, rec]) => rec.what === one.item)![0]
+    const ruled = 'synthetic: a line a stranger can follow'
+    const rulings: FloorRulings = { records: { [ref]: { field: 'what', ruled, replaces: [one.item], ruling: 'synthetic ruling' } } }
+    const sent: string[] = []
+    const gh: GitHubApi = {
+      readFile: async () => null, resetBranch: async () => {}, writeFile: async (_path, _branch, text) => { sent.push(text) },
+      openPull: async () => null, closedPulls: async () => [], createPull: async () => 51, updatePull: async () => {},
+    }
+    const base = { db, google: drive, llm: null, cfg: loadConfig({}), runId, write: true, propose: false, now, gh }
+    const r = await runRejections({ ...base, floorRulings: async () => rulings })
+    expect(r.problems).toEqual([])
+    expect(r.counts).toMatchObject({ rejections_rulings_applied: 1, rejections_rulings_waiting: 0, rejections_floor_written: 1, rejections_floor_pull: 51 })
+    expect(sent).toHaveLength(1)
+    const floor = JSON.parse(sent[0]!) as { records: Record<string, { what: string | null }> }
+    expect(floor.records[ref]!.what).toBe(ruled)
+    expect(sent[0]).not.toContain(one.item)
+
+    sent.length = 0
+    const down = await runRejections({ ...base, floorRulings: async () => { throw Object.assign(new Error('github read failed: HTTP 503'), { status: 503 }) } })
+    expect(down.problems).toContain('rejections rulings: Error')
+    expect(down.counts).toMatchObject({ rejections_rulings_unread: 1, rejections_floor_held: 1 })
+    expect(sent).toEqual([])
   })
 })
 

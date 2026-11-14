@@ -22,7 +22,8 @@ export function githubFetcher(cfg: Config): FetchJson {
     if (cfg.CONTENT_ENGINE_READ_TOKEN) headers.authorization = `Bearer ${cfg.CONTENT_ENGINE_READ_TOKEN}`
     const url = `https://api.github.com/repos/${cfg.CONTENT_ENGINE_REPO}/contents/${path}?ref=${encodeURIComponent(cfg.CONTENT_ENGINE_REF)}`
     const res = await fetch(url, { headers })
-    if (!res.ok) throw new Error(`github read failed for ${path}: HTTP ${res.status}`)
+    // The status rides on the error, so a reader can tell a file that is not there (404) from a failed read.
+    if (!res.ok) throw Object.assign(new Error(`github read failed for ${path}: HTTP ${res.status}`), { status: res.status })
     return res.json()
   }
 }

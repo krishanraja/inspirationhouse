@@ -1,3 +1,5 @@
+import { z } from 'zod'
+import type { FetchJson } from '../collect/gitTaste.ts'
 import type { Db } from '../db.ts'
 import { contentHash, stableJson } from '../hash.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
@@ -15,6 +17,64 @@ import { NEVERS, SORT_REV, sortStandard } from './layers.ts'
 // assertPublic() refuses to render a file that still holds one.
 
 export const FLOOR_FILE = 'config/rejection-floor.json'
+
+/**
+ * Krish's rulings on a record's wording, kept in content-engine beside the floor (content-engine #701). Ruling (Krish,
+ * 2026-11-14): a caption page holds two to five words, and the rejections engine keeps the ruled wording (his words: "I
+ * agree with everything else until Batch 6"). A record cannot be edited once written, so the floor rebuilt from it would
+ * put the old wording back; the render applies each ruling to the line it names, as content-engine's own readers do
+ * (scripts/floor_rulings.py): a field is replaced only while it holds one of the wordings the ruling replaces, or is left
+ * when it already holds the ruled one; any other wording is a new one from the engine, left as sent and reported, since
+ * it waits on him. Read through the GitHub API, never copied here (AGENTS.md rule 6).
+ */
+export const FLOOR_RULINGS_FILE = 'config/floor-rulings.json'
+
+export const FloorRulingsSchema = z.object({
+  records: z.record(z.string(), z.object({
+    field: z.string().min(1),
+    ruled: z.string().min(1),
+    replaces: z.array(z.string()).default([]),
+    ruling: z.string().default(''),
+  }).passthrough()).default({}),
+}).passthrough()
+export type FloorRulings = z.infer<typeof FloorRulingsSchema>
+export const NO_FLOOR_RULINGS: FloorRulings = { records: {} }
+
+/** content-engine's rulings file through the GitHub API: none when the file is not there (as its own reader treats it),
+ *  and any other failure thrown, so a floor is never proposed without the rulings it should carry. */
+export async function readFloorRulings(fetchJson: FetchJson): Promise<FloorRulings> {
+  let raw: unknown
+  try {
+    raw = await fetchJson(FLOOR_RULINGS_FILE)
+  } catch (err) {
+    if ((err as { status?: unknown })?.status === 404) return NO_FLOOR_RULINGS
+    throw err
+  }
+  return FloorRulingsSchema.parse(raw)
+}
+
+export interface RulingsReport {
+  /** Fields set to the ruled wording, and those that already held it. */
+  applied: number; kept: number
+  /** Rulings whose record holds a wording the ruling does not name (left as sent, waiting on him), by record key. */
+  waiting: string[]
+  /** Rulings whose record the floor does not hold, by record key. */
+  idle: string[]
+}
+
+/** Each ruling applied to the line it names, in place, as content-engine's floor_rulings.apply does. */
+export function applyFloorRulings(records: Record<string, Record<string, unknown>>, rulings: FloorRulings): RulingsReport {
+  const report: RulingsReport = { applied: 0, kept: 0, waiting: [], idle: [] }
+  for (const [ref, r] of Object.entries(rulings.records).sort(([a], [b]) => a.localeCompare(b))) {
+    const record = records[ref]
+    if (!record) { report.idle.push(ref); continue }
+    const now = record[r.field]
+    if (now === r.ruled) { report.kept++; continue }
+    if (typeof now === 'string' && r.replaces.includes(now)) { record[r.field] = r.ruled; report.applied++; continue }
+    report.waiting.push(ref)
+  }
+  return report
+}
 
 export interface StandardRow {
   id: string; fingerprint: string; formats: string[]; theme: string; layer: string | null; kind: string
@@ -138,8 +198,13 @@ export interface RenderInput {
   standards: StandardRow[]; records: RecordViewRow[]; quotes: QuoteViewRow[]; media: MediaViewRow[]
 }
 
-/** The whole floor, rendered. Pure and deterministic. */
-export function renderFloor(input: RenderInput): string {
+/** The whole floor, rendered, with his rulings on its wording applied. Pure and deterministic. */
+export function renderFloor(input: RenderInput, rulings: FloorRulings = NO_FLOOR_RULINGS): string {
+  return renderFloorReport(input, rulings).text
+}
+
+/** The floor rendered, and what each of his rulings on its wording did to it. */
+export function renderFloorReport(input: RenderInput, rulings: FloorRulings = NO_FLOOR_RULINGS): { text: string; rulings: RulingsReport } {
   const quotes = new Map(input.quotes.map(q => [q.id, q]))
   const media = new Map(input.media.map(m => [m.sha256, m]))
   const words = (ids: string[]) => ids.map(id => quotes.get(id)).filter((q): q is QuoteViewRow => Boolean(q))
@@ -165,6 +230,8 @@ export function renderFloor(input: RenderInput): string {
       ...(r.pointed ? { master: 'held in the floor database by its Drive id; never copied' } : {}),
     }
   }
+  // His rulings on a record's wording, before anything is counted or hashed: the version is the hash of the file sent.
+  const ruled = applyFloorRulings(records as Record<string, Record<string, unknown>>, rulings)
 
   // A standard's records are the standing rejections and process records that carry the words it rests on, found by
   // its quotes (the stable unit), with any it named still standing: a merge pass that re-files a record under a new
@@ -288,5 +355,5 @@ export function renderFloor(input: RenderInput): string {
   const values: string[] = []
   const text = `${JSON.stringify(doc, (_k, v: unknown) => { if (typeof v === 'string') values.push(v); return v }, 2)}\n`
   assertPublic(values.join('\n'))
-  return text
+  return { text, rulings: ruled }
 }
