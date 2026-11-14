@@ -14,6 +14,7 @@ import { answeredItemEvidence, tagItems, HEAR_TRIES } from '../src/tag/items.ts'
 import { syncReports } from '../src/collect/sessionReports.ts'
 import { syncCues } from '../src/collect/feedbackCues.ts'
 import { extractSignals, SIGNAL_PROMPT_REV } from '../src/signal/extract.ts'
+import { capSkips, readChainCap } from '../src/chainCap.ts'
 import type { DriveFile, Google } from '../src/google.ts'
 
 // End to end against a real Postgres with the real migrations, and a stub in
@@ -1002,5 +1003,30 @@ runSignals('his answers as countable taste signals', () => {
       `insert into taste_signals (evidence_id, dimension, kind, attribute, polarity, strength, origin, fingerprint, vocab_rev, prompt_rev, model)
        values ($1, 'vibes', 'form', 'vibes.good', 'likes', 2, 'model_guess', 'cccccccccccccccc', 'vocab-v1', 'test', 'stub')`, [long!.id]))
       .rejects.toThrow(/not a craft layer/)
+  })
+})
+
+run('content-engine\u2019s chain cap, read from the run ledger before the daily tagging', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  afterAll(async () => { await client?.end() })
+
+  it('skips tagging on this week\u2019s newest skipped verdict that names it, and on nothing older', async () => {
+    const now = new Date('2026-11-15T05:17:00Z')
+    expect(capSkips(await readChainCap(db, now), 'tag')).toBe(false)
+    // As content-engine's triage sweep records it (apps/control-plane/api/_chainCap.ts there): numbers only in counts.
+    await client.query(`insert into content_engine_runs (job, trigger, status, reason, counts, started_at, finished_at) values
+      ('chain_cap', 'cron', 'skipped', 'synthetic: last week', '{"over": 1, "skips": 1, "skip_inspirationhouse_tag": 1}', '2026-11-08T03:00:00Z', '2026-11-08T03:00:01Z'),
+      ('chain_cap', 'cron', 'ok', null, '{"over": 0, "skips": 0}', '2026-11-13T03:00:00Z', '2026-11-13T03:00:01Z')`)
+    expect(capSkips(await readChainCap(db, now), 'tag')).toBe(false)
+    await client.query(`insert into content_engine_runs (job, trigger, status, reason, counts, started_at, finished_at) values
+      ('chain_cap', 'cron', 'skipped', 'synthetic: over', '{"usd": 20.43, "over": 1, "skips": 1, "skip_inspirationhouse_tag": 1}', '2026-11-15T03:00:00Z', '2026-11-15T03:00:01Z'),
+      ('taste_daily', 'cron', 'ok', null, '{"skip_inspirationhouse_tag": 1}', '2026-11-15T04:00:00Z', '2026-11-15T04:00:01Z')`)
+    const cap = await readChainCap(db, now)
+    expect(cap).toMatchObject({ read: true, status: 'skipped' })
+    expect(capSkips(cap, 'tag')).toBe(true)
+    // Monday's new week reads none of last week's verdicts.
+    expect(capSkips(await readChainCap(db, new Date('2026-11-16T05:17:00Z')), 'tag')).toBe(false)
   })
 })

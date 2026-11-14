@@ -22,6 +22,7 @@ import type { DriveFile } from './google.ts'
 import { explainPending } from './explain/whys.ts'
 import { extractSignals, patternsOf } from './signal/extract.ts'
 import { distil } from './distil/claims.ts'
+import { capSkips, readChainCap } from './chainCap.ts'
 import { propose, syncDecisions } from './publish/propose.ts'
 import { score } from './score/scoreboard.ts'
 import { githubApi, syncHarness } from './publish/harness.ts'
@@ -264,7 +265,7 @@ async function reports(ctx: Ctx): Promise<void> {
   log({ stage: 'reports', dry_run: ctx.dry, ...counts })
 }
 
-async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
+async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, now: Date): Promise<{ status: RunStatus; reason: string | null }> {
   // The page's own answers live in a ledger table too.
   if (!ctx.ledger) ctx.counts.ledger_missing = true
   await collect(ctx, cfg)
@@ -283,7 +284,14 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ st
       // The same linking the cards job does, so no pasted link depends on Control Center's knock.
       await link(ctx, items.files)
       // His evidence is read either way, so the run still explains when tagging stops.
-      await tag(ctx, items.files, 60, false)
+      // Over content-engine's $15 a week chain, its daily sweep skips this tagging (src/chainCap.ts): the cards wait for
+      // the next week, or for the cards job he starts. A cap that cannot be read skips nothing.
+      const cap = await readChainCap(ctx.db, now)
+      ctx.counts.chain_cap_unread = cap.read ? 0 : 1
+      if (capSkips(cap, 'tag')) {
+        ctx.counts.items_tag_skipped_chain_cap = 1
+        log({ stage: 'tag', status: 'skipped', items_tag_skipped_chain_cap: 1 })
+      } else await tag(ctx, items.files, 60, false)
       await understand(ctx, items.files)
     }
   }
@@ -487,7 +495,7 @@ async function main(): Promise<void> {
 
   let outcome: { status: RunStatus; reason: string | null }
   try {
-    outcome = job === 'daily' ? await daily(ctx, cfg) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx)
+    outcome = job === 'daily' ? await daily(ctx, cfg, started) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx)
       : job === 'rejections' ? await rejections(ctx, cfg, started, proposeFloor) : job === 'retro' ? await retroJob(ctx, started, args.includes('--force'))
       : await harness(ctx, cfg)
   } catch (err) {
