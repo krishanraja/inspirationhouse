@@ -310,7 +310,8 @@ async function weekly(ctx: Ctx, now: Date): Promise<{ status: RunStatus; reason:
     const d = await distil(ctx.db, staged(ctx.llm, 'distil'), ctx.runId, !ctx.dry)
     Object.assign(ctx.counts, { distil_whys: d.whys, drafted: d.drafted, resolved: d.resolved, claims: d.written, distil_repaired: d.repaired,
       distil_ventures: d.ventures, distil_ventures_skipped: d.skipped })
-    if (d.failed) ctx.problems.push('distil: the model answer was refused, cut off or unparsed')
+    if (d.failed) ctx.problems.push(`distil: the model answer was refused, cut off or unparsed (${d.failures.join(', ')})`)
+    if (d.failures.length) ctx.counts.distil_failures = d.failures.join(', ')
   }
   const p = await propose(ctx.db, now, !ctx.dry)
   Object.assign(ctx.counts, { eligible: p.eligible, proposed: p.proposed })
