@@ -1,0 +1,99 @@
+name: Repository operating context
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  operating-context:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Verify the delivered context
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import {readFileSync} from 'node:fs';
+          import {createHash} from 'node:crypto';
+          for (const [path, kind, limit] of [['AGENTS.md','krish-repo-admin',400],['docs/HARNESS_CONTEXT.md','krish-repo-context',1200]]) {
+            const text = readFileSync(path,'utf8');
+            const re = new RegExp('<!-- '+kind+':start brain=([a-f0-9]{12}) sha=([a-f0-9]{12}) -->\\n([\\s\\S]*?)\\n<!-- '+kind+':end -->','g');
+            const matches = [...text.matchAll(re)];
+            if (matches.length !== 1) throw new Error('Missing or duplicate managed context: '+path);
+            const body = matches[0][3];
+            if (createHash('sha256').update(body).digest('hex').slice(0,12) !== matches[0][2]) throw new Error('Managed context drift: '+path);
+            if (body.trim().split(/\s+/).length > limit) throw new Error('Context budget exceeded: '+path);
+          }
+          if (!readFileSync('CLAUDE.md','utf8').includes('@AGENTS.md')) throw new Error('Claude must load shared repository guidance');
+          const hook = createHash('sha256').update(readFileSync('.claude/hooks/harness-closeout.mjs')).digest('hex');
+          if (hook !== '9d6d1ac460c0d45df9bbc7a10b6cd40badcee45d6fad9ee95d84139726cf8790') throw new Error('Closeout hook drift: .claude/hooks/harness-closeout.mjs is not the harness copy');
+          if (!readFileSync('.claude/settings.json','utf8').includes('harness-closeout.mjs')) throw new Error('Closeout hook is not registered in .claude/settings.json');
+          console.log('Delivered context hashes, budgets, Claude entry route and closeout hook verified.');
+          JS
+  closeout:
+    # Every session leaves NOW.md and its North Star check current (Ruling, Krish, 2026-10-22).
+    # The same file is Claude Code's Stop hook; this job holds every other client to it.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Status, next step and North Star check are current in NOW.md
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Run the hook only after proving it is the harness copy: a pull request
+        # must never be able to grade itself with bytes it edited.
+        run: |
+          set -euo pipefail
+          echo "9d6d1ac460c0d45df9bbc7a10b6cd40badcee45d6fad9ee95d84139726cf8790  .claude/hooks/harness-closeout.mjs" | sha256sum --check --status || { echo "::error::.claude/hooks/harness-closeout.mjs is not the harness copy"; exit 1; }
+          node .claude/hooks/harness-closeout.mjs --ci --base "$BASE_SHA" --head "$HEAD_SHA"
+  fold:
+    # A closeout note that reaches main is folded into NOW.md and removed, so
+    # pull requests never edit NOW.md at once (Ruling, Krish, 2026-10-28).
+    # Every attempt folds afresh from the newest main, so a steward or another
+    # fold landing first never leaves a conflicted NOW.md.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: closeout-fold
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Fold closeout notes into NOW.md
+        run: |
+          set -uo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch --quiet origin "$GITHUB_REF_NAME" && git reset --quiet --hard "origin/$GITHUB_REF_NAME" || exit 1
+            if ! ls now-notes/*.md >/dev/null 2>&1; then echo "No closeout notes to fold."; exit 0; fi
+            echo "9d6d1ac460c0d45df9bbc7a10b6cd40badcee45d6fad9ee95d84139726cf8790  .claude/hooks/harness-closeout.mjs" | sha256sum --check --status || { echo "::error::.claude/hooks/harness-closeout.mjs is not the harness copy"; exit 1; }
+            status=0; node .claude/hooks/harness-closeout.mjs --fold || status=$?
+            if [ -z "$(git status --porcelain -- NOW.md now-notes)" ]; then exit "$status"; fi
+            git add -A -- NOW.md now-notes
+            git commit --quiet -m "docs(closeout): fold closeout notes into NOW.md" -m "Written by .claude/hooks/harness-closeout.mjs --fold, delivered from krishanraja/ai-harness."
+            if git push --quiet origin "HEAD:$GITHUB_REF_NAME"; then exit "$status"; fi
+            sleep $((attempt * 5))
+          done
+          echo "::error::Main kept moving; the notes stay in now-notes/ for the next push or the nightly steward."
+          exit 1

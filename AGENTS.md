@@ -24,3 +24,9 @@ Read `NOW.md` first (where it is right now), then `README.md`. Before a session 
 10. **Every row's venture comes from `src/venture.ts` or the reporting session's own declaration, never a model's guess.** The ledger is keyed by venture (a `venture_registry` slug; Make Your Mind Up is `publication`, apart from `mindmake`), and a row keeps the venture it was filed under. A report or capture with no venture is held and counted, never filed under a guess. A compiling step (distil, the floor, the harness render, the tagger's profile) reads one venture; a read that decides what to withdraw stays whole across ventures, so one venture's step never withdraws another's rows. A new source, folder or cue source gets its venture in `src/venture.ts` first, and the migration's backfill and that file must agree (`venture_mismatch` is 0).
 
 Check before pushing: `pnpm typecheck && pnpm test`, then `pnpm engine daily --dry-run` against live data.
+
+<!-- krish-repo-admin:start brain=72f9a61493dc sha=0cc207a2c492 -->
+## Administer this repository
+
+Use `docs/HARNESS_CONTEXT.md` for the owning workflow, source of truth and checks. Preserve the goal and accepted decisions when a revision changes one part; explain material trade-offs. Verify the downstream result. Record corrections and observed outcomes through the existing capture path. Experimental results retain their conditions; inferred requirements remain proposals.
+<!-- krish-repo-admin:end -->
