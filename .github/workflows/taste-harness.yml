@@ -1,5 +1,9 @@
 name: taste-harness
 # Propose Krish's approved taste rules to the ai-harness voice and design skills, by pull request.
+# What really runs it: Control Center's clock (control-center api/_tasteClock.ts, Ruling, Krish, 2026-10-24)
+# dispatches this workflow every day at 05:47 UTC, after taste-daily. The schedule below stays as the record of
+# that time but is skipped while TASTE_ENABLED is unset, which it is; the clock's dispatch passes `clock: true`,
+# so its runs are recorded as scheduled (trigger cron, counts.clock control-center), never as manual.
 on:
   schedule:
     # 05:47 UTC daily, after taste-daily has synced his decisions. GitHub registers this only from main.
@@ -10,6 +14,10 @@ on:
         description: Read only, open no pull request
         type: boolean
         default: true
+      clock:
+        description: Set by Control Center's clock, so the run is recorded as scheduled
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -30,7 +38,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Logs on this public repository carry counts only (src/log.ts).
-      - run: pnpm -s engine harness ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+      - run: pnpm -s engine harness ${{ github.event_name == 'schedule' && '--cron' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.clock) && '--clock' || '' }} ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Contents and pull request write on krishanraja/ai-harness only.
