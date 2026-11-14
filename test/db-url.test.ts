@@ -23,7 +23,7 @@ describe('reading DATABASE_URL', () => {
 
   it('turns on TLS when the string asks for it, and refuses what is not a Postgres URL', () => {
     expect(parseDatabaseUrl(`postgres://u:p@${POOLER}:5432/postgres?sslmode=require`).ssl).toEqual({ rejectUnauthorized: false })
-    expect(() => parseDatabaseUrl('https://gojpffsrxybbpbdzzrvs.supabase.co')).toThrow(/not a postgresql/)
+    expect(() => parseDatabaseUrl('https://abcdefghijklmnopqrst.supabase.co')).toThrow(/not a postgresql/)
   })
 
   it('sends a Direct connection string through the IPv4 session pooler', () => {
