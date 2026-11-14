@@ -26,6 +26,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- the weekly distil reads a venture whose answer is cut off at max_tokens again as two halves, cut between items, each shown the claims already drafted, until a half would fall under 12 whys; a claim both halves draft is written once on the evidence of both. Heartside's answer was cut off on 7 and 14 Nov (`counts.distil_failures` heartside:max_tokens), which failed `taste_weekly` both weeks. (2026-11-14)
 - closeout notes now fold into NOW.md on the default branch (.github/workflows/closeout-fold.yml runs the harness's own fold, after checking the hook is the ai-harness copy by sha256). (2026-11-14)
 - The harness job sends one reading marker a week (event id `taste-ledger:<week>:reading`) after the week's repeats, also when the total is 0, so ai-harness can tell a real 0 from a week not yet read (`counts.reading_marker_sent`). (2026-11-14)
 - `taste-harness` takes a clock input; a run Control Center's clock dispatches is recorded as trigger `cron` with `counts.clock` = `control-center` instead of manual (audit harness-8). (2026-11-14)
@@ -44,7 +45,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-14): write each session's closeout as now-notes/YYYY-MM-DD-<slug>.md with Status:, Next: and the North Star check line, and let the fold place it.
+- Next (2026-11-14): read the next `taste_weekly` run (Saturday 21 Nov, 18:23 UTC): status ok, `distil_splits` 1 or more and no `distil_failures`.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
