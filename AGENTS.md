@@ -1,6 +1,16 @@
 # Working in Inspiration House
 
-Read `README.md` first. These rules hold for every change.
+<!-- north-star:start -->
+## North Star: read it first, every session
+
+This repository's North Star is [`docs/NORTH_STAR.md`](docs/NORTH_STAR.md). It is not set yet: only Krish sets it.
+
+- Read it before any work, every session, and say so first: it is not set, so a task moves no North Star of this repository's own.
+- Check the state line, the first line under "Where it is right now" in `NOW.md` (U4 until Krish sets a number), by [the harness contract](https://github.com/krishanraja/ai-harness/blob/main/contract/north-star-metric.md).
+- Only Krish changes it.
+<!-- north-star:end -->
+
+Read `NOW.md` first (where it is right now), then `README.md`. Before a session that changed the repository ends, write `now-notes/YYYY-MM-DD-<slug>.md` with `Status:`, `Next:` and `North Star check (YYYY-MM-DD): holds.`; it folds into `NOW.md` on main. These rules hold for every change.
 
 1. **Never write to Krish's Drive.** Google scopes stay read-only (`src/config.ts`, checked in `test/hygiene.test.ts`).
 2. **No data in the repository or the logs.** The repository is public. Fixtures are synthetic. Log through `src/log.ts`, which keeps counts and drops text. Readable previews go to `preview/`, which is gitignored.
