@@ -443,11 +443,14 @@ async function main(): Promise<void> {
   const dry = args.includes('--dry-run')
   // A dry run that costs nothing: collect and count, but call no model.
   const noModel = args.includes('--no-model')
-  const trigger = args.includes('--cron') ? 'cron' : 'manual'
+  // A run Control Center's clock dispatches (api/_tasteClock.ts) is a scheduled run like --cron, so it records 'cron'
+  // (content_engine_runs allows cron, manual and watch) and names its clock in the counts; a hand dispatch stays manual.
+  const clock = args.includes('--clock')
+  const trigger = args.includes('--cron') || clock ? 'cron' : 'manual'
   // Put the floor's standards to him (rejections only). Off unless asked: his yes comes before the first batch.
   const proposeFloor = args.includes('--propose')
   if (job !== 'daily' && job !== 'weekly' && job !== 'harness' && job !== 'cards' && job !== 'rejections' && job !== 'retro') {
-    console.error('usage: engine daily|weekly|harness|cards|rejections|retro [--dry-run] [--no-model] [--cron] [--preview] [--propose] [--force]')
+    console.error('usage: engine daily|weekly|harness|cards|rejections|retro [--dry-run] [--no-model] [--cron] [--clock] [--preview] [--propose] [--force]')
     process.exit(2)
   }
   const cfg = loadConfig()
@@ -457,7 +460,7 @@ async function main(): Promise<void> {
   // Every model call of the run, posted to Control Center's usage meter at the end (src/meter.ts).
   const meter = new Meter()
   const ctx: Ctx = {
-    db, dry, runId: randomUUID(), google: null, llm: null, counts: { dry_run: dry }, ledger: false, problems: [], preview: {}, machine: new Set(),
+    db, dry, runId: randomUUID(), google: null, llm: null, counts: { dry_run: dry, ...(clock ? { clock: 'control-center' } : {}) }, ledger: false, problems: [], preview: {}, machine: new Set(),
   }
   const [reg] = await db.query<{ ok: boolean }>(
     `select to_regclass('public.taste_evidence') is not null and to_regclass('public.inspiration_items') is not null as ok`,
