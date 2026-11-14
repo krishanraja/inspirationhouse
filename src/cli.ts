@@ -377,13 +377,17 @@ async function harness(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ 
   const gh = githubApi(cfg.HARNESS_REPO, cfg.HARNESS_SYNC_TOKEN)
   // Each repeat goes to the harness's own ledger, where its North Star and weekly proposer read it. Resending a week
   // is harmless: the event ids are fixed, and ai-harness records each once.
+  // The week's reading marker goes last, also when there is no repeat, so a 0 there is a reading, not a silence.
   const envelopes = repeatEnvelopes(reading)
-  if (envelopes.length && !ctx.dry) {
+  ctx.counts.repeat_envelopes_sent = 0
+  ctx.counts.reading_marker_sent = false
+  if (!ctx.dry) {
     try {
       await sendRepeats(gh, envelopes)
-      ctx.counts.repeat_envelopes_sent = envelopes.length
+      ctx.counts.repeat_envelopes_sent = reading.repeats.length
+      ctx.counts.reading_marker_sent = true
     } catch (e) { ctx.problems.push(`harness: repeats not sent to the harness ledger: ${(e as Error).message}`) }
-  } else ctx.counts.repeat_envelopes_sent = 0
+  }
   const r = await syncHarness(ctx.db, gh, !ctx.dry)
   Object.assign(ctx.counts, { approved_rules: r.rules, files_changed: r.changed, files_written: r.written,
     ...(r.pull ? { pull: r.pull } : {}), ...(r.declined ? { declined_pull: r.declined } : {}) })
