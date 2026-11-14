@@ -26,6 +26,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- closeout notes now fold into NOW.md on the default branch (.github/workflows/closeout-fold.yml runs the harness's own fold, after checking the hook is the ai-harness copy by sha256). (2026-11-14)
 - The harness job sends one reading marker a week (event id `taste-ledger:<week>:reading`) after the week's repeats, also when the total is 0, so ai-harness can tell a real 0 from a week not yet read (`counts.reading_marker_sent`). (2026-11-14)
 - `taste-harness` takes a clock input; a run Control Center's clock dispatches is recorded as trigger `cron` with `counts.clock` = `control-center` instead of manual (audit harness-8). (2026-11-14)
 - A failed distil names each failed venture and why its answer was not data (refusal, max_tokens or unparsed), in the run's problem line and in `counts.distil_failures`. (2026-11-14)
@@ -43,7 +44,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-14): confirm the first reading-marker row in ai-harness `state/observations` after the 16 Nov 05:47 UTC run.
+- Next (2026-11-14): write each session's closeout as now-notes/YYYY-MM-DD-<slug>.md with Status:, Next: and the North Star check line, and let the fold place it.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
