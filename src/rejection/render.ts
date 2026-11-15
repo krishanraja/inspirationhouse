@@ -81,6 +81,8 @@ export interface StandardRow {
   standing: 'approved' | 'reworded' | 'draft'; statement: string; how_to_check: string; krish: string | null
   support_n: number; action_n: number; quote_ids: string[]; record_refs: string[]; boundary_quote_ids: string[]
   decided_at: string | null
+  /** The group the taste_floor view reads this standard's decision from (its first, by when made and key), or null. */
+  group_key?: string | null
 }
 export interface RecordViewRow {
   source: string; source_ref: string; kind: string; rejected_at: string; theme: string; formats: string[]
@@ -91,11 +93,54 @@ export interface RecordViewRow {
 export interface QuoteViewRow { id: string; text: string; attribution: string; said_at: string }
 export interface MediaViewRow { sha256: string; role: string; mime: string; bytes: number; at_ms: number | null; derived_from: string | null }
 
+/**
+ * A group of the floor's standards Krish decided at /standards (content-engine taste_floor_groups), with the words he
+ * decided. Only a group he approved or corrected is read; one he rejected carries no words to a maker. `amendment` is
+ * his latest restatement of the group's words (content-engine taste_floor_group_amendments, when that table is there),
+ * which outranks the correction he made when he decided the group.
+ */
+export interface GroupViewRow {
+  key: string; title: string; never_beneath: string; member_fingerprints: string[]
+  status: 'approved' | 'corrected'; decision_note: string | null; decided_at: string
+  amendment: string | null; amended_at: string | null
+}
+
+/** content-engine's restatements of a group's words, by Krish: tolerated absent, since its migration lands on its own. */
+export const GROUP_AMENDMENTS_TABLE = 'taste_floor_group_amendments'
+
+/** One venture's groups he decided, each with his latest amendment when the amendments table exists. Ordered by key. */
+export async function loadFloorGroups(db: Db, venture: Venture = FLOOR_VENTURE): Promise<GroupViewRow[]> {
+  const groups = await db.query<Omit<GroupViewRow, 'amendment' | 'amended_at'>>(
+    `select g.key, g.title, g.never_beneath, g.member_fingerprints, gp.status, gp.decision_note, gp.decided_at::text as decided_at
+     from public.taste_floor_groups g join public.mindmake_studio_learning_proposals gp on gp.id = g.proposal_id
+     where g.venture = $1 and gp.decided_by = 'Krish' and gp.status in ('approved', 'corrected') and gp.decided_at is not null
+     order by g.key`,
+    [venture],
+  )
+  const amended = new Map<string, { statement: string; decided_at: string }>()
+  const [reg] = await db.query<{ ok: boolean }>(`select to_regclass('public.${GROUP_AMENDMENTS_TABLE}') is not null as ok`)
+  if (reg?.ok) {
+    // His latest, and among two at the same moment the one that sorts first, so the same rows always render the same.
+    const rows = await db.query<{ group_key: string; statement: string; decided_at: string }>(
+      `select distinct on (a.group_key) a.group_key, a.statement, a.decided_at::text as decided_at
+       from public.${GROUP_AMENDMENTS_TABLE} a
+       where a.venture = $1 and a.decided_by = 'Krish' and nullif(btrim(a.statement), '') is not null
+       order by a.group_key, a.decided_at desc, a.statement`,
+      [venture],
+    )
+    for (const r of rows) amended.set(r.group_key, { statement: r.statement, decided_at: r.decided_at })
+  }
+  return groups.map(g => {
+    const a = amended.get(g.key)
+    return { ...g, amendment: a?.statement ?? null, amended_at: a?.decided_at ?? null }
+  })
+}
+
 /** One venture's floor (FLOOR_VENTURE): its standards, its records, and only the quotes and media its records hold. */
-export async function loadFloor(db: Db, venture: Venture = FLOOR_VENTURE): Promise<{ standards: StandardRow[]; records: RecordViewRow[]; quotes: QuoteViewRow[]; media: MediaViewRow[] }> {
+export async function loadFloor(db: Db, venture: Venture = FLOOR_VENTURE): Promise<Required<RenderInput>> {
   const standards = await db.query<StandardRow>(
     `select id::text, fingerprint, formats, theme, layer, kind, standing, statement, how_to_check, krish, support_n, action_n,
-            quote_ids::text[] as quote_ids, record_refs, boundary_quote_ids::text[] as boundary_quote_ids, decided_at::text
+            quote_ids::text[] as quote_ids, record_refs, boundary_quote_ids::text[] as boundary_quote_ids, decided_at::text, group_key
      from public.taste_floor where venture = $1 order by fingerprint`,
     [venture],
   )
@@ -119,7 +164,8 @@ export async function loadFloor(db: Db, venture: Venture = FLOOR_VENTURE): Promi
      where exists (select 1 from public.taste_rejections r where r.venture = $1 and r.withdrawn_at is null and m.sha256 = any(r.media_sha256))`,
     [venture],
   )
-  return { standards, records, quotes, media }
+  const groups = await loadFloorGroups(db, venture)
+  return { standards, records, quotes, media, groups }
 }
 
 // Paths on his machines and in Drive for desktop, Drive and Docs links, Drive-id-shaped tokens, session ids and emails.
@@ -196,6 +242,35 @@ export function productionOf(r: { piece: string | null; rejected_at: string }): 
 
 export interface RenderInput {
   standards: StandardRow[]; records: RecordViewRow[]; quotes: QuoteViewRow[]; media: MediaViewRow[]
+  /** The groups he decided; none when absent (a run before the tables exist). */
+  groups?: GroupViewRow[]
+}
+
+/** A decided group as the floor file carries it: the words he decided, and which of the file's standards they cover. */
+export interface FloorGroup {
+  key: string; title: string; standing: 'approved' | 'reworded'; statement: string; decided_on: string; members: string[]
+}
+
+/**
+ * The words each group he decided carries to the makers. Pure. His latest amendment, else the correction he made when he
+ * decided it, else the group's own never_beneath he approved. A member is a standard in the file whose decision the
+ * taste_floor view reads from this group (its first), named by its key in the file.
+ */
+export function floorGroups(groups: GroupViewRow[], standards: StandardRow[]): FloorGroup[] {
+  const keyOfStd = (s: StandardRow) => `s${s.fingerprint.slice(0, 10)}`
+  return [...groups].sort((a, b) => a.key.localeCompare(b.key)).map(g => {
+    const members = new Set(g.member_fingerprints)
+    const note = g.status === 'corrected' && g.decision_note?.trim() ? g.decision_note : null
+    const statement = g.amendment ?? note ?? g.never_beneath
+    return {
+      key: g.key,
+      title: scrub(g.title) ?? '',
+      standing: g.amendment !== null || note !== null ? 'reworded' as const : 'approved' as const,
+      statement: scrub(statement) ?? '',
+      decided_on: day(g.amendment !== null && g.amended_at ? g.amended_at : g.decided_at),
+      members: [...new Set(standards.filter(s => members.has(s.fingerprint) && (s.group_key ?? g.key) === g.key).map(keyOfStd))].sort(),
+    }
+  })
 }
 
 /** The whole floor, rendered, with his rulings on its wording applied. Pure and deterministic. */
@@ -318,11 +393,13 @@ export function renderFloorReport(input: RenderInput, rulings: FloorRulings = NO
     }
   }
 
-  const latest = [...input.records.map(r => r.rejected_at), ...input.standards.map(s => s.decided_at ?? '')].sort().pop() ?? ''
+  const groups = floorGroups(input.groups ?? [], input.standards)
+  const latest = [...input.records.map(r => r.rejected_at), ...input.standards.map(s => s.decided_at ?? ''),
+    ...(input.groups ?? []).flatMap(g => [g.decided_at, g.amended_at ?? ''])].sort().pop() ?? ''
   const body = {
     themes: Object.fromEntries(Object.entries(THEMES).map(([k, t]) => [k, t.label])),
     floor, aims: keysIn('aim'), examples: keysIn('example'),
-    formats: byFormat, standards, records,
+    groups, formats: byFormat, standards, records,
   }
   const doc = {
     _about: [
@@ -334,6 +411,7 @@ export function renderFloorReport(input: RenderInput, rulings: FloorRulings = NO
       "Every standard sits in one of his three layers, its taste_layer (Krish, 2026-10-29: \"I would much rather the engine know what kind of thing doesn't fly with me, rather than implement incredibly specific rules everywhere\"): floor, one of the eight nevers he confirmed that day, listed under floor.nevers by the ids of content-engine's config/reference-cuts.json; aim, what great looks like, which guides and never blocks; or example, a dated example of the kind of thing that does not fly, never a new rule. Only a standard with blocks true may refuse work: a floor standard he approved or reworded. The engine sorted them (floor.sorted_by); he confirms the sort.",
       'The engine wrote every check_before_delivery; check_by says whether he approved it with the statement, or it is still a draft.',
       `weight is pattern when he raised it about ${FLOOR_PATTERN_MIN} or more productions (productions says how many), one_off when about one. A pattern is more critical to follow than a one-off, and comes first (Krish, 2026-10-28).`,
+      "groups are the groups of standards he decided at /standards, approved or reworded (a group he rejected is left out): statement is the words he decided for the whole group, his latest amendment, else his correction when he decided it, else the group's never_beneath he approved; members are the file's standards that take the group's decision. A maker holds work to a group's statement as well as to each member's own never_beneath.",
       'Media are kept in the floor database (content-engine taste_rejection_media) by sha256: a still, a six-frame strip or a 4 s clip, never a master.',
     ],
     version: contentHash(stableJson(body)),
@@ -347,6 +425,7 @@ export function renderFloorReport(input: RenderInput, rulings: FloorRulings = NO
       examples: keysIn('example').length,
       blocking: [...layerOf.values()].filter(l => l.blocks).length,
       records: input.records.filter(r => r.kind !== 'liked').length,
+      groups: groups.length,
       liked_nearby: input.records.filter(r => r.kind === 'liked').length,
     },
     ...body,
