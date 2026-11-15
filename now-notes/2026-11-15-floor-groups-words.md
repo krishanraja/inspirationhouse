@@ -1,3 +1,0 @@
-Status: the rejections engine's floor file now carries a top-level `groups` list: every group of standards Krish approved or reworded, with the words he decided for the whole group (his latest amendment in content-engine's `taste_floor_group_amendments` once that table exists, else his correction, else the group's never_beneath), its standing, decided_on and members by the file's standard keys. Until today no maker read a group's own words.
-Next: once content-engine's amendments migration is applied and its floor.py prints `groups`, read the next floor pull request (branch `floor/rejections`) and check its groups match his decisions at /standards.
-North Star check (2026-11-15): holds.
