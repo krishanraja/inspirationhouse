@@ -10,7 +10,7 @@ import type { Db } from '../src/db.ts'
 import { VENTURE_STUBS } from './stubs.ts'
 import { FOLDER_MIME, type DriveFile, type Google } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
-import { recountStandards, type DraftStandard } from '../src/rejection/distil.ts'
+import { recountStandards, standardFingerprint, type DraftStandard } from '../src/rejection/distil.ts'
 import { INBOX_WAIT_DAYS, runRejections, type RejectionsDeps, type RejectionsResult } from '../src/rejection/job.ts'
 import { keepMedia } from '../src/rejection/keep.ts'
 import { FLOOR_ELIGIBLE_SQL } from '../src/rejection/propose.ts'
@@ -22,10 +22,11 @@ const noRulings = async (): Promise<FloorRulings> => NO_FLOOR_RULINGS
 // The Rejections floor against a real Postgres with content-engine's real migrations (supabase/migrations/), and
 // stubs in place of Drive and the model. Synthetic rows only: nothing here is anything Krish said or any file in his
 // Drive, and every Drive id is made up. TASTE_MIGRATION is the same comma-separated list test/pipeline.int.test.ts
-// takes (its header is the one list), and this file runs only once it holds 20261116090000_rejections.sql:
+// takes (its header is the one list), and this file runs only once it holds 20261116090000_rejections.sql. The job
+// needs 20261124090000_floor_groups.sql too (his decisions on groups of standards, src/rejection/groups.ts):
 //   M=supabase/migrations
 //   TEST_DATABASE_URL=postgres://... \
-//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql | paste -sd, -)
+//   TASTE_MIGRATION=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql $M/20261124090000_floor_groups.sql | paste -sd, -)
 // It works in its own database beside the one given (<name>_rejections, made on first use): vitest runs test files at
 // the same time, and pipeline.int.test.ts drops schema public in the one given.
 const url = process.env.TEST_DATABASE_URL
@@ -1023,5 +1024,136 @@ runJob('the same image kept from two Drive files, on a real database', () => {
     // Noted once, however often it is kept again.
     await keepMedia(db, google, records, files, true)
     expect((await client.query(`select jsonb_array_length(meta->'also_from')::int as n from taste_rejection_media`)).rows).toEqual([{ n: 1 }])
+  })
+})
+
+// Krish decides the floor's standards in groups too (content-engine 20261124090000_floor_groups.sql; Krish, 2026-11-04:
+// "group the 215 floor standards for my approval"). A member takes its group's decision in the taste_floor view, while
+// its own row stays a candidate with no proposal of its own. On 2026-11-15 a reading of the records that drafted only
+// one of three approved members of one group (all three about one never, one opening and one close) superseded the
+// other two, so the floor rebuilt from the view dropped them, and rewrote the third's check he had approved. The shape
+// is that one, in synthetic words; the job runs over records already filed (his folder unread that day).
+run('a standard he decided through its group, on a real database', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => { ({ client, db } = await freshSchema()) }, 30_000)
+  beforeEach(async () => {
+    await client.query(`truncate public.taste_floor_groups, public.taste_floor_standards, public.taste_rejections, public.taste_rejection_quotes,
+      public.taste_rejection_media, public.taste_rejection_inbox, public.taste_watermarks, public.mindmake_studio_learning_proposals cascade`)
+  })
+  afterAll(async () => { await client?.end() })
+
+  const runId = '44444444-4444-4444-4444-444444444444'
+  const now = new Date('2026-11-15T06:00:00Z')
+  // His folder unread that day: the job reads the floor's records from the database, as every run does after filing.
+  const unread = { listFolder: async () => [], download: async () => { throw new Error('google download failed: HTTP 404') },
+    file: async () => null, downloadTo: async () => { throw new Error('synthetic: no master') } } as unknown as Google
+  const one = async (sql: string, params: unknown[] = []) => (await client.query(sql, params)).rows[0]
+
+  // Three standards about one never, his group of them approved, each check as he was shown it; one draft no group
+  // holds; and one standard in a group he rejected.
+  const OPEN = { statement: 'synthetic: never put two intro sequences back to back in one cut; always a single opening.',
+    check: 'synthetic: watch the first fifteen seconds and count the intro sequences.', formats: ['long_video', 'short_video'], layer: 'opening' }
+  const ONE_OPENING = { statement: 'synthetic: always use one opening sequence; never two intro sequences back to back.',
+    check: 'synthetic: scrub the first fifteen seconds for a second intro after the first.', formats: ['intro_outro', 'motion'], layer: 'opening' }
+  const ONE_CLOSE = { statement: 'synthetic: always end on one closing screen; never stack multiple outro screens after it.',
+    check: 'synthetic: count the closing screens in the last ten seconds.', formats: ['intro_outro'], layer: 'close' }
+  const DRAFT = { statement: 'synthetic: never fade the end card out before its last word lands.',
+    check: 'synthetic: play the last five seconds and watch the end card.', formats: ['intro_outro'], layer: 'close' }
+  const REJECTED = { statement: 'synthetic: never cut to black between the intro and the first line.',
+    check: 'synthetic: watch the cut out of the intro.', formats: ['long_video', 'short_video'], layer: 'opening' }
+  type Std = typeof OPEN
+  const key = (s: Std) => `s${standardFingerprint(s.formats, s.statement).slice(0, 10)}`
+
+  /** The records, the five standards as candidates, and his two group decisions, as content-engine writes them. */
+  const seed = async () => {
+    const q = async (text: string) => (await client.query(
+      `insert into taste_rejection_quotes (quote_key, text, said_at, said_precision, said_where, source, attribution)
+       values ($1, $2, '2026-10-20T12:00:00Z', 'day', 'a synthetic session', 'cloud', 'krish_words') returning id::text`,
+      [md5(text), text])).rows[0].id as string
+    const rec = async (ref: string, quoteId: string, formats: string[], piece: string) => client.query(
+      `insert into taste_rejections (source, source_ref, source_version, kind, rejected_at, quote_ids, attribution, item,
+         reason, strength, theme, formats, rule_kind, capture, rules_rev, venture, piece)
+       values ('drive_dump', $1, $2, 'rejected', '2026-10-20T12:00:00Z', $3::uuid[], 'krish_words', 'synthetic: the opening and the close',
+         'synthetic: one of each', 'disliked', 'structure', $4::text[], 'form', 'words', 'rules-v1', 'publication', $5)`,
+      [`dump:${ref}`, md5(ref), [quoteId], formats, piece])
+    const intro = await q('synthetic: two intros, pick one')
+    const close = await q('synthetic: one close, not three end screens')
+    await rec('synthetic-intro', intro, ['long_video', 'short_video', 'intro_outro', 'motion'], 'synthetic piece one')
+    await rec('synthetic-close', close, ['intro_outro'], 'synthetic piece two')
+    for (const [s, quoteId] of [[OPEN, intro], [ONE_OPENING, intro], [ONE_CLOSE, close], [DRAFT, close], [REJECTED, intro]] as const) {
+      await client.query(
+        `insert into taste_floor_standards (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, status, prompt_rev, venture)
+         values ($1, $2, $3, $4::text[], 'structure', $5, 'form', $6::uuid[], 'candidate', 'floor-v2', 'publication')`,
+        [standardFingerprint(s.formats, s.statement), s.statement, s.check, s.formats, s.layer, [quoteId]])
+    }
+    const group = async (groupKey: string, members: Std[], status: 'approved' | 'rejected') => {
+      const { id } = await one(
+        `insert into mindmake_studio_learning_proposals (weekly_batch_id, proposal_class, assertion, scope, evidence_event_ids,
+           independent_session_count, independent_job_count, regression_cases, proposed_change, status, decided_at, decided_by)
+         values ('floor-groups-2026-11-04', 'taste', 'synthetic: a group put to him.', $1::jsonb, '{}', 1, 0, $2::jsonb, '{}', $3,
+           '2026-11-04T10:53:00Z', 'Krish') returning id::text`,
+        [JSON.stringify({ source: 'rejections_group', key: groupKey }), JSON.stringify(members.map(m => ({ standard: key(m), how_to_check: m.check }))), status])
+      await client.query(
+        `insert into taste_floor_groups (venture, key, title, never_beneath, check_text, member_fingerprints, card, proposal_id)
+         values ('publication', $1, 'synthetic group', 'synthetic: one opening, one close.', 'synthetic: count them.', $2::text[], '{}', $3::uuid)`,
+        [groupKey, members.map(m => standardFingerprint(m.formats, m.statement)), id])
+    }
+    await group('synthetic_shape', [OPEN, ONE_OPENING, ONE_CLOSE], 'approved')
+    await group('synthetic_cut', [REJECTED], 'rejected')
+  }
+
+  // The reading of 2026-11-15, in its shape: of the five, it drafts only the first again, with a check of its own.
+  const redraft: DraftStandard = { statement: OPEN.statement, how_to_check: 'synthetic: a new check the engine wrote today.',
+    formats: OPEN.formats, theme: 'structure', layer: 'opening', kind: 'form', records: [0], krish_quote_ref: null, krish_quote: null, boundary: [] }
+  const llm: Llm = { model: 'stub', structured: async () => ({ failure: null, model: 'stub', data: { standards: [redraft] } as never }) }
+  const job = (over: Partial<RejectionsDeps> = {}) => runRejections({ db, google: unread, llm, cfg: loadConfig({}), runId, write: true,
+    propose: true, now, gh: null, floorPatternMin: 1, floorRulings: noRulings, ...over })
+  /** The floor file as the job renders it for content-engine. */
+  const floor = async () => JSON.parse(renderFloor(await loadFloor(db))) as {
+    standards: Record<string, { standing: string; taste_layer: string; never?: string; blocks: boolean; check_before_delivery: string }>
+    floor: { nevers: Array<{ id: string; standards: string[]; blocking: string[] }> }
+  }
+  const approved = [OPEN, ONE_OPENING, ONE_CLOSE]
+
+  it('keeps every member of a group he approved, with the check he approved, when a reading drafts only one of them', async () => {
+    await seed()
+    const r = await job()
+    expect(r.problems).toEqual(['rejections read: Error'])
+    expect(r.counts.rejections_distil_skipped).toBe(0)
+    const f = await floor()
+    for (const s of approved) {
+      expect(f.standards[key(s)], key(s)).toMatchObject({ standing: 'approved', taste_layer: 'floor', never: 'one_opening_one_close', blocks: true,
+        check_before_delivery: s.check })
+    }
+    expect(f.floor.nevers.find(nv => nv.id === 'one_opening_one_close')!.blocking.sort()).toEqual(approved.map(key).sort())
+    // A draft no group holds is still superseded when no reading drafts it, as before.
+    expect(f.standards[key(DRAFT)]).toBeUndefined()
+    expect((await one(`select status from taste_floor_standards where fingerprint = $1`, [standardFingerprint(DRAFT.formats, DRAFT.statement)])).status).toBe('superseded')
+    // What he rejected stays out of the floor.
+    expect(f.standards[key(REJECTED)]).toBeUndefined()
+    // And nothing he decided in a group is put to him again one by one.
+    expect(r.counts).toMatchObject({ rejections_eligible: 0, rejections_proposed: 0 })
+    expect((await one(`select count(*)::int as n from mindmake_studio_learning_proposals where scope->>'source' = 'rejections'`)).n).toBe(0)
+  })
+
+  it('brings back a member a reading superseded and the check it rewrote, as he decided them, and never one he rejected', async () => {
+    await seed()
+    // The rows as the reading of 2026-11-15 left them.
+    const fp = (s: Std) => standardFingerprint(s.formats, s.statement)
+    await client.query(`update taste_floor_standards set status = 'superseded' where fingerprint = any($1::text[])`, [[fp(ONE_OPENING), fp(ONE_CLOSE), fp(REJECTED)]])
+    await client.query(`update taste_floor_standards set how_to_check = 'synthetic: a new check the engine wrote today.' where fingerprint = $1`, [fp(OPEN)])
+    const r = await job({ llm: null })
+    expect(r.problems).toEqual(['rejections read: Error'])
+    expect(r.counts).toMatchObject({ rejections_group_restored: 2, rejections_group_checks_restored: 1 })
+    const f = await floor()
+    for (const s of approved) {
+      expect(f.standards[key(s)], key(s)).toMatchObject({ standing: 'approved', blocks: true, check_before_delivery: s.check })
+    }
+    expect((await one(`select status from taste_floor_standards where fingerprint = $1`, [fp(REJECTED)])).status).toBe('superseded')
+    expect(f.standards[key(REJECTED)]).toBeUndefined()
+    // Once is enough: a second run finds nothing to bring back.
+    const again = await job({ llm: null })
+    expect(again.counts).toMatchObject({ rejections_group_restored: 0, rejections_group_checks_restored: 0 })
   })
 })

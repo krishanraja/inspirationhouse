@@ -4,6 +4,7 @@ import { contentHash } from '../hash.ts'
 import type { Llm } from '../llm.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { normaliseWords } from './file.ts'
+import { groupDecisionSql } from './groups.ts'
 import { FORMATS, FORMAT_GROUPS, RULES_REV, THEMES, type FormatSlug, type ThemeSlug } from './vocab.ts'
 
 // The floor's standards: what the model reads into his rejections, for him to approve. The model reads text only (his
@@ -175,6 +176,8 @@ const FLOOR_MAX_TOKENS = 32000
 
 export interface FloorDistilResult {
   records: number; groups: number; drafted: number; resolved: number; written: number; superseded: number
+  /** Drafted again, but left as he decided it through its group (src/rejection/groups.ts). */
+  held: number
   /** Model calls made, and those that came back with no answer, by why (max_tokens, unparsed, refusal). */
   calls: number; failures: Record<string, number>
   skipped: boolean; failed: number; repaired: number; preview: ResolvedStandard[]
@@ -189,7 +192,7 @@ export interface FloorDistilResult {
  */
 export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolean, venture: Venture = FLOOR_VENTURE): Promise<FloorDistilResult> {
   const { records, liked } = await floorRecords(db, venture)
-  const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, calls: 0, failures: {}, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
+  const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, held: 0, calls: 0, failures: {}, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
   if (!records.length) return result
   const cursor = contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
   const [mark] = await db.query<{ cursor: string | null }>(`select cursor from public.taste_watermarks where source = $1`, [WATERMARK])
@@ -248,19 +251,22 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
 
   for (const s of drafted) {
     // Only a candidate is rewritten, and a superseded one drafted again comes back as a candidate. A standard once put
-    // to him, or retired, is never rewritten or put back. One the database refuses is counted, and the rest are written.
-    let rows: Array<{ n: number }>
+    // to him, or retired, is never rewritten or put back, nor is one he decided through its group (src/rejection/groups.ts):
+    // its row is still a candidate, but its words and check are the ones he decided on. One the database refuses is
+    // counted, and the rest are written.
+    let rows: Array<{ n: number; held: number }>
     try {
-      rows = await db.query<{ n: number }>(
+      rows = await db.query<{ n: number; held: number }>(
         `with prior as (
-           select id, status from public.taste_floor_standards where venture = $16 and fingerprint = $1 order by version desc limit 1
+           select s.id, s.status, ${groupDecisionSql('s')} as decided
+           from public.taste_floor_standards s where s.venture = $16 and s.fingerprint = $1 order by s.version desc limit 1
          ), upd as (
            update public.taste_floor_standards f
            set statement = $2, how_to_check = $3, formats = $4::text[], theme = $5, layer = $6, kind = $7,
                quote_ids = $8::uuid[], record_refs = $9::text[], boundary_quote_ids = $10::uuid[],
                krish = $11, krish_quote_id = $12::uuid, run_id = $13::uuid, model = $14, prompt_rev = $15,
                status = 'candidate'
-           from prior where f.id = prior.id and prior.status in ('candidate', 'superseded')
+           from prior where f.id = prior.id and prior.status in ('candidate', 'superseded') and prior.decided is null
            returning 1
          ), ins as (
            insert into public.taste_floor_standards
@@ -270,20 +276,24 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
            where not exists (select 1 from prior)
            returning 1
          )
-         select (select count(*) from upd)::int + (select count(*) from ins)::int as n`,
+         select (select count(*) from upd)::int + (select count(*) from ins)::int as n,
+                (select count(*) from prior where decided is not null)::int as held`,
         [s.fingerprint, s.statement, s.howToCheck, s.formats, s.theme, s.layer, s.kind, s.quoteIds, s.recordRefs, s.boundaryIds,
           s.krish, s.krishQuoteId, runId, model.slice(0, 80), FLOOR_PROMPT_REV, venture],
         { write: true },
       )
     } catch { result.refused++; continue }
     result.written += Number(rows[0]?.n ?? 0)
+    result.held += Number(rows[0]?.held ?? 0)
   }
   // A candidate this reading no longer drafts is superseded, but only when every group was read: a group whose call
-  // failed keeps its candidates until a reading succeeds.
+  // failed keeps its candidates until a reading succeeds. One he decided through its group is never superseded: a
+  // reading that does not draft it again says nothing about his decision.
   if (!result.failed && !result.refused) {
     const gone = await db.query<{ id: string }>(
-      `update public.taste_floor_standards set status = 'superseded'
-       where venture = $2 and status = 'candidate' and not (fingerprint = any($1::text[])) returning id::text`,
+      `update public.taste_floor_standards s set status = 'superseded'
+       where s.venture = $2 and s.status = 'candidate' and not (s.fingerprint = any($1::text[])) and ${groupDecisionSql('s')} is null
+       returning s.id::text`,
       [drafted.map(s => s.fingerprint), venture],
       { write: true },
     )
