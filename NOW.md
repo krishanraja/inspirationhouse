@@ -26,6 +26,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- the branch sweep takes an approved list (branch@sha) on a hand run and deletes each named branch only at that exact commit, skipping and logging anything else; the weekly run is unchanged. Copied from ai-harness's canonical script and workflow. (2026-11-15)
 - A weekly branch sweep (`.github/workflows/branch-sweep.yml`, Sunday 03:17 UTC, and by hand) deletes every remote branch whose work is already on main and lists each branch it keeps with why: unmerged work, an open pull request, protected (Ruling, Krish, 2026-11-15). The script is `.github/scripts/branch_sweep.py`, copied unchanged from ai-harness, which holds the canonical copy. (2026-11-15)
 - the rejections engine's floor file now carries a top-level `groups` list: every group of standards Krish approved or reworded, with the words he decided for the whole group (his latest amendment in content-engine's `taste_floor_group_amendments` once that table exists, else his correction, else the group's never_beneath), its standing, decided_on and members by the file's standard keys. Until today no maker read a group's own words. (2026-11-15)
 - the rejections engine reads Krish's decisions on groups of floor standards (content-engine `taste_floor_groups`): a standard he decided through its group is never rewritten, superseded or put to him again, and each run brings back any member of a group he approved or reworded that the engine superseded, with the check he was shown (`src/rejection/groups.ts`). The hand run of 2026-11-15 05:47 UTC had superseded 36 approved standards and rewritten 95 approved checks, so its floor pull request (content-engine #707, closed unmerged) dropped them; a read-only count of live data shows the next run brings back exactly those 36 and those 95. (2026-11-15)
@@ -50,7 +51,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-15): once content-engine's amendments migration is applied and its floor.py prints `groups`, read the next floor pull request (branch `floor/rejections`) and check its groups match his decisions at /standards.
+- Next (2026-11-15): run the sweep by hand with dry_run false and this repository's approved list, and read its log.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
