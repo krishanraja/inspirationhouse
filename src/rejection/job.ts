@@ -8,6 +8,7 @@ import { judgeRun } from '../runs.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { fileCapture, fileReportDislike, markCollected, reportedDislikes, uncollectedInbox, type InboxRow } from './arrivals.ts'
 import { distilFloor, recountStandards } from './distil.ts'
+import { restoreGroupDecided } from './groups.ts'
 import { fileDrop, readDropZone, type DropFile } from './dropzone.ts'
 import { readDump, type Dump } from './dump.ts'
 import { fileDump, holdQuote, nearOf, type QuoteRow, type RecordRow } from './file.ts'
@@ -64,7 +65,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
 
   const tables = await rejectionTablesExist(d.db)
   counts.rejections_table_missing = tables ? 0 : 1
-  if (!tables && d.write) problems.push('rejections tables are missing: apply the rejections migration')
+  if (!tables && d.write) problems.push('rejections tables are missing: apply the rejections and floor groups migrations')
   if (!d.google) {
     if (d.write) problems.push('rejections: Google service account not configured')
     return { counts, problems, preview, input: 0 }
@@ -241,12 +242,19 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   // 5. The standards (text only), and his decisions on them.
   if (tables) {
     try { counts.rejections_retired = await syncFloorDecisions(d.db, write) } catch (err) { problem('decisions', err) }
+    // What he decided through a group stands as he decided it, before anything is drafted (src/rejection/groups.ts).
+    try {
+      const g = await restoreGroupDecided(d.db, write)
+      counts.rejections_group_restored = g.restored
+      counts.rejections_group_checks_restored = g.checks
+    } catch (err) { problem('groups', err) }
     if (d.llm) {
       try {
         const r = await distilFloor(d.db, d.llm, d.runId, write)
         Object.assign(counts, {
           rejections_distil_records: r.records, rejections_distil_groups: r.groups, rejections_drafted: r.drafted,
           rejections_standards: r.resolved, rejections_standards_written: r.written, rejections_superseded: r.superseded,
+          rejections_standards_held: r.held,
           rejections_distil_skipped: r.skipped ? 1 : 0, rejections_distil_failed: r.failed, rejections_distil_repaired: r.repaired,
           rejections_standards_refused: r.refused, rejections_distil_calls: r.calls,
         })

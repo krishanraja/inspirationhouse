@@ -56,7 +56,8 @@ jobs:
         run: |
           test "$(docker exec ${{ job.services.postgres.id }} psql -U postgres -Atc 'show server_encoding')" = UTF8
           M=.content-engine/supabase/migrations
-          files=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql | paste -sd, -)
+          # The floor groups migration too: the rejections job reads his decisions on groups of standards (src/rejection/groups.ts).
+          files=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql $M/20261124090000_floor_groups.sql | paste -sd, -)
           test -n "$files"
           echo "TASTE_MIGRATION=$files" >> "$GITHUB_ENV"
       - run: pnpm test

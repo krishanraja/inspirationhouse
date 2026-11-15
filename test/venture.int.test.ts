@@ -36,7 +36,11 @@ if (url && !/^postgres(ql)?:\/\/([^@/]*@)?(localhost|127\.0\.0\.1)(:\d+)?\//.tes
   throw new Error('TEST_DATABASE_URL must point at a local throwaway database')
 }
 const ventureFile = migrations.find(m => m.endsWith('_taste_ventures.sql'))
-const before = migrations.filter(m => m !== ventureFile)
+// The ledger as it stood is every migration listed before the venture one; those listed after it (the floor groups)
+// build on its columns, so they follow it, as on content-engine's main.
+const at = ventureFile ? migrations.indexOf(ventureFile) : migrations.length
+const before = migrations.slice(0, at)
+const after = migrations.slice(at + 1)
 // CI lists every migration on content-engine's main: there, a list without the venture migration is a fault.
 if (process.env.REQUIRE_DB_TESTS && !ventureFile) throw new Error('REQUIRE_DB_TESTS is set but TASTE_MIGRATION lacks the taste_ventures migration')
 const run = url && ventureFile ? describe : describe.skip
@@ -254,6 +258,7 @@ run('the ledger keyed by venture, on a real database', () => {
       [`inbox:${captured}`, cut, { repository: 'krishanraja/heartside', inbox_id: captured }])
 
     await client.query(readFileSync(ventureFile!, 'utf8'))
+    for (const file of after) await client.query(readFileSync(file, 'utf8'))
 
     const ev = await stored()
     expect(Object.fromEntries([...ev].filter(([, v]) => v !== 'publication'))).toEqual({

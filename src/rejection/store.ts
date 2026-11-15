@@ -5,9 +5,11 @@ import { RULES_REV } from './vocab.ts'
 // Writing what file.ts made: his quotes, then each record version, then what he liked nearby. Every write is
 // idempotent (a second run writes nothing), and a dry run writes nothing at all: it counts what a real run would.
 
-export const REJECTION_TABLES = ['taste_rejection_quotes', 'taste_rejections', 'taste_rejection_media', 'taste_rejection_inbox', 'taste_floor_standards'] as const
+// taste_floor_groups (content-engine 20261124090000_floor_groups.sql) holds his decisions on groups of standards: a run
+// that cannot read them would rewrite, supersede and put to him again what he decided (src/rejection/groups.ts).
+export const REJECTION_TABLES = ['taste_rejection_quotes', 'taste_rejections', 'taste_rejection_media', 'taste_rejection_inbox', 'taste_floor_standards', 'taste_floor_groups'] as const
 
-/** Whether content-engine's rejections migration is applied. Until it is, a real run writes nothing. */
+/** Whether content-engine's rejections and floor groups migrations are applied. Until they are, a real run writes nothing. */
 export async function rejectionTablesExist(db: Db): Promise<boolean> {
   const [r] = await db.query<{ ok: boolean }>(
     `select ${REJECTION_TABLES.map(t => `to_regclass('public.${t}') is not null`).join(' and ')} as ok`,

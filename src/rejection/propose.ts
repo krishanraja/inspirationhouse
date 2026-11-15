@@ -1,6 +1,7 @@
 import type { Db } from '../db.ts'
 import { mondayOf } from '../publish/propose.ts'
 import { FLOOR_VENTURE } from '../venture.ts'
+import { groupDecisionSql } from './groups.ts'
 import { FLOOR_PATTERN_MIN } from './render.ts'
 import { NEVERS, SORT_REV, sortStandard } from './layers.ts'
 
@@ -46,6 +47,8 @@ export const FLOOR_ELIGIBLE_SQL = `
   where s.venture = $1 and s.status = 'candidate' and s.support_n >= 1 and p.productions >= $2
     and not exists (select 1 from public.taste_floor_standards o
                     where o.venture = s.venture and o.fingerprint = s.fingerprint and o.proposal_id is not null)
+    -- Nor one he decided through its group (src/rejection/groups.ts): he has answered it once.
+    and ${groupDecisionSql('s')} is null
   order by p.productions desc, s.support_n desc, s.fingerprint`
 
 export interface FloorProposeResult { eligible: number; proposed: number; batch: string; waiting: boolean }
