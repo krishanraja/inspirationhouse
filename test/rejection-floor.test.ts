@@ -4,8 +4,8 @@ import {
   type DraftStandard, type FloorQuote, type FloorRecord,
 } from '../src/rejection/distil.ts'
 import {
-  scrub, assertPublic, renderFloor, loadFloor, FLOOR_FILE, renderFloorReport, applyFloorRulings, readFloorRulings, FLOOR_RULINGS_FILE, NO_FLOOR_RULINGS,
-  type MediaViewRow, type QuoteViewRow, type RecordViewRow, type RenderInput, type StandardRow, productionOf } from '../src/rejection/render.ts'
+  scrub, assertPublic, renderFloor, loadFloor, loadFloorGroups, floorGroups, GROUP_AMENDMENTS_TABLE, FLOOR_FILE, renderFloorReport, applyFloorRulings, readFloorRulings, FLOOR_RULINGS_FILE, NO_FLOOR_RULINGS,
+  type GroupViewRow, type MediaViewRow, type QuoteViewRow, type RecordViewRow, type RenderInput, type StandardRow, productionOf } from '../src/rejection/render.ts'
 import { floorPullBody, publishFloor, FLOOR_BRANCH, FLOOR_CLOSEOUT_LINE } from '../src/rejection/publish.ts'
 import { fileCapture, fileReportDislike, type InboxRow, type ReportEvidence } from '../src/rejection/arrivals.ts'
 import { FORMATS, FORMAT_GROUPS, type FormatSlug } from '../src/rejection/vocab.ts'
@@ -676,7 +676,8 @@ describe('rendering the floor', () => {
       close: async () => {},
     }
     const loaded = await loadFloor(db)
-    expect(sqls).toHaveLength(4)
+    // Standards, records, quotes, media, then his decided groups and whether the amendments table is there.
+    expect(sqls).toHaveLength(6)
     expect(loaded.records.map(r => r.rule_kind)).not.toContain('subject')
     const text = renderFloor(loaded)
     expect(text).not.toContain('synthetic: the angle is stale')
@@ -942,5 +943,93 @@ describe('his rulings on the floor’s wording', () => {
     const down = Object.assign(new Error('github read failed for config/floor-rulings.json: HTTP 503'), { status: 503 })
     await expect(readFloorRulings(async () => { throw down })).rejects.toThrow(/HTTP 503/)
     await expect(readFloorRulings(async () => ({ records: { r1: { field: 'wanted_instead' } } }))).rejects.toThrow()
+  })
+})
+
+// Groups of standards he decided at /standards, carried to the makers with the words he decided (synthetic rows only).
+const vgroup = (over: Partial<GroupViewRow> = {}): GroupViewRow => ({
+  key: 'synthetic-clipart', title: 'synthetic: no stock clipart', never_beneath: 'synthetic: Never stock clipart on any frame.',
+  member_fingerprints: ['a'.repeat(32), 'b'.repeat(32)], status: 'approved', decision_note: null,
+  decided_at: '2026-11-04 10:53:36+00', amendment: null, amended_at: null, ...over,
+})
+type GroupFile = FloorFile & { groups: Array<Record<string, unknown>> }
+const parseGroups = (text: string) => JSON.parse(text) as GroupFile
+
+describe('the groups he decided, in the floor file', () => {
+  it('carries an approved group with its own never_beneath and its members as the file names them', () => {
+    const doc = parseGroups(renderFloor({ ...floorInput(), groups: [vgroup()] }))
+    expect(doc.groups).toEqual([{
+      key: 'synthetic-clipart', title: 'synthetic: no stock clipart', standing: 'approved',
+      statement: 'synthetic: Never stock clipart on any frame.', decided_on: '2026-11-04', members: ['saaaaaaaaaa', 'sbbbbbbbbbb'],
+    }])
+    // Every member is a standard the file holds.
+    for (const m of doc.groups[0]!.members as string[]) expect(doc.standards[m]).toBeDefined()
+    expect(doc.counts.groups).toBe(1)
+  })
+
+  it('carries his correction as the statement of a group he corrected, as reworded', () => {
+    const [g] = floorGroups([vgroup({ status: 'corrected', decision_note: 'synthetic: his own words for the group' })], floorInput().standards)
+    expect(g).toMatchObject({ standing: 'reworded', statement: 'synthetic: his own words for the group', decided_on: '2026-11-04' })
+  })
+
+  it('puts his latest amendment above his correction, dated when he amended it', () => {
+    const [g] = floorGroups([vgroup({
+      status: 'corrected', decision_note: 'synthetic: his correction', amendment: 'synthetic: his amendment', amended_at: '2026-11-15 13:40:00+00',
+    })], floorInput().standards)
+    expect(g).toMatchObject({ standing: 'reworded', statement: 'synthetic: his amendment', decided_on: '2026-11-15' })
+    // An amendment rewords a group he had approved as it was, too.
+    const [a] = floorGroups([vgroup({ amendment: 'synthetic: his amendment', amended_at: '2026-11-15 13:40:00+00' })], [])
+    expect(a).toMatchObject({ standing: 'reworded', statement: 'synthetic: his amendment', members: [] })
+  })
+
+  it('falls back to never_beneath when a correction holds no words', () => {
+    const [g] = floorGroups([vgroup({ status: 'corrected', decision_note: '  ' })], [])
+    expect(g).toMatchObject({ standing: 'approved', statement: 'synthetic: Never stock clipart on any frame.' })
+  })
+
+  it('names as a member only a standard whose decision the view reads from this group', () => {
+    const standards = floorInput().standards.map(s => s.fingerprint === 'b'.repeat(32) ? { ...s, group_key: 'synthetic-other' } : { ...s, group_key: 'synthetic-clipart' })
+    const [g] = floorGroups([vgroup({ member_fingerprints: ['a'.repeat(32), 'b'.repeat(32), 'd'.repeat(32)] })], standards)
+    expect(g!.members).toEqual(['saaaaaaaaaa'])
+  })
+
+  it('renders the same bytes whatever order the groups are read in, and a new group changes the version', () => {
+    const two = [vgroup(), vgroup({ key: 'synthetic-a-first', member_fingerprints: ['c'.repeat(32)] })]
+    const one = renderFloor({ ...floorInput(), groups: two })
+    expect(renderFloor({ ...floorInput(), groups: [...two].reverse() })).toBe(one)
+    expect(parseGroups(one).groups.map(g => g.key)).toEqual(['synthetic-a-first', 'synthetic-clipart'])
+    expect(parseGroups(one).version).not.toBe(parseGroups(renderFloor(floorInput())).version)
+    // No groups is an empty list, never a missing field.
+    expect(parseGroups(renderFloor(floorInput())).groups).toEqual([])
+  })
+
+  it('scrubs a group statement before it reaches the public file', () => {
+    const text = renderFloor({ ...floorInput(), groups: [vgroup({ status: 'corrected', decision_note: `synthetic: see https://drive.google.com/file/d/${DRIVE_ID}/view` })] })
+    expect(text).not.toContain(DRIVE_ID)
+    expect(parseGroups(text).groups[0]!.statement).toBe('synthetic: see [link]')
+  })
+
+  it('reads only groups he approved or corrected, and his amendments only when their table is there', async () => {
+    const sqls: string[] = []
+    const fake = (hasTable: boolean): Db => ({
+      async query<T>(sql: string) {
+        sqls.push(sql)
+        if (/from public\.taste_floor_groups g/.test(sql)) {
+          return [{ key: 'synthetic-clipart', title: 't', never_beneath: 'n', member_fingerprints: [], status: 'approved', decision_note: null, decided_at: '2026-11-04 10:00:00+00' }] as T[]
+        }
+        if (/to_regclass/.test(sql)) return [{ ok: hasTable }] as T[]
+        if (sql.includes(`from public.${GROUP_AMENDMENTS_TABLE}`)) return [{ group_key: 'synthetic-clipart', statement: 'synthetic: amended', decided_at: '2026-11-15 13:40:00+00' }] as T[]
+        return [] as T[]
+      },
+      close: async () => {},
+    })
+    const without = await loadFloorGroups(fake(false))
+    expect(without[0]).toMatchObject({ amendment: null, amended_at: null })
+    expect(sqls.some(q => q.includes(GROUP_AMENDMENTS_TABLE) && !/to_regclass/.test(q))).toBe(false)
+    expect(sqls[0]).toMatch(/gp\.decided_by = 'Krish' and gp\.status in \('approved', 'corrected'\)/)
+    sqls.length = 0
+    const withTable = await loadFloorGroups(fake(true))
+    expect(withTable[0]).toMatchObject({ amendment: 'synthetic: amended', amended_at: '2026-11-15 13:40:00+00' })
+    expect(sqls.find(q => q.includes(`from public.${GROUP_AMENDMENTS_TABLE}`))).toMatch(/decided_by = 'Krish'/)
   })
 })

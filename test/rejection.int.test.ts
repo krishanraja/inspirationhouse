@@ -1156,4 +1156,29 @@ run('a standard he decided through its group, on a real database', () => {
     const again = await job({ llm: null })
     expect(again.counts).toMatchObject({ rejections_group_restored: 0, rejections_group_checks_restored: 0 })
   })
+
+  // The group's own words reach the makers: the floor file names each group he decided, the words he decided and its
+  // members. The amendments table is content-engine's (being added 2026-11-15); until it lands the floor reads none.
+  it('carries each group he decided, with the words he decided, and his latest amendment once that table is there', async () => {
+    await seed()
+    type Groups = { groups: Array<{ key: string; standing: string; statement: string; decided_on: string; members: string[] }> }
+    const groups = async () => (JSON.parse(renderFloor(await loadFloor(db))) as Groups).groups
+    expect(await groups()).toEqual([{ key: 'synthetic_shape', title: 'synthetic group', standing: 'approved',
+      statement: 'synthetic: one opening, one close.', decided_on: '2026-11-04', members: approved.map(key).sort() }])
+    await client.query(`update mindmake_studio_learning_proposals set status = 'corrected', decision_note = 'synthetic: his words for the group'
+      where scope->>'key' = 'synthetic_shape'`)
+    expect((await groups())[0]).toMatchObject({ standing: 'reworded', statement: 'synthetic: his words for the group' })
+    await client.query(`create table public.taste_floor_group_amendments (venture text not null, group_key text not null,
+      statement text not null, decided_by text not null, decided_at timestamptz not null)`)
+    try {
+      await client.query(`insert into public.taste_floor_group_amendments values
+        ('publication', 'synthetic_shape', 'synthetic: his first amendment', 'Krish', '2026-11-15T13:30:00Z'),
+        ('publication', 'synthetic_shape', 'synthetic: his latest amendment', 'Krish', '2026-11-15T13:40:00Z'),
+        ('publication', 'synthetic_shape', 'synthetic: not his', 'engine', '2026-11-15T14:00:00Z'),
+        ('heartside', 'synthetic_shape', 'synthetic: another venture', 'Krish', '2026-11-15T15:00:00Z')`)
+      expect((await groups())[0]).toMatchObject({ standing: 'reworded', statement: 'synthetic: his latest amendment', decided_on: '2026-11-15' })
+    } finally {
+      await client.query('drop table public.taste_floor_group_amendments')
+    }
+  })
 })
