@@ -1,0 +1,3 @@
+Status: A weekly branch sweep (`.github/workflows/branch-sweep.yml`, Sunday 03:17 UTC, and by hand) deletes every remote branch whose work is already on main and lists each branch it keeps with why: unmerged work, an open pull request, protected (Ruling, Krish, 2026-11-15). The script is `.github/scripts/branch_sweep.py`, copied unchanged from ai-harness, which holds the canonical copy.
+Next: once content-engine's amendments migration is applied and its floor.py prints `groups`, read the next floor pull request (branch `floor/rejections`) and check its groups match his decisions at /standards.
+North Star check (2026-11-15): holds.
