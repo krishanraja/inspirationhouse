@@ -1,7 +1,7 @@
 ---
 repo: krishanraja/inspirationhouse
 product: Inspiration House (the taste ledger)
-as_of: 2026-11-14
+as_of: 2026-11-15
 head: 6be5686
 lifecycle: live
 production_url: none
@@ -22,10 +22,11 @@ The taste ledger. It turns what Krish saves and judges into a record of why he l
 
 Krish, and every writer and maker in the fleet: output gets closer to his taste each week only through rules he approved, keyed by venture.
 
-## Where it is right now (as of 2026-11-14)
+## Where it is right now (as of 2026-11-15)
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- the rejections engine reads Krish's decisions on groups of floor standards (content-engine `taste_floor_groups`): a standard he decided through its group is never rewritten, superseded or put to him again, and each run brings back any member of a group he approved or reworded that the engine superseded, with the check he was shown (`src/rejection/groups.ts`). The hand run of 2026-11-15 05:47 UTC had superseded 36 approved standards and rewritten 95 approved checks, so its floor pull request (content-engine #707, closed unmerged) dropped them; a read-only count of live data shows the next run brings back exactly those 36 and those 95. (2026-11-15)
 - the daily run reads content-engine's chain cap verdict (job `chain_cap` in `content_engine_runs`, written by its 03:00 UTC triage sweep) and skips its tagging while this week's newest verdict is `skipped` and names `skip_inspirationhouse_tag` (Ruling, Krish, 2026-11-14: the chain cap as proposed, approved as written); no verdict, a failed one or an unreadable ledger skips nothing. (2026-11-14)
 - the rejections engine reads Krish's rulings on the floor's wording from content-engine `config/floor-rulings.json` through the GitHub API and applies each to the line it names before it renders `config/rejection-floor.json`, so its floor pull requests carry "two to five" words a caption page (Ruling, Krish, 2026-11-14), matching content-engine #701; a new wording on a ruled record fails the run and waits on him, and a failed read proposes nothing. (2026-11-14)
 - the weekly distil reads a venture whose answer is cut off at max_tokens again as two halves, cut between items, each shown the claims already drafted, until a half would fall under 12 whys; a claim both halves draft is written once on the evidence of both. Heartside's answer was cut off on 7 and 14 Nov (`counts.distil_failures` heartside:max_tokens), which failed `taste_weekly` both weeks. (2026-11-14)
@@ -47,9 +48,9 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-14): read the 15 Nov 05:17 UTC `taste_daily` run: `items_tag_skipped_chain_cap` 1 and no `inspirationhouse-tag` row on the meter that day, while content-engine's `chain_cap` row says skipped.
+- Next (2026-11-15): run taste-rejections by hand (dry_run off, use_model on; its schedule is off) and check its floor pull request: `rejections_group_restored` 36 and `rejections_group_checks_restored` 95 on its first run, 159 approved standards in the file, and s9d6db813a0, sad5604ad3b and se67ed0142d all approved and blocking under one_opening_one_close.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
 - Waiting on Krish: a North Star for this repository; `TASTE_REJECTIONS_CLOCK=on` and the first real rejections floor run (fleet decisions, batch 3).
-- North Star check (2026-11-14): holds.
+- North Star check (2026-11-15): holds.
