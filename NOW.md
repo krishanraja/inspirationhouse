@@ -1,7 +1,7 @@
 ---
 repo: krishanraja/inspirationhouse
 product: Inspiration House (the taste ledger)
-as_of: 2026-11-15
+as_of: 2026-11-17
 head: 6be5686
 lifecycle: live
 production_url: none
@@ -22,10 +22,11 @@ The taste ledger. It turns what Krish saves and judges into a record of why he l
 
 Krish, and every writer and maker in the fleet: output gets closer to his taste each week only through rules he approved, keyed by venture.
 
-## Where it is right now (as of 2026-11-15)
+## Where it is right now (as of 2026-11-17)
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- the tagger (tag-v4) reads each card's own words (why_here, would_do, a typed why_like) as the ground truth of its reading and records which it stood on (facets.grounded_in); every reading picks only from content-engine's own style ids (caption themes, motion styles, transitions, camera, energy, script and production formats, series, roles) into facets.style as engine_read, and writes the roles content-engine's teaches column takes as engine_guess, never over his; a subfolder's files carry facets.collection, a tool's checksum, log or collection JSON is no card, and cards are tagged by value (his words, loose videos, loose images and documents, collections last) inside the unchanged caps. (2026-11-17)
 - the branch sweep takes an approved list (branch@sha) on a hand run and deletes each named branch only at that exact commit, skipping and logging anything else; the weekly run is unchanged. Copied from ai-harness's canonical script and workflow. (2026-11-15)
 - A weekly branch sweep (`.github/workflows/branch-sweep.yml`, Sunday 03:17 UTC, and by hand) deletes every remote branch whose work is already on main and lists each branch it keeps with why: unmerged work, an open pull request, protected (Ruling, Krish, 2026-11-15). The script is `.github/scripts/branch_sweep.py`, copied unchanged from ai-harness, which holds the canonical copy. (2026-11-15)
 - the rejections engine's floor file now carries a top-level `groups` list: every group of standards Krish approved or reworded, with the words he decided for the whole group (his latest amendment in content-engine's `taste_floor_group_amendments` once that table exists, else his correction, else the group's never_beneath), its standing, decided_on and members by the file's standard keys. Until today no maker read a group's own words. (2026-11-15)
@@ -51,9 +52,9 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-15): run the sweep by hand with dry_run false and this repository's approved list, and read its log.
+- Next (2026-11-17): content-engine migration to let inspiration_items.teaches (and card_uses.role, and its ROLES in api/inspiration/_cards.ts) take `thumbnail`, then read the first daily run's items_grounded, items_style_dropped, items_teaches_written and style_vocab_pinned.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
 - Waiting on Krish: a North Star for this repository; `TASTE_REJECTIONS_CLOCK=on` and the first real rejections floor run (fleet decisions, batch 3).
-- North Star check (2026-11-15): holds.
+- North Star check (2026-11-17): holds.
