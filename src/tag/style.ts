@@ -8,8 +8,8 @@ import type { FetchJson } from '../collect/gitTaste.ts'
 //   - narrative and production formats: config/style-references.json formats.script and formats.production.
 // Transitions, camera and energy live in the renderer's code (apps/renderer kit/ingredients.ts, docs/ve/INGREDIENTS.md),
 // not in a config file, so they are pinned here. The series and the roles a card teaches are pinned too: the roles are
-// the ones content-engine's /api/inspiration/candidates ranks by, plus `thumbnail`, which content-engine's column does
-// not take yet (TEACHES_DB_ROLES).
+// the ones content-engine's /api/inspiration/candidates ranks by, `thumbnail` among them since content-engine's
+// migration 20261205090000 (TEACHES_DB_ROLES).
 // A pick is a reading of the model's, labelled `engine_read`; an id not in its list is dropped, never stored.
 
 export const CAPTION_THEMES_FILE = 'config/caption-themes.json'
@@ -18,11 +18,11 @@ export const STYLE_REFERENCES_FILE = 'config/style-references.json'
 export const SERIES = ['follow_the_money', 'mind_the_gap', 'under_the_hood', 'none'] as const
 export const TEACHES_ROLES = ['look', 'motion', 'captions', 'hook', 'pacing', 'layout', 'thumbnail'] as const
 /**
- * The roles content-engine's `inspiration_items.teaches` takes (its check constraint, migration
- * 20261122090000_inspiration_teaches_and_card_uses.sql). `thumbnail` is kept on the card's facets.style only, until a
- * content-engine migration widens that constraint.
+ * The roles content-engine's `inspiration_items.teaches` takes (its check constraint, migrations
+ * 20261122090000_inspiration_teaches_and_card_uses.sql and 20261205090000_inspiration_teaches_thumbnail.sql, which added
+ * `thumbnail` for his thumbnail study set; applied 2026-11-17).
  */
-export const TEACHES_DB_ROLES = ['look', 'motion', 'captions', 'hook', 'pacing', 'layout'] as const
+export const TEACHES_DB_ROLES = ['look', 'motion', 'captions', 'hook', 'pacing', 'layout', 'thumbnail'] as const
 
 export interface StyleVocab {
   captions: readonly string[]
