@@ -1121,9 +1121,9 @@ runTeaches('what a card teaches, on a real database', () => {
     expect(r).toMatchObject({ tagged: 3, teachesWritten: 3, styleDropped: 3 })
     const rows = (await client.query(`select name, teaches, teaches_source, facets->'style'->'teaches' as picked from inspiration_items order by name`)).rows
     expect(rows).toEqual([
-      { name: 'a.png', teaches: ['hook'], teaches_source: 'engine_guess', picked: ['hook', 'thumbnail'] },
+      { name: 'a.png', teaches: ['hook', 'thumbnail'], teaches_source: 'engine_guess', picked: ['hook', 'thumbnail'] },
       { name: 'b.png', teaches: ['layout'], teaches_source: 'krish', picked: ['hook', 'thumbnail'] },
-      { name: 'c.png', teaches: ['hook'], teaches_source: 'engine_guess', picked: ['hook', 'thumbnail'] },
+      { name: 'c.png', teaches: ['hook', 'thumbnail'], teaches_source: 'engine_guess', picked: ['hook', 'thumbnail'] },
     ])
     // A reading that finds nothing it teaches clears the engine's own guess, within the column's check.
     await client.query(`update inspiration_items set tag_rev = null`)
