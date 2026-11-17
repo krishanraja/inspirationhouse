@@ -647,13 +647,13 @@ describe('tagItems and content-engine\'s style vocabulary', () => {
     expect(facets.style).toMatchObject({ captions: ['slam'], motion: ['living-ui'], energy: 'high', series: 'none', teaches: ['hook', 'thumbnail'], origin: 'engine_read' })
     expect(r.styleDropped).toBe(1)
   })
-  it('writes teaches as the engine\'s guess with only the roles the column takes, never over his', async () => {
+  it('writes teaches as the engine\'s guess with the roles the column takes, thumbnail among them, never over his', async () => {
     const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { answer, teaches: true })
     const r = await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
     const w = lastTagWrite(h)
     expect(w.sql).toContain(`teaches = case when teaches_source = 'krish' then teaches else $14::text[] end`)
     expect(w.sql).toContain(`'engine_guess'`)
-    expect(w.params[13]).toEqual(['hook'])
+    expect(w.params[13]).toEqual(['hook', 'thumbnail'])
     expect(r.teachesWritten).toBe(1)
   })
   it('leaves teaches alone before content-engine\'s migration gives the column', async () => {

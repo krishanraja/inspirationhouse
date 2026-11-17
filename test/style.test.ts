@@ -64,8 +64,8 @@ describe('a reading\'s style picks', () => {
     expect(stylePicks(undefined, PINNED_VOCAB, []).picks).toMatchObject({ captions: [], energy: null, series: null, teaches: [], grounded_in: [] })
   })
   it('writes to content-engine\'s teaches column only the roles it takes', () => {
-    expect(dbTeaches(['hook', 'thumbnail', 'layout'])).toEqual(['hook', 'layout'])
-    expect(TEACHES_ROLES.filter(r => !(TEACHES_DB_ROLES as readonly string[]).includes(r))).toEqual(['thumbnail'])
+    expect(dbTeaches(['hook', 'thumbnail', 'layout', 'vibes'])).toEqual(['hook', 'thumbnail', 'layout'])
+    expect(TEACHES_ROLES.filter(r => !(TEACHES_DB_ROLES as readonly string[]).includes(r))).toEqual([])
   })
   it('lists every id in the prompt', () => {
     const p = vocabPrompt(PINNED_VOCAB)
