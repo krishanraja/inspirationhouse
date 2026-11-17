@@ -482,6 +482,9 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
     }
     inDrive = inDrive.filter(readable)
   }
+  // A reference set's file (facets.collection, e.g. a thumbnail study) is read only when he wrote on it (Krish,
+  // 2026-11-17: "If this is just all the same veed thumbnails, I don't think it's necessary to look at them all."):
+  // content-engine finds the set by its folder, so reading each image spends model calls for nothing.
   // Healing means tagged on this revision and here only to be heard again; a card he instructed since is tagged again.
   const pending = await db.query<Pending>(
     `select id::text, drive_file_id, note_for_claude, read_as, facets, kind, kind_source, transcript, why_here, would_do,
@@ -490,7 +493,8 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
      from public.inspiration_items
      where ${needsTags(2)} and dismissed_at is null
        and drive_file_id = any(select jsonb_array_elements_text($3::jsonb))
-       and not facets ? 'part_of'${deps.linked ? `\n       and facets ? 'link'` : ''}
+       and not facets ? 'part_of'
+       and (not facets ? 'collection' or ${HAS_HIS_WORDS})${deps.linked ? `\n       and facets ? 'link'` : ''}
      order by ${TAG_ORDER}, (tagged_at is null) desc, drive_created_at desc limit $1`,
     [limit, TAG_PROMPT_REV, JSON.stringify(inDrive)],
   )
