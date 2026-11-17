@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { DRIVE } from '../src/config.ts'
 import { FOLDER_MIME, type DriveFile, type Google } from '../src/google.ts'
-import { collectDrive, inspirationTree } from '../src/collect/drive.ts'
+import { collectDrive, collectionOf, inspirationTree, machineFile } from '../src/collect/drive.ts'
 import { syncItems } from '../src/tag/items.ts'
 import { machineStillsOf, productionTags, understandCards } from '../src/tag/understand.ts'
 import type { Db } from '../src/db.ts'
@@ -46,6 +46,47 @@ describe('his Inspiration tree', () => {
     const items = await syncItems(db, google, false, machine)
     expect([...items.files.keys()]).not.toContain('1SYNmachine0')
     expect(items).toMatchObject({ seen: 3, machine: 1, duplicates: 1 })
+  })
+})
+
+describe('collections and the files a tool wrote', () => {
+  it('names the subfolder a file sits in, by folder names only, and nothing for a loose drop', () => {
+    expect(collectionOf('loose.png')).toBeNull()
+    expect(collectionOf('Thumbnail study/a.png')).toEqual({ name: 'Thumbnail study', path: 'Thumbnail study' })
+    expect(collectionOf('Study/round 2/a.png')).toEqual({ name: 'round 2', path: 'Study/round 2' })
+  })
+  it('knows a checksum, a log and a collection\'s JSON for a machine\'s, and keeps a loose JSON he dropped', () => {
+    expect(machineFile('checksums.sha256', false)).toBe(true)
+    expect(machineFile('run.LOG', false)).toBe(true)
+    expect(machineFile('cleanup-log.json', true)).toBe(true)
+    expect(machineFile('verification.json', true)).toBe(true)
+    expect(machineFile('a saved post.json', false)).toBe(false)
+    expect(machineFile('a.png', true)).toBe(false)
+  })
+  it('makes no card for them, counts them, and gives the rest their collection', async () => {
+    const study: Record<string, DriveFile[]> = {
+      [DRIVE.coldIdeas]: [file('1SYNloose00j', 'loose.json', { mimeType: 'application/json' })],
+      [DRIVE.videoInspiration]: [file('1SYNstudy000', 'A study', { mimeType: FOLDER_MIME })],
+      '1SYNstudy000': [
+        file('1SYNthumb001', 'thumb 1.png', { mimeType: 'image/png' }),
+        file('1SYNcheck001', 'checksums.sha256', { mimeType: 'text/plain' }),
+        file('1SYNlog00001', 'cleanup-log.json', { mimeType: 'application/json' }),
+        file('1SYNplan0001', 'pending-cleanup-plan.json', { mimeType: 'application/json' }),
+      ],
+    }
+    const g = { listFolder: async (id: string) => study[id] ?? [] } as unknown as Google
+    const t = await inspirationTree(g)
+    expect(t.files.map(f => f.f.id).sort()).toEqual(['1SYNloose00j', '1SYNthumb001'])
+    expect(t.machineFiles).toBe(3)
+    const writes: Array<{ sql: string; params: unknown[] }> = []
+    const db = { query: async (sql: string, params: unknown[] = []) => { writes.push({ sql, params }); return [{ n: 1 }] } } as unknown as Db
+    const items = await syncItems(db, g, true)
+    expect(items).toMatchObject({ seen: 2, machineFiles: 3, collected: 1 })
+    const recs = JSON.parse(writes[0]!.params[0] as string) as Array<Record<string, unknown>>
+    expect(recs.find(r => r.drive_file_id === '1SYNthumb001')!.collection).toEqual({ name: 'A study', path: 'A study' })
+    expect(recs.find(r => r.drive_file_id === '1SYNloose00j')).not.toHaveProperty('collection')
+    // A card made before collections were kept gets its collection; one moved back to the top loses it.
+    expect(writes[1]!.sql).toContain(`when x.collection is null then i.facets - 'collection'`)
   })
 })
 

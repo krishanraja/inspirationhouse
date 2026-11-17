@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { tagItems, HEAR_TRIES, needsTags, nameWords, answerEvidence, answeredItemEvidence, apiFailureClass, INSTRUCTED_SINCE, TAG_PROMPT_REV, READING_MAX_CHARS, type AnsweredRow } from '../src/tag/items.ts'
+import { tagItems, tagSystemPrompt, HIS_WORDS_PROMPT_MAX, HAS_HIS_WORDS, TAG_ORDER, HEAR_TRIES, needsTags, nameWords, answerEvidence, answeredItemEvidence, apiFailureClass, INSTRUCTED_SINCE, TAG_PROMPT_REV, READING_MAX_CHARS, type AnsweredRow } from '../src/tag/items.ts'
 import type { Db } from '../src/db.ts'
 import type { Google, DriveFile } from '../src/google.ts'
 import type { Llm } from '../src/llm.ts'
 import type { Watched } from '../src/tag/watch.ts'
 
 // Synthetic cards and files only; nothing here is anything Krish saved.
-type Row = { id: string; drive_file_id: string; note_for_claude: string | null; read_as?: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null; transcript?: string | null }
+type Row = { id: string; drive_file_id: string; note_for_claude: string | null; read_as?: string | null; healing: boolean; facets: Record<string, unknown> | null; kind?: string | null; kind_source?: string | null; transcript?: string | null; why_here?: string | null; would_do?: string | null; why_like?: string | null }
 const file = (id: string, over: Partial<DriveFile> = {}): DriveFile =>
   ({ id, name: `clip-${id}.mp4`, mimeType: 'video/mp4', modifiedTime: '2026-10-24T00:00:00Z', createdTime: '2026-10-24T00:00:00Z', size: '1000', ...over })
 
 type ReadRow = { sha256: string; engine_rev: string; read_md: string; heard: string | null; words_text: string | null }
-function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown>; throwOn?: (call: number) => unknown; failure?: string; reads?: ReadRow[] } = {}) {
+function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>; known?: Array<{ id: string; drive_file_id: string; kind: string | null; kind_source: string | null }>; slate?: Array<{ id: string; idea: string }>; answer?: Record<string, unknown>; throwOn?: (call: number) => unknown; failure?: string; reads?: ReadRow[]; teaches?: boolean } = {}) {
   const writes: Array<{ sql: string; params: unknown[] }> = []
   const pendingSelects: Array<{ sql: string; params: unknown[] }> = []
   const queries: Array<{ sql: string; params: unknown[]; write: boolean }> = []
@@ -19,6 +19,7 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
     async query<T>(sql: string, params: unknown[] = [], o?: { write?: boolean }) {
       queries.push({ sql, params, write: Boolean(o?.write) })
       if (/^\s*update/i.test(sql)) { writes.push({ sql, params }); return [] as T[] }
+      if (/column_name in \('teaches', 'teaches_source'\)/.test(sql)) return [{ ok: Boolean(opts.teaches) }] as T[]
       if (/to_regclass\('public\.content_reads'\)/.test(sql)) return [{ ok: Boolean(opts.reads) }] as T[]
       if (/from public\.content_reads/.test(sql)) return (opts.reads ?? []).filter(r => (JSON.parse(params[0] as string) as string[]).includes(r.sha256)) as T[]
       if (/select count\(\*\)::int as n from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) {
@@ -28,7 +29,7 @@ function harness(rows: Row[], opts: { download?: (id: string) => Promise<Buffer>
       if (/from public\.inspiration_items\s+where \(tagged_at is null/.test(sql)) {
         pendingSelects.push({ sql, params })
         const ids = JSON.parse(params[2] as string) as string[]
-        return rows.filter(r => ids.includes(r.drive_file_id)).map(r => ({ kind: null, kind_source: null, read_as: null, transcript: null, ...r })) as T[]
+        return rows.filter(r => ids.includes(r.drive_file_id)).map(r => ({ kind: null, kind_source: null, read_as: null, transcript: null, why_here: null, would_do: null, why_like: null, ...r })) as T[]
       }
       if (/select id::text, drive_file_id, kind, kind_source from public\.inspiration_items/.test(sql)) return (opts.known ?? []) as T[]
       if (/from public\.content_ideas/.test(sql)) return (opts.slate ?? []) as T[]
@@ -587,5 +588,98 @@ describe('tagItems on an image the API refuses at full size', () => {
     expect(r).toMatchObject({ tagged: 1, failed: 0 })
     expect(h.downloads).toEqual([])
     expect(h.prompts[0]).toContain(Buffer.from('thumb').toString('base64'))
+  })
+})
+
+// tag-v4 (Krish, 2026-11-17): his own words on a card are the ground truth of its reading, the reading names
+// content-engine's own style ids, and cards are read in order of value.
+const doc = (id: string) => file(id, { mimeType: 'application/vnd.google-apps.document', name: `${id}.md` })
+const lastTagWrite = (h: ReturnType<typeof harness>) => h.writes.filter(w => /set auto_tags = /.test(w.sql)).at(-1)!
+
+describe('tagItems and his own words on the card', () => {
+  it('is a new revision, so every card is read again in the new order', () => {
+    expect(TAG_PROMPT_REV).toBe('tag-v4')
+  })
+  it('gives the model why he saved it and what he would do, whole, as the ground truth', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {}, why_here: 'the way the receipt slams in on the number', would_do: 'use it for the money beat' }])
+    await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    const prompt = JSON.parse(h.prompts[0]!) as Array<{ type: string; text?: string }>
+    const text = prompt.find(b => b.type === 'text')!.text!
+    expect(text).toContain('<his_words>\nWhy he saved it: the way the receipt slams in on the number\nWhat he would do with it: use it for the money beat\n</his_words>')
+    expect(text).toContain('ground truth')
+    expect(text).not.toContain('What he likes about it')
+  })
+  it('cuts only what goes into the prompt, and says so', async () => {
+    const long = 'word '.repeat(HIS_WORDS_PROMPT_MAX)
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {}, why_here: long }])
+    await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    expect(h.prompts[0]).toContain('[cut here for this prompt only; his whole words are kept on the card]')
+    // His words are never written by the tagger: not why_here, not why_like, not answered_at (rule 3).
+    for (const w of h.writes) expect(w.sql).not.toMatch(/\b(why_here|why_like|would_do|answered_at)\s*=/)
+  })
+  it('records which of his words the reading stood on, and nothing for a bare read', async () => {
+    const h = harness([
+      { id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {}, why_here: 'the hook', why_like: 'how plain it is' },
+      { id: '2', drive_file_id: 'e', note_for_claude: null, healing: false, facets: {} },
+    ])
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')], ['e', doc('e')]]))
+    const tagWrites = h.writes.filter(w => /set auto_tags = /.test(w.sql))
+    const facetsOf = (id: string) => JSON.parse(tagWrites.find(w => w.params[0] === id)!.params[7] as string)
+    expect(facetsOf('1')).toMatchObject({ grounded_in: ['why_here', 'why_like'], style: { origin: 'engine_read', grounded_in: ['why_here', 'why_like'] } })
+    expect(facetsOf('2')).toMatchObject({ grounded_in: [], style: { origin: 'engine_read', grounded_in: [] } })
+    expect(r.grounded).toBe(1)
+  })
+  it('tells the model his words lead, and lists content-engine\'s ids', () => {
+    const p = tagSystemPrompt([], [])
+    expect(p).toContain('they are the ground truth for why he kept it')
+    expect(p).toContain('living-ui')
+    expect(p).toContain('follow_the_money')
+  })
+})
+
+describe('tagItems and content-engine\'s style vocabulary', () => {
+  const answer = { style: { captions: ['slam', 'not-a-theme'], motion: ['living-ui'], transitions: [], camera: [], energy: 'high',
+    script_formats: [], production_formats: [], series: 'none', teaches: ['hook', 'thumbnail'] } }
+  it('stores only ids in the lists, as the engine\'s reading, and counts what it dropped', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { answer })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    const facets = JSON.parse(lastTagWrite(h).params[7] as string)
+    expect(facets.style).toMatchObject({ captions: ['slam'], motion: ['living-ui'], energy: 'high', series: 'none', teaches: ['hook', 'thumbnail'], origin: 'engine_read' })
+    expect(r.styleDropped).toBe(1)
+  })
+  it('writes teaches as the engine\'s guess with only the roles the column takes, never over his', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { answer, teaches: true })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    const w = lastTagWrite(h)
+    expect(w.sql).toContain(`teaches = case when teaches_source = 'krish' then teaches else $14::text[] end`)
+    expect(w.sql).toContain(`'engine_guess'`)
+    expect(w.params[13]).toEqual(['hook'])
+    expect(r.teachesWritten).toBe(1)
+  })
+  it('leaves teaches alone before content-engine\'s migration gives the column', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }], { answer })
+    const r = await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    expect(lastTagWrite(h).sql).not.toContain('teaches')
+    expect(lastTagWrite(h).params).toHaveLength(13)
+    expect(r.teachesWritten).toBe(0)
+  })
+  it('keeps the collection a card was filed in when it is tagged again', async () => {
+    const h = harness([{ id: '1', drive_file_id: 'd', note_for_claude: null, healing: false, facets: {} }])
+    await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    expect(lastTagWrite(h).sql).toContain(`case when facets ? 'collection' then jsonb_build_object('collection', facets->'collection')`)
+  })
+})
+
+describe('the order cards are read in', () => {
+  it('asks for cards by value, then untagged first, then newest', async () => {
+    const h = harness([])
+    await tagItems(h.db, h.google, h.llm, new Map([['d', doc('d')]]))
+    expect(h.pendingSelects[0]!.sql).toContain(`order by ${TAG_ORDER}, (tagged_at is null) desc, drive_created_at desc limit $1`)
+  })
+  it('puts his words first, then loose videos, then loose images and documents, then a collection\'s files', () => {
+    expect(TAG_ORDER).toBe(`case when ${HAS_HIS_WORDS} then 0 when facets ? 'collection' then 3 when mime like 'video/%' then 1 else 2 end`)
+    for (const col of ['why_here', 'would_do', 'why_like', 'note_for_claude']) expect(HAS_HIS_WORDS).toContain(col)
+    // A pick is not his words: only a typed why_like counts.
+    expect(HAS_HIS_WORDS).toContain(`why_like_source = 'typed'`)
   })
 })

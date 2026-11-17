@@ -10,7 +10,9 @@ import { distil } from '../src/distil/claims.ts'
 import { propose, syncDecisions, ELIGIBLE_SQL, type Eligible } from '../src/publish/propose.ts'
 import { score } from '../src/score/scoreboard.ts'
 import { linkRequests } from '../src/tag/links.ts'
-import { answeredItemEvidence, tagItems, HEAR_TRIES } from '../src/tag/items.ts'
+import { answeredItemEvidence, syncItems, tagItems, HEAR_TRIES, TAG_PROMPT_REV } from '../src/tag/items.ts'
+import { DRIVE } from '../src/config.ts'
+import { FOLDER_MIME } from '../src/google.ts'
 import { syncReports } from '../src/collect/sessionReports.ts'
 import { syncCues } from '../src/collect/feedbackCues.ts'
 import { extractSignals, SIGNAL_PROMPT_REV } from '../src/signal/extract.ts'
@@ -55,6 +57,8 @@ if (url && !/^postgres(ql)?:\/\/([^@/]*@)?(localhost|127\.0\.0\.1)(:\d+)?\//.tes
 const run = url && migrations.length ? describe : describe.skip
 // The signals tables arrive in their own migration; until content-engine has it, a list without it skips that suite.
 const runSignals = url && migrations.some(m => m.endsWith('_taste_signals.sql')) ? describe : describe.skip
+// The teaches columns arrive in their own migration (20261122090000_inspiration_teaches_and_card_uses.sql).
+const runTeaches = url && migrations.some(m => m.endsWith('_inspiration_teaches_and_card_uses.sql')) ? describe : describe.skip
 
 // A fresh public schema with the real migrations, and a Db on it. Every suite here starts from one.
 async function freshSchema(): Promise<{ client: pg.Client; db: Db }> {
@@ -387,7 +391,7 @@ run('the review of the link box, on a real database', () => {
   it('tags a healing video from the words it finally heard, on the run after a model error, and never hears them twice', async () => {
     await client.query(
       `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, tagged_at, tag_rev, facets)
-       values ('vid-heal-0000', 'video_inspiration', 'production', 'vid-heal-0000.mp4', 'video/mp4', now(), now(), 'tag-v3', '{"heard": "failed", "heard_tries": 1}'),
+       values ('vid-heal-0000', 'video_inspiration', 'production', 'vid-heal-0000.mp4', 'video/mp4', now(), now(), '${TAG_PROMPT_REV}', '{"heard": "failed", "heard_tries": 1}'),
               ('vid-new-00000', 'video_inspiration', 'production', 'vid-new-00000.mp4', 'video/mp4', now(), null, null, '{}')`)
     const files = new Map([['vid-heal-0000', video('vid-heal-0000')], ['vid-new-00000', video('vid-new-00000')]])
     const asked: Array<boolean | undefined> = []
@@ -407,8 +411,8 @@ run('the review of the link box, on a real database', () => {
     expect(asked).toEqual([undefined, undefined, false, false])
     const rows = (await client.query(`select tag_rev, transcript, facets->>'heard' as heard from inspiration_items order by name`)).rows
     expect(rows).toEqual([
-      { tag_rev: 'tag-v3', transcript: 'synthetic words that were finally heard', heard: 'words' },
-      { tag_rev: 'tag-v3', transcript: 'synthetic words that were finally heard', heard: 'words' },
+      { tag_rev: TAG_PROMPT_REV, transcript: 'synthetic words that were finally heard', heard: 'words' },
+      { tag_rev: TAG_PROMPT_REV, transcript: 'synthetic words that were finally heard', heard: 'words' },
     ])
     // Tagged from its words, it is done: a third run does not pick either card up.
     expect(await tagItems(db, noDrive, tagger().llm, files, 60, true, { watch })).toMatchObject({ tagged: 0, rehead: 0 })
@@ -1029,5 +1033,106 @@ run('content-engine\u2019s chain cap, read from the run ledger before the daily 
     expect(capSkips(cap, 'tag')).toBe(true)
     // Monday's new week reads none of last week's verdicts.
     expect(capSkips(await readChainCap(db, new Date('2026-11-16T05:17:00Z')), 'tag')).toBe(false)
+  })
+})
+
+// tag-v4 (Krish, 2026-11-17): a collection's files carry their collection, cards are read by value, and the engine's
+// guess of what a card teaches never overwrites his. Synthetic cards only.
+const stubTagger = (style: Record<string, unknown> = {}) => {
+  const order: string[] = []
+  const llm: Llm = { model: 'stub', structured: async (a) => {
+    const text = (a.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')?.text ?? ''
+    order.push(/^File: (.*)$/m.exec(text)?.[1] ?? '')
+    return { failure: null, model: 'stub', data: {
+      tags: [], predicted: { why_here: [], why_like: [], would_do: [] }, route: 'study_style', kind: null, opinion: null, reason: null, piece_ref: null,
+      facets: { platform: 'instagram', format: 'single_image', source: null, creator: null, people: [], organisations: [], topics: [] },
+      style: { captions: [], motion: [], transitions: [], camera: [], energy: null, script_formats: [], production_formats: [], series: null, teaches: [], ...style },
+    } as never }
+  } }
+  return { llm, order }
+}
+const noFetch = { thumbnail: async () => null, text: async () => null, download: async () => null } as unknown as Google
+const driveFile = (id: string, name: string, mimeType: string): DriveFile =>
+  ({ id, name, mimeType, modifiedTime: '2026-11-01T09:00:00Z', createdTime: '2026-11-01T09:00:00Z', size: '1000' })
+
+run('collections and the order of value, on a real database', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  beforeEach(async () => { await client.query('truncate public.inspiration_items cascade') })
+  afterAll(async () => { await client?.end() })
+
+  it('gives a collection\'s files their collection, on new cards and old ones, makes no card for a tool\'s files, and takes it off a file moved out', async () => {
+    const tree: Record<string, DriveFile[]> = {
+      [DRIVE.coldIdeas]: [],
+      [DRIVE.videoInspiration]: [driveFile('syn-loose-001', 'loose.png', 'image/png'), driveFile('syn-study-dir', 'A study', FOLDER_MIME)],
+      'syn-study-dir': [driveFile('syn-study-001', 'thumb.png', 'image/png'), driveFile('syn-study-log', 'cleanup-log.json', 'application/json'),
+        driveFile('syn-study-sum', 'checksums.sha256', 'text/plain')],
+    }
+    const google = { listFolder: async (id: string) => tree[id] ?? [] } as unknown as Google
+    // A card made before collections were kept.
+    await client.query(`insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at) values ('syn-study-001', 'video_inspiration', 'production', 'thumb.png', 'image/png', now())`)
+    const first = await syncItems(db, google, true)
+    expect(first).toMatchObject({ seen: 2, written: 1, machineFiles: 2, collected: 1 })
+    const facets = async () => Object.fromEntries((await client.query(`select drive_file_id, facets from inspiration_items order by drive_file_id`)).rows.map(r => [r.drive_file_id, r.facets]))
+    expect(await facets()).toEqual({ 'syn-loose-001': {}, 'syn-study-001': { collection: { name: 'A study', path: 'A study' } } })
+    expect(await syncItems(db, google, true)).toMatchObject({ written: 0, collected: 0 })
+    tree[DRIVE.videoInspiration]!.push(tree['syn-study-dir']!.shift()!)
+    expect(await syncItems(db, google, true)).toMatchObject({ collected: 1 })
+    expect((await facets())['syn-study-001']).toEqual({})
+  })
+
+  it('reads a card with his words first, then a loose video, then a loose image, then a collection\'s file, and keeps the collection', async () => {
+    const card = (id: string, name: string, mime: string, facets: Record<string, unknown>, why: string | null = null) => client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, facets, why_here) values ($1, 'video_inspiration', 'production', $2, $3, $4, $5::jsonb, $6)`,
+      [id, name, mime, '2026-11-0' + id.slice(-1) + 'T09:00:00Z', JSON.stringify(facets), why])
+    const inStudy = { collection: { name: 'A study', path: 'A study' } }
+    await card('syn-order-1', 'study-image.png', 'image/png', inStudy)
+    await card('syn-order-2', 'study-worded.png', 'image/png', inStudy, 'synthetic: the way the title sits on the face')
+    await card('syn-order-3', 'loose-image.png', 'image/png', {})
+    await card('syn-order-4', 'loose-video.mp4', 'video/mp4', {})
+    const files = new Map(['study-image.png', 'study-worded.png', 'loose-image.png', 'loose-video.mp4'].map((n, i) => [`syn-order-${i + 1}`, driveFile(`syn-order-${i + 1}`, n, n.endsWith('.mp4') ? 'video/mp4' : 'image/png')]))
+    const t = stubTagger()
+    const watch = async () => ({ frames: [], transcript: null, durationS: 5, heard: 'silent' as const, unheard: null })
+    const r = await tagItems(db, noFetch, t.llm, files, 60, true, { watch })
+    expect(t.order).toEqual(['study-worded.png', 'loose-video.mp4', 'loose-image.png', 'study-image.png'])
+    expect(r.grounded).toBe(1)
+    const rows = (await client.query(`select name, facets->'collection' as c, facets->'grounded_in' as g, tag_rev from inspiration_items order by name`)).rows
+    expect(rows.filter(x => x.name.startsWith('study')).every(x => x.c?.name === 'A study' && x.tag_rev === TAG_PROMPT_REV)).toBe(true)
+    expect(rows.find(x => x.name === 'study-worded.png')!.g).toEqual(['why_here'])
+  })
+})
+
+runTeaches('what a card teaches, on a real database', () => {
+  let client: pg.Client
+  let db: Db
+  beforeAll(async () => { ({ client, db } = await freshSchema()) })
+  beforeEach(async () => { await client.query('truncate public.inspiration_items cascade') })
+  afterAll(async () => { await client?.end() })
+
+  it('writes the engine\'s guess in the roles the column takes, replaces its own guess, and never touches his', async () => {
+    await client.query(
+      `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, teaches, teaches_source) values
+         ('syn-teach-1', 'video_inspiration', 'production', 'a.png', 'image/png', now(), '{}', null),
+         ('syn-teach-2', 'video_inspiration', 'production', 'b.png', 'image/png', now(), '{layout}', 'krish'),
+         ('syn-teach-3', 'video_inspiration', 'production', 'c.png', 'image/png', now(), '{motion}', 'engine_guess')`)
+    const files = new Map(['a', 'b', 'c'].map((n, i) => [`syn-teach-${i + 1}`, driveFile(`syn-teach-${i + 1}`, `${n}.png`, 'image/png')]))
+    const r = await tagItems(db, noFetch, stubTagger({ teaches: ['hook', 'thumbnail', 'not-a-role'] }).llm, files, 60, true)
+    expect(r).toMatchObject({ tagged: 3, teachesWritten: 3, styleDropped: 3 })
+    const rows = (await client.query(`select name, teaches, teaches_source, facets->'style'->'teaches' as picked from inspiration_items order by name`)).rows
+    expect(rows).toEqual([
+      { name: 'a.png', teaches: ['hook'], teaches_source: 'engine_guess', picked: ['hook', 'thumbnail'] },
+      { name: 'b.png', teaches: ['layout'], teaches_source: 'krish', picked: ['hook', 'thumbnail'] },
+      { name: 'c.png', teaches: ['hook'], teaches_source: 'engine_guess', picked: ['hook', 'thumbnail'] },
+    ])
+    // A reading that finds nothing it teaches clears the engine's own guess, within the column's check.
+    await client.query(`update inspiration_items set tag_rev = null`)
+    await tagItems(db, noFetch, stubTagger().llm, files, 60, true)
+    const after = (await client.query(`select name, teaches, teaches_source from inspiration_items order by name`)).rows
+    expect(after).toEqual([
+      { name: 'a.png', teaches: [], teaches_source: null },
+      { name: 'b.png', teaches: ['layout'], teaches_source: 'krish' },
+      { name: 'c.png', teaches: [], teaches_source: null },
+    ])
   })
 })

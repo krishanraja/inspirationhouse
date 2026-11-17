@@ -16,6 +16,7 @@ import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, staged, type Llm } from './llm.ts'
 import { Meter } from './meter.ts'
 import { syncItems, tagItems, answeredItemEvidence, type TagResult } from './tag/items.ts'
+import { readStyleVocab } from './tag/style.ts'
 import { linkRequests } from './tag/links.ts'
 import { machineStillShas, understandCards } from './tag/understand.ts'
 import type { DriveFile } from './google.ts'
@@ -165,10 +166,15 @@ async function link(ctx: Ctx, files: Map<string, DriveFile>): Promise<number> {
 }
 
 /** Tag the cards that need it. A throw from tagging as a whole (the database, Drive) is recorded, never thrown. */
-async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linked: boolean): Promise<TagResult | null> {
+async function tag(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, files: Map<string, DriveFile>, limit: number, linked: boolean): Promise<TagResult | null> {
   if (!ctx.google || !ctx.llm) return null
+  // content-engine's style vocabulary, read through the GitHub API (never edited here); a list that cannot be read is
+  // its pinned copy, and the run says which (src/tag/style.ts).
+  const v = await readStyleVocab(githubFetcher(cfg))
+  ctx.counts.style_vocab_live = v.live ? 1 : 0
+  if (v.pinned.length) ctx.counts.style_vocab_pinned = v.pinned.join(',')
   // The class only: an error's message can quote a row.
-  const t = await tagItems(ctx.db, ctx.google, staged(ctx.llm, 'tag'), files, limit, !ctx.dry, linked ? { linked, budgetMs: CARDS_BUDGET_MS } : {}).catch(err => {
+  const t = await tagItems(ctx.db, ctx.google, staged(ctx.llm, 'tag'), files, limit, !ctx.dry, linked ? { linked, budgetMs: CARDS_BUDGET_MS, vocab: v.vocab } : { vocab: v.vocab }).catch(err => {
     ctx.problems.push(`tagging stopped: ${(err as Error).name}`)
     log({ stage: 'tag', status: 'failed', error_class: (err as Error).name })
     return null
@@ -188,6 +194,9 @@ async function tag(ctx: Ctx, files: Map<string, DriveFile>, limit: number, linke
   ctx.counts.items_from_reading = t.fromReading
   ctx.counts.items_full_refused = t.fullRefused
   ctx.counts.items_tag_failed = t.failed
+  ctx.counts.items_grounded = t.grounded
+  ctx.counts.items_style_dropped = t.styleDropped
+  ctx.counts.items_teaches_written = t.teachesWritten
   if (linked) ctx.counts.waiting_for_reading = t.waitingForReading
   if (t.failed) ctx.problems.push(`tagging failed on ${t.failed} item(s): ${Object.keys(t.failures).join(', ')}`)
   const unheard = Object.values(t.unheard).reduce((a, b) => a + b, 0)
@@ -281,6 +290,8 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, now: Date): P
       ctx.counts.items_new = items.written
       ctx.counts.items_machine_skipped = items.machine
       ctx.counts.items_duplicates = items.duplicates
+      ctx.counts.items_machine_files_skipped = items.machineFiles
+      ctx.counts.items_collection_set = items.collected
       // The same linking the cards job does, so no pasted link depends on Control Center's knock.
       await link(ctx, items.files)
       // His evidence is read either way, so the run still explains when tagging stops.
@@ -291,7 +302,7 @@ async function daily(ctx: Ctx, cfg: ReturnType<typeof loadConfig>, now: Date): P
       if (capSkips(cap, 'tag')) {
         ctx.counts.items_tag_skipped_chain_cap = 1
         log({ stage: 'tag', status: 'skipped', items_tag_skipped_chain_cap: 1 })
-      } else await tag(ctx, items.files, 60, false)
+      } else await tag(ctx, cfg, items.files, 60, false)
       await understand(ctx, items.files)
     }
   }
@@ -362,15 +373,17 @@ const CARDS_BUDGET_MS = 8 * 60_000
 // The quick job for links he pasted on the Inspiration board: make the cards their media became, link each request to
 // its card, and tag the linked cards from content-watcher's reading. No collecting, explaining or watching: a linked
 // card with no reading yet is left for the daily job.
-async function cards(ctx: Ctx): Promise<{ status: RunStatus; reason: string | null }> {
+async function cards(ctx: Ctx, cfg: ReturnType<typeof loadConfig>): Promise<{ status: RunStatus; reason: string | null }> {
   if (!ctx.ledger) { ctx.problems.push('taste ledger tables are missing: apply the taste_ledger migration'); return finish(ctx, 0) }
   if (!ctx.google) return finish(ctx, 0)
   const items = await syncItems(ctx.db, ctx.google, !ctx.dry, ctx.machine).catch(err => { ctx.problems.push(`items: ${(err as Error).message.slice(0, 120)}`); return null })
   if (!items) return finish(ctx, 0)
   ctx.counts.items_seen = items.seen
   ctx.counts.items_new = items.written
+  ctx.counts.items_machine_files_skipped = items.machineFiles
+  ctx.counts.items_collection_set = items.collected
   const linked = await link(ctx, items.files)
-  const t = await tag(ctx, items.files, CARDS_LIMIT, true)
+  const t = await tag(ctx, cfg, items.files, CARDS_LIMIT, true)
   await understand(ctx, items.files)
   return finish(ctx, linked + (t ? t.tagged + t.failed + t.rehead + t.waitingForReading : 0))
 }
@@ -495,7 +508,7 @@ async function main(): Promise<void> {
 
   let outcome: { status: RunStatus; reason: string | null }
   try {
-    outcome = job === 'daily' ? await daily(ctx, cfg, started) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx)
+    outcome = job === 'daily' ? await daily(ctx, cfg, started) : job === 'weekly' ? await weekly(ctx, started) : job === 'cards' ? await cards(ctx, cfg)
       : job === 'rejections' ? await rejections(ctx, cfg, started, proposeFloor) : job === 'retro' ? await retroJob(ctx, started, args.includes('--force'))
       : await harness(ctx, cfg)
   } catch (err) {
