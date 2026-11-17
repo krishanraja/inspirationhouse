@@ -26,6 +26,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- A tag answer that cannot be read now says where it broke (field names only, never its words), so the two cards that fail every run name their cause in the run's reason. (2026-11-17)
 - The tagger reads no file in a reference set (facets.collection, such as the VEED thumbnail study) unless Krish wrote on it, so the daily run spends its model calls on his own drops; content-engine finds the set by its folder. (2026-11-17)
 - The tagger writes `thumbnail` into content-engine's teaches column now that its migration 20261205090000 is applied (2026-11-17), so his thumbnail study set reaches content-engine's thumbnail references by role. (2026-11-17)
 - the tagger (tag-v4) reads each card's own words (why_here, would_do, a typed why_like) as the ground truth of its reading and records which it stood on (facets.grounded_in); every reading picks only from content-engine's own style ids (caption themes, motion styles, transitions, camera, energy, script and production formats, series, roles) into facets.style as engine_read, and writes the roles content-engine's teaches column takes as engine_guess, never over his; a subfolder's files carry facets.collection, a tool's checksum, log or collection JSON is no card, and cards are tagged by value (his words, loose videos, loose images and documents, collections last) inside the unchanged caps. (2026-11-17)
@@ -54,7 +55,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-17): Look into the two cards per run whose model answer comes back unparsed.
+- Next (2026-11-17): Read the next taste_daily run's reason and fix the field it names.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
