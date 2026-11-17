@@ -13,6 +13,19 @@ export interface Structured<T> {
   model: string
   // How many limits the answer overran and were repaired (src/repair.ts); counted by the run, never hidden.
   repairs?: number
+  // For 'unparsed': where the answer broke, as names only ('json' for text that is not JSON, else the first issue's
+  // code and the field path, list positions as '#'), never a word of the answer, so a run can say why (2026-11-17).
+  detail?: string
+}
+
+/** Where an answer that could not be repaired broke: the first issue that is not a size limit, by code and path. */
+export function unparsedDetail(schema: z.ZodType, raw: unknown): string {
+  const res = schema.safeParse(raw)
+  if (res.success) return 'limits'
+  const issues = res.error.issues
+  const i = issues.find(x => x.code !== 'too_small' && x.code !== 'too_big') ?? issues[0]!
+  const path = i.path.map(p => (typeof p === 'number' ? '#' : String(p))).join('.') || 'root'
+  return `${i.code}@${path}`
 }
 
 export interface Llm {
@@ -84,9 +97,9 @@ function bound(client: Anthropic, model: string, meter: Meter | undefined, stage
       if (stop === 'refusal') return { data: null, failure: 'refusal', model: served }
       if (stop === 'max_tokens') return { data: null, failure: 'max_tokens', model: served }
       let raw: unknown
-      try { raw = JSON.parse(text) } catch { return { data: null, failure: 'unparsed', model: served } }
+      try { raw = JSON.parse(text) } catch { return { data: null, failure: 'unparsed', model: served, detail: text.trim() ? 'json' : 'empty' } }
       const fixed = repairToSchema(schema, raw)
-      if (!fixed) return { data: null, failure: 'unparsed', model: served }
+      if (!fixed) return { data: null, failure: 'unparsed', model: served, detail: unparsedDetail(schema, raw) }
       return { data: fixed.data, failure: null, model: served, repairs: fixed.repairs }
     },
   }

@@ -63,9 +63,12 @@ describe('anthropicLlm.structured', () => {
   })
   it('fails an answer that is not the schema, without throwing', async () => {
     answer = 'not json at all'; stop = 'end_turn'
-    expect((await ask())).toMatchObject({ data: null, failure: 'unparsed' })
+    expect((await ask())).toMatchObject({ data: null, failure: 'unparsed', detail: 'json' })
     answer = JSON.stringify({ tags: [] }); stop = 'end_turn'
-    expect((await ask())).toMatchObject({ data: null, failure: 'unparsed' })
+    const out = await ask()
+    expect(out).toMatchObject({ data: null, failure: 'unparsed' })
+    // Names where it broke, never a word of the answer.
+    expect(out.detail).toMatch(/^[a-z_]+@[a-z_.#]+$/)
   })
 })
 

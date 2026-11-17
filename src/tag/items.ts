@@ -685,7 +685,7 @@ export async function tagItems(db: Db, google: Google, llm: Llm, files: Map<stri
       if (!retried) { fail(apiFailureClass(err)); await keepWords(); continue }
       out = retried
     }
-    if (!out.data) { fail(out.failure ?? 'unparsed'); await keepWords(); continue }
+    if (!out.data) { fail(out.failure === 'unparsed' && out.detail ? `unparsed (${out.detail})` : out.failure ?? 'unparsed'); await keepWords(); continue }
     result.repaired += out.repairs ?? 0
     const kind: Kind = settled ?? out.data.kind ?? 'document'
     const kindSource = item.kind_source === 'krish' ? 'krish' : settled ? 'rule' : 'model'
