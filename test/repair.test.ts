@@ -10,6 +10,7 @@ const tag = (): any => ({
   predicted: { why_here: ['a sharp opening'], why_like: ['it gets to the point'], would_do: ['try the same hook'] },
   route: 'make_piece', kind: null, opinion: null, reason: null, piece_ref: null,
   facets: { platform: 'unknown', format: 'document', source: null, creator: null, people: [], organisations: [], topics: [] },
+  style: { captions: [], motion: [], transitions: [], camera: [], energy: null, script_formats: [], production_formats: [], series: null, teaches: [] },
 })
 
 describe('the limits are not enforced by the API', () => {

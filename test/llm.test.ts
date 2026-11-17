@@ -42,6 +42,7 @@ const card = (tags: number) => JSON.stringify({
   tags: Array.from({ length: tags }, (_, i) => ({ label: `subject ${i}`, kind: 'subject', layer: null })),
   predicted: { why_here: [], why_like: [], would_do: [] }, route: 'taste_only', kind: null, opinion: null, reason: null, piece_ref: null,
   facets: { platform: 'web', format: 'document', source: null, creator: null, people: [], organisations: [], topics: [] },
+  style: { captions: [], motion: [], transitions: [], camera: [], energy: null, script_formats: [], production_formats: [], series: null, teaches: [] },
 })
 const ask = () => llm().structured({ schema: TagSchema, system: 's', content: [{ type: 'text', text: 'x' }] })
 
