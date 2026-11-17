@@ -1082,7 +1082,7 @@ run('collections and the order of value, on a real database', () => {
     expect((await facets())['syn-study-001']).toEqual({})
   })
 
-  it('reads a card with his words first, then a loose video, then a loose image, then a collection\'s file, and keeps the collection', async () => {
+  it('reads a card with his words first, then a loose video, then a loose image, never a collection\'s file he did not write on, and keeps the collection', async () => {
     const card = (id: string, name: string, mime: string, facets: Record<string, unknown>, why: string | null = null) => client.query(
       `insert into inspiration_items (drive_file_id, folder, lane, name, mime, drive_created_at, facets, why_here) values ($1, 'video_inspiration', 'production', $2, $3, $4, $5::jsonb, $6)`,
       [id, name, mime, '2026-11-0' + id.slice(-1) + 'T09:00:00Z', JSON.stringify(facets), why])
@@ -1095,10 +1095,12 @@ run('collections and the order of value, on a real database', () => {
     const t = stubTagger()
     const watch = async () => ({ frames: [], transcript: null, durationS: 5, heard: 'silent' as const, unheard: null })
     const r = await tagItems(db, noFetch, t.llm, files, 60, true, { watch })
-    expect(t.order).toEqual(['study-worded.png', 'loose-video.mp4', 'loose-image.png', 'study-image.png'])
+    expect(t.order).toEqual(['study-worded.png', 'loose-video.mp4', 'loose-image.png'])
     expect(r.grounded).toBe(1)
     const rows = (await client.query(`select name, facets->'collection' as c, facets->'grounded_in' as g, tag_rev from inspiration_items order by name`)).rows
-    expect(rows.filter(x => x.name.startsWith('study')).every(x => x.c?.name === 'A study' && x.tag_rev === TAG_PROMPT_REV)).toBe(true)
+    expect(rows.filter(x => x.name.startsWith('study')).every(x => x.c?.name === 'A study')).toBe(true)
+    expect(rows.find(x => x.name === 'study-worded.png')!.tag_rev).toBe(TAG_PROMPT_REV)
+    expect(rows.find(x => x.name === 'study-image.png')!.tag_rev).not.toBe(TAG_PROMPT_REV)
     expect(rows.find(x => x.name === 'study-worded.png')!.g).toEqual(['why_here'])
   })
 })
