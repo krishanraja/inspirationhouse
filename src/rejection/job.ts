@@ -62,6 +62,10 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   const problems: string[] = []
   const preview: Record<string, unknown> = {}
   const problem = (stage: string, err: unknown) => problems.push(`rejections ${stage}: ${(err as Error)?.name ?? 'Error'}`)
+  // Seconds each stage took, as counts, so a run that meets its time limit says which stage ran long (17 and 18 Nov:
+  // two runs were cancelled at 45 minutes with nothing in the log to say where).
+  let lapAt = Date.now()
+  const lap = (stage: number) => { counts[`rejections_seconds_${stage}`] = Math.round((Date.now() - lapAt) / 1000); lapAt = Date.now() }
 
   const tables = await rejectionTablesExist(d.db)
   counts.rejections_table_missing = tables ? 0 : 1
@@ -98,6 +102,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     counts.rejections_theme_other = filed.records.filter(r => r.theme === 'other').length
   }
 
+  lap(1)
   // 2. What arrived from sessions.
   const reported: RecordRow[] = []
   let reportsRead = false
@@ -153,6 +158,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   } catch (err) { problem('drop', err) }
   const input = records.length + reported.length + captured.length + dropped.length
 
+  lap(2)
   // 3. Filed: his quotes, then each record, then what he liked nearby.
   let standing = 0
   if (tables && (quotes.size || reportsRead || dropped.length)) {
@@ -199,6 +205,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     counts.rejections_records_new = input
   }
 
+  lap(3)
   // 4. What is kept of each asset. A capture's master is reached by its Drive id, so it is cut even on a day the folder
   // could not be read.
   if (records.length || captured.length || dropped.length) {
@@ -239,6 +246,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     } catch (err) { problem('inbox', err) }
   }
 
+  lap(4)
   // 5. The standards (text only), and his decisions on them.
   if (tables) {
     try { counts.rejections_retired = await syncFloorDecisions(d.db, write) } catch (err) { problem('decisions', err) }
@@ -277,6 +285,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     }
   }
 
+  lap(5)
   // 6. The floor, rendered with his rulings on its wording (content-engine config/floor-rulings.json), and proposed to
   // content-engine. Without the rulings the floor would put a wording he overruled back, so a failed read proposes nothing.
   try {
@@ -286,6 +295,9 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     } catch (err) {
       problem('rulings', err)
       counts.rejections_rulings_unread = 1
+      // The HTTP status when there is one (a number, never text), so a held floor says why in the public log.
+      const status = (err as { status?: unknown })?.status
+      if (typeof status === 'number') counts.rejections_rulings_status = status
     }
     const input: RenderInput = tables ? await loadFloor(d.db) : inMemory(records, quotes)
     const { text, rulings: ruled } = renderFloorReport(input, rulings ?? undefined)
@@ -308,6 +320,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     }
   } catch (err) { problem('render', err) }
 
+  lap(6)
   // Records read and not one standing is a broken run, never a quiet one.
   if (tables && write) {
     const judged = judgeRun(input, standing)
