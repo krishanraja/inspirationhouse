@@ -1,7 +1,7 @@
 ---
 repo: krishanraja/inspirationhouse
 product: Inspiration House (the taste ledger)
-as_of: 2026-11-17
+as_of: 2026-11-18
 head: 6be5686
 lifecycle: live
 production_url: none
@@ -22,10 +22,11 @@ The taste ledger. It turns what Krish saves and judges into a record of why he l
 
 Krish, and every writer and maker in the fleet: output gets closer to his taste each week only through rules he approved, keyed by venture.
 
-## Where it is right now (as of 2026-11-17)
+## Where it is right now (as of 2026-11-18)
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- The floor run (taste-rejections) had not reached content-engine since 15 Nov. On 16 Nov it could not read content-engine's floor rulings and so held the floor by design, and on 17 and 18 Nov it was cancelled at its 45-minute limit. The GitHub reader now reads once more without the token when the token is refused (content-engine is public), a held floor logs the HTTP status as a count, each stage logs its seconds, and the limit is 90 minutes. (2026-11-18)
 - A tag answer that cannot be read now says where it broke (field names only, never its words), so the two cards that fail every run name their cause in the run's reason. (2026-11-17)
 - The tagger reads no file in a reference set (facets.collection, such as the VEED thumbnail study) unless Krish wrote on it, so the daily run spends its model calls on his own drops; content-engine finds the set by its folder. (2026-11-17)
 - The tagger writes `thumbnail` into content-engine's teaches column now that its migration 20261205090000 is applied (2026-11-17), so his thumbnail study set reaches content-engine's thumbnail references by role. (2026-11-17)
@@ -55,9 +56,9 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-17): Read the next taste_daily run's reason and fix the field it names.
+- Next (2026-11-18): Dispatch taste-rejections once and read its counts (rejections_rulings_status, rejections_seconds_1 to 6), then re-run content-engine's standards check-in.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
 - Waiting on Krish: a North Star for this repository; `TASTE_REJECTIONS_CLOCK=on` and the first real rejections floor run (fleet decisions, batch 3).
-- North Star check (2026-11-17): holds.
+- North Star check (2026-11-18): holds.
