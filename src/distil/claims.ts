@@ -3,6 +3,7 @@ import type { Db } from '../db.ts'
 import { contentHash } from '../hash.ts'
 import type { Llm } from '../llm.ts'
 import { byVenture, ventureName, type Venture } from '../venture.ts'
+import { countsAsSignal } from '../evidence.ts'
 
 // Group the whys into claims about Krish's taste. The model proposes the
 // grouping and the wording; code checks every citation, and the database
@@ -127,7 +128,7 @@ const WHYS_SQL = `
   select w.id::text, w.evidence_id::text, w.statement, w.kind, w.layer, w.lane, e.polarity, e.source,
          e.attribution, e.excerpt, e.occurred_at::text
   from public.taste_whys w join public.taste_evidence e on e.id = w.evidence_id
-  where e.venture = $1 and e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null
+  where e.venture = $1 and e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null and ${countsAsSignal('e')}
   order by e.occurred_at desc limit 600`
 
 /**
@@ -139,7 +140,7 @@ export async function distil(db: Db, llm: Llm, runId: string, write = true): Pro
   const result: DistilResult = { whys: 0, drafted: 0, resolved: 0, written: 0, failed: false, repaired: 0, ventures: 0, skipped: 0, failures: [], calls: 0, splits: 0 }
   const ventures = (await db.query<{ venture: Venture }>(
     `select distinct e.venture from public.taste_whys w join public.taste_evidence e on e.id = w.evidence_id
-     where e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null`,
+     where e.occurred_at > now() - interval '365 days' and e.withdrawn_at is null and ${countsAsSignal('e')}`,
   )).map(v => v.venture).sort(byVenture)
   for (const venture of ventures) {
     const whys = await db.query<WhyRow>(WHYS_SQL, [venture])

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Db } from '../db.ts'
 import { contentHash } from '../hash.ts'
 import type { Llm } from '../llm.ts'
+import { countsAsSignal } from '../evidence.ts'
 
 // For each piece of Krish's evidence, one to three candidate reasons he liked
 // or rejected it, each tagged form (how it is made) or subject (what it is
@@ -112,7 +113,7 @@ export async function explainPending(db: Db, llm: Llm, runId: string, opts: { ba
     `select e.id::text, e.source, e.polarity, e.lane, e.layer, e.title, e.excerpt, e.meta, e.attribution
      from public.taste_evidence e
      where e.attribution in ('krish_words', 'krish_action')
-       and e.explained_at is null and e.withdrawn_at is null
+       and e.explained_at is null and e.withdrawn_at is null and ${countsAsSignal('e')}
        and not exists (select 1 from public.taste_whys w where w.evidence_id = e.id)
      order by e.occurred_at desc
      limit $1`,

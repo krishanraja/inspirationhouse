@@ -75,6 +75,17 @@ export const PAGE_META_UNVERSIONED: readonly string[] = ['kind', 'kind_source', 
  * (src/signal/extract.ts). It is out of the version, as the excerpt's cut always was, so keeping it makes no row a new
  * version, and a row written before it was kept gets it on the next run (writeEvidence).
  */
+/**
+ * A row that still counts as his signal: not marked reference material (content-engine migration
+ * 20261206090000_taste_evidence_reference.sql; Krish, 2026-11-18). Reference rows are kept whole, in their venture, and
+ * never deleted; they are only left out of every read that counts or uses his signal. Read through the row's json, so
+ * the clause holds before the column exists (every row counts then) and after (only unmarked rows count).
+ * withdrawUncollected never reads it: a withdrawal and a reference mark are separate facts.
+ */
+export function countsAsSignal(alias: string): string {
+  return `(to_jsonb(${alias}) ->> 'reference_at') is null`
+}
+
 export const FULL_TEXT = 'full_text'
 /** The longest whole text kept, in characters. */
 export const FULL_TEXT_MAX = 20_000
