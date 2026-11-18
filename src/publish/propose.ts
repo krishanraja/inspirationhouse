@@ -1,5 +1,6 @@
 import { WEEKLY_PROPOSAL_CAP } from '../config.ts'
 import type { Db } from '../db.ts'
+import { countsAsSignal } from '../evidence.ts'
 
 // Put at most three claims a week in front of Krish, through the learning
 // proposals door that already exists (mindmake_studio_learning_proposals,
@@ -31,13 +32,13 @@ export interface Eligible {
 // statement in another venture is another claim.
 export const ELIGIBLE_SQL = `
   select c.id::text, c.venture, c.fingerprint, c.lane, c.layer, c.kind, c.statement,
-         case when exists (select 1 from public.taste_evidence k where k.id = c.krish_source_id and k.withdrawn_at is null)
+         case when exists (select 1 from public.taste_evidence k where k.id = c.krish_source_id and k.withdrawn_at is null and ${countsAsSignal('k')})
               then c.krish end as krish,
          c.means, c.flip_rule,
          c.evidence_ids::text[] as evidence_ids, c.counterexample_ids::text[] as counterexample_ids,
          c.support_n, c.counter_n, c.confidence::float as confidence,
          (select count(distinct e.occurred_at::date)::int from public.taste_evidence e
-          where e.id = any(c.evidence_ids) and e.attribution in ('krish_words', 'krish_action')
+          where e.id = any(c.evidence_ids) and e.attribution in ('krish_words', 'krish_action') and ${countsAsSignal('e')}
             and exists (select 1 from public.taste_evidence s
                         where s.source = e.source and s.source_ref = e.source_ref and s.withdrawn_at is null)) as days
   from public.taste_claims c

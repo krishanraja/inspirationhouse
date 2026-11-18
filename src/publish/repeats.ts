@@ -1,6 +1,7 @@
 import type { Db } from '../db.ts'
 import type { Venture } from '../venture.ts'
 import type { GitHubApi } from './harness.ts'
+import { countsAsSignal } from '../evidence.ts'
 
 // The harness's North Star counts "corrections Krish had to give twice in a week, across the fleet" (ai-harness
 // docs/NORTH_STAR.md). Its own ledger never measured it: NOW.md read "U4, not measured yet" on 2026-11-12. This
@@ -29,7 +30,7 @@ export const REPEATS_SQL = `
   from public.taste_signals s
   join public.taste_evidence e on e.id = s.evidence_id
   where s.superseded_at is null and s.origin = 'krish' and s.polarity = 'dislikes' and s.kind <> 'subject'
-    and s.attribute not like '%.other' and e.withdrawn_at is null and e.venture is not null
+    and s.attribute not like '%.other' and e.withdrawn_at is null and ${countsAsSignal('e')} and e.venture is not null
     and e.source = any($1::text[])
     and e.occurred_at >= $2::date and e.occurred_at < $3::date
   group by 1, 2, 3`

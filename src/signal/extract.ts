@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { Db } from '../db.ts'
-import { clip } from '../evidence.ts'
+import { clip, countsAsSignal } from '../evidence.ts'
 import { renderItem } from '../explain/whys.ts'
 import { contentHash } from '../hash.ts'
 import type { Llm } from '../llm.ts'
@@ -204,7 +204,7 @@ export async function extractSignals(db: Db, llm: Llm, runId: string, opts: { wr
             ${missing ? 'false' : `exists (select 1 from public.taste_signal_reads r where r.evidence_id = e.id)`} as read_before
      from public.taste_evidence e
      left join public.inspiration_items i on e.source = 'inspiration_page' and i.id::text = e.source_ref
-     where e.attribution in ('krish_words', 'krish_action') and e.withdrawn_at is null
+     where e.attribution in ('krish_words', 'krish_action') and e.withdrawn_at is null and ${countsAsSignal('e')}
        -- Something to read: a file saved with no words and no picks says nothing a signal could hold.
        and coalesce(e.excerpt, e.meta->>'why_here', e.meta->>'would_do') is not null
        ${unread}

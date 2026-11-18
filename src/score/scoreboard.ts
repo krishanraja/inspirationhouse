@@ -1,6 +1,7 @@
 import type { Db } from '../db.ts'
 import { mondayOf } from '../publish/propose.ts'
 import { MYMU } from '../venture.ts'
+import { countsAsSignal } from '../evidence.ts'
 
 // Is the output getting better? Computed from signals that are actually live,
 // by SQL anyone can re-run (query_rev pins the version). A week with nothing to
@@ -9,7 +10,8 @@ import { MYMU } from '../venture.ts'
 // score-v2 (2026-10-24): the answered rate counts a card from when he first answered it (first_answered_at).
 // score-v3 (2026-10-28): the scoreboard is Make Your Mind Up's, so the decided rate counts only its claims' proposals
 // (scope.venture publication, or none, which every proposal made before the ledger was split by venture is).
-export const QUERY_REV = 'score-v3'
+// score-v4 (2026-11-18): evidence marked reference material is never counted (countsAsSignal in src/evidence.ts).
+export const QUERY_REV = 'score-v4'
 
 interface Metric { metric: string; sql: string }
 
@@ -22,7 +24,7 @@ export const METRICS: Metric[] = [
     sql: `
       with corrections as (
         select count(*)::numeric as n from public.taste_evidence e
-        where e.occurred_at >= $1::date and e.occurred_at < $2::date
+        where e.occurred_at >= $1::date and e.occurred_at < $2::date and ${countsAsSignal('e')}
           and (e.source in ('learnings_json', 'rejected_lines')
                or (e.source = 'title_verdicts' and e.polarity = 'dislikes'))
       ), edits as (
@@ -41,8 +43,8 @@ export const METRICS: Metric[] = [
     sql: `
       select count(*) filter (where polarity = 'likes')::numeric as numerator,
              count(*)::numeric as denominator
-      from public.taste_evidence
-      where source = 'title_verdicts' and occurred_at >= $1::date and occurred_at < $2::date`,
+      from public.taste_evidence e
+      where source = 'title_verdicts' and ${countsAsSignal('e')} and occurred_at >= $1::date and occurred_at < $2::date`,
   },
   {
     metric: 'inspiration_answered_rate',
