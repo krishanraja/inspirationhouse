@@ -35,7 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     # The media stage starts no new master after 12 minutes (KEEP_BUDGET_MS); one started just inside that can take a
     # few more, and the standards (up to seven model calls) and the floor come after.
-    timeout-minutes: 45
+    # 90 since 18 Nov: on 16 Nov a full run took 42 minutes, and the next two were cancelled at the old 45.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

@@ -21,7 +21,13 @@ export function githubFetcher(cfg: Config): FetchJson {
     const headers: Record<string, string> = { accept: 'application/vnd.github.raw+json', 'user-agent': 'inspirationhouse' }
     if (cfg.CONTENT_ENGINE_READ_TOKEN) headers.authorization = `Bearer ${cfg.CONTENT_ENGINE_READ_TOKEN}`
     const url = `https://api.github.com/repos/${cfg.CONTENT_ENGINE_REPO}/contents/${path}?ref=${encodeURIComponent(cfg.CONTENT_ENGINE_REF)}`
-    const res = await fetch(url, { headers })
+    let res = await fetch(url, { headers })
+    // content-engine is public: a token that has expired or lost its grant answers 401 or 403 where no token would
+    // read the file. Read once more without it, so a stale secret never holds the floor (16 Nov: the floor held a day).
+    if ((res.status === 401 || res.status === 403) && headers.authorization) {
+      const { authorization: _dropped, ...open } = headers
+      res = await fetch(url, { headers: open })
+    }
     // The status rides on the error, so a reader can tell a file that is not there (404) from a failed read.
     if (!res.ok) throw Object.assign(new Error(`github read failed for ${path}: HTTP ${res.status}`), { status: res.status })
     return res.json()
