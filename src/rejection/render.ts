@@ -83,12 +83,16 @@ export interface StandardRow {
   decided_at: string | null
   /** The group the taste_floor view reads this standard's decision from (its first, by when made and key), or null. */
   group_key?: string | null
+  /** Where the standard lives: taste, or the engine for a defect (content-engine production_floor). */
+  home?: 'taste' | 'engine'
 }
 export interface RecordViewRow {
   source: string; source_ref: string; kind: string; rejected_at: string; theme: string; formats: string[]
   rule_kind: string; capture: string; piece: string | null; item: string | null; wanted_instead: string | null
   strength: string; quote_ids: string[]; near: Array<{ quote_id: string; basis: string }>; media_sha256: string[]
   pointed: boolean; moment_ms: number | null
+  /** True for a defect moved to the engine's failure log: still shown to makers, no longer taste. */
+  moved?: boolean
 }
 export interface QuoteViewRow { id: string; text: string; attribution: string; said_at: string }
 export interface MediaViewRow { sha256: string; role: string; mime: string; bytes: number; at_ms: number | null; derived_from: string | null }
@@ -140,28 +144,29 @@ export async function loadFloorGroups(db: Db, venture: Venture = FLOOR_VENTURE):
 export async function loadFloor(db: Db, venture: Venture = FLOOR_VENTURE): Promise<Required<RenderInput>> {
   const standards = await db.query<StandardRow>(
     `select id::text, fingerprint, formats, theme, layer, kind, standing, statement, how_to_check, krish, support_n, action_n,
-            quote_ids::text[] as quote_ids, record_refs, boundary_quote_ids::text[] as boundary_quote_ids, decided_at::text, group_key
-     from public.taste_floor where venture = $1 order by fingerprint`,
+            quote_ids::text[] as quote_ids, record_refs, boundary_quote_ids::text[] as boundary_quote_ids, decided_at::text, group_key, home
+     from public.production_floor where venture = $1 order by fingerprint`,
     [venture],
   )
   const records = await db.query<RecordViewRow>(
     `select source, source_ref, kind, rejected_at::text, theme, formats, rule_kind, capture, piece, item, wanted_instead, strength,
-            quote_ids::text[] as quote_ids, near, media_sha256, (master_drive_id is not null) as pointed, moment_ms
+            quote_ids::text[] as quote_ids, near, media_sha256, (master_drive_id is not null) as pointed, moment_ms,
+            (moved_to_engine_at is not null) as moved
      from public.taste_rejections
-     where venture = $1 and withdrawn_at is null and rule_kind in ('form', 'workflow')
+     where venture = $1 and (withdrawn_at is null or moved_to_engine_at is not null) and rule_kind in ('form', 'workflow')
      order by rejected_at, source, source_ref`,
     [venture],
   )
   const quotes = await db.query<QuoteViewRow>(
     `select q.id::text, q.text, q.attribution, q.said_at::text from public.taste_rejection_quotes q
-     where exists (select 1 from public.taste_rejections r where r.venture = $1 and r.withdrawn_at is null and r.rule_kind in ('form', 'workflow')
+     where exists (select 1 from public.taste_rejections r where r.venture = $1 and (r.withdrawn_at is null or r.moved_to_engine_at is not null) and r.rule_kind in ('form', 'workflow')
                    and (q.id = any(r.quote_ids) or r.near @> jsonb_build_array(jsonb_build_object('quote_id', q.id::text))))`,
     [venture],
   )
   const media = await db.query<MediaViewRow>(
     `select m.sha256, m.role, m.mime, octet_length(m.bytes)::int as bytes, m.at_ms, m.derived_from
      from public.taste_rejection_media m
-     where exists (select 1 from public.taste_rejections r where r.venture = $1 and r.withdrawn_at is null and m.sha256 = any(r.media_sha256))`,
+     where exists (select 1 from public.taste_rejections r where r.venture = $1 and (r.withdrawn_at is null or r.moved_to_engine_at is not null) and m.sha256 = any(r.media_sha256))`,
     [venture],
   )
   const groups = await loadFloorGroups(db, venture)
@@ -292,6 +297,7 @@ export function renderFloorReport(input: RenderInput, rulings: FloorRulings = NO
   const records: Record<string, unknown> = {}
   for (const r of input.records) {
     records[shortRef(r.source, r.source_ref)] = {
+      ...(r.moved ? { home: 'engine' } : {}),
       on: day(r.rejected_at), kind: r.kind, theme: r.theme, formats: r.formats, kept_as: r.capture, strength: r.strength,
       piece: scrub(r.piece),
       his_words: words(r.quote_ids),
@@ -340,6 +346,7 @@ export function renderFloorReport(input: RenderInput, rulings: FloorRulings = NO
     const recs = recordsOf(s)
     const lastDay = recs.map(ref => recordByRef.get(ref)?.rejected_at ?? '').sort().pop() ?? ''
     standards[key] = {
+      ...(s.home === 'engine' ? { home: 'engine' } : {}),
       // Which of his three layers it sits in; layer, below, is the craft layer it is about.
       taste_layer: sorted.layer,
       ...(sorted.never ? { never: sorted.never } : {}),

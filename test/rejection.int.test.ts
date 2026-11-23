@@ -551,7 +551,8 @@ runJob('the rejections job, end to end, on a real database', () => {
     writes = []
     // The fixture holds one production per maker, so a single one makes a pattern here; the pattern bar itself is held
     // by "puts only a pattern to him" above.
-    const r = await runRejections({ db: watched, google, llm, cfg: loadConfig({}), runId, write: true, propose: true, now, gh: null, floorPatternMin: 1, floorRulings: noRulings, ...over })
+    // These tests pin what filing does; the move out of taste has its own test, last in this suite.
+    const r = await runRejections({ db: watched, google, llm, cfg: loadConfig({}), runId, write: true, propose: true, now, gh: null, floorPatternMin: 1, floorRulings: noRulings, moveDefects: false, ...over })
     results.push(r)
     return r
   }
@@ -879,6 +880,68 @@ runJob('the rejections job, end to end, on a real database', () => {
     expect(r.problems).toContain('rejections read: Error')
     expect(await tally()).toEqual(before)
   })
+
+  // Ruling (Krish, 2026-11-23): the taste system holds only preference and inspiration. Run last: it moves rows the tests
+  // above read.
+  it('moves a defect out of taste without losing it, keeps it for makers, and a later read never brings it back', async () => {
+    // A current reading, so a model call after this could only come from the move.
+    await job(drive(dump()), { propose: false })
+    // A defect standard already on a proposal: the move must get past the guard that keeps such a row's words fixed.
+    const fp = md5('synthetic: a defect standard on a proposal')
+    const onProposal = await client.query(
+      `insert into taste_floor_standards (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, status, proposal_id, prompt_rev, venture)
+       select $1, 'synthetic: never let a title card overlap the caption band.', s.how_to_check, s.formats, 'layout', 'graphics', 'form',
+              s.quote_ids, s.status, s.proposal_id, s.prompt_rev, s.venture
+       from taste_floor_standards s join taste_floor f on f.id = s.id
+       where s.venture = 'publication' and s.status = 'proposed' and f.statement = s.statement order by s.fingerprint limit 1`, [fp])
+    expect(onProposal.rowCount).toBe(1)
+    // A preference standard whose evidence is a record that moves: it stays taste, and a later reading must not retire it.
+    const cited = await one(`select source || ':' || source_ref as ref, quote_ids::text[] as quotes from taste_rejections
+      where kind = 'process' and item = $1 and withdrawn_at is null limit 1`, [P.item])
+    const keptFp = md5('synthetic: a preference standard citing a record that moves')
+    await client.query(
+      `insert into taste_floor_standards (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, record_refs, prompt_rev, venture)
+       values ($1, 'synthetic: keep the pace of the opening lively.', 'synthetic: watch the first ten seconds for pace.', '{short_video}',
+               'voice_tone', 'graphics', 'form', $2::uuid[], $3::text[], 'floor-v1', 'publication')`, [keptFp, cited.quotes, [cited.ref]])
+    const makers = (await one(`select count(*)::int as n from production_floor`)).n as number
+    const records = (await one(`select count(*)::int as n from taste_rejections`)).n as number
+    let calls = 0
+    const counted: Llm = { ...llm, structured: (async (q: Parameters<Llm['structured']>[0]) => { calls++; return llm.structured(q) }) as Llm['structured'] }
+
+    const r = await job(drive(dump()), { llm: counted, propose: false, moveDefects: true })
+    expect(r.problems).toEqual([])
+    expect(Number(r.counts.rejections_defects_records_moved)).toBeGreaterThanOrEqual(1)
+    expect(Number(r.counts.rejections_defects_standards_moved)).toBeGreaterThanOrEqual(1)
+    const moved = await one(`select id::text, withdrawn_at is not null as out from taste_rejections where kind = 'process' and item = $1 and moved_to_engine_at is not null limit 1`, [P.item])
+    expect(moved.out).toBe(true)
+    const incident = await one(`select kind, stage, his_words from engine_incidents where client_ref = $1`, [`taste-move:${moved.id}`])
+    expect(incident).toEqual({ kind: 'krish_reject', stage: 'session', his_words: 'synthetic: stop asking and just start' })
+
+    // Out of taste, still in front of makers, and no row deleted.
+    expect((await one(`select count(*)::int as n from taste_floor where fingerprint = $1`, [fp])).n).toBe(0)
+    expect((await one(`select home from production_floor where fingerprint = $1`, [fp])).home).toBe('engine')
+    expect((await one(`select count(*)::int as n from production_floor`)).n).toBe(makers)
+    expect((await one(`select count(*)::int as n from taste_rejections`)).n).toBe(records)
+    const floor = JSON.parse(renderFloor(await loadFloor(db))) as { standards: Record<string, { home?: string }>; records: Record<string, { home?: string; what: string | null }> }
+    expect(floor.standards[`s${fp.slice(0, 10)}`]!.home).toBe('engine')
+    expect(Object.values(floor.records).find(x => x.what === P.item)!.home).toBe('engine')
+
+    // The next read of the same folder neither restores it nor files it twice.
+    const again = await job(drive(dump()), { llm: counted, propose: false, moveDefects: true })
+    expect(again.counts).toMatchObject({ rejections_records_restored: 0, rejections_defects_records_moved: 0, rejections_defects_standards_moved: 0 })
+    expect((await one(`select withdrawn_at is not null as out from taste_rejections where id = $1`, [moved.id])).out).toBe(true)
+    // The move is not new evidence, so it never buys a model reading.
+    expect(calls).toBe(0)
+
+    // A reading that does come later leaves both standards where they are.
+    await client.query(`update taste_watermarks set cursor = $1`, [md5('synthetic: a later reading')])
+    const later = await job(drive(dump()), { llm: counted, propose: false, moveDefects: true })
+    expect(later.problems).toEqual([])
+    expect(calls).toBeGreaterThan(0)
+    expect((await one(`select status from taste_floor_standards where fingerprint = $1`, [keptFp])).status).toBe('candidate')
+    expect((await one(`select count(*)::int as n from taste_floor where fingerprint = $1`, [keptFp])).n).toBe(1)
+    expect((await one(`select home from production_floor where fingerprint = $1`, [fp])).home).toBe('engine')
+  })
 })
 
 runJob('the drop zone, Rejections/Inbox/, filed by a scheduled run on a real database', () => {
@@ -1168,17 +1231,18 @@ run('a standard he decided through its group, on a real database', () => {
     await client.query(`update mindmake_studio_learning_proposals set status = 'corrected', decision_note = 'synthetic: his words for the group'
       where scope->>'key' = 'synthetic_shape'`)
     expect((await groups())[0]).toMatchObject({ standing: 'reworded', statement: 'synthetic: his words for the group' })
-    await client.query(`create table public.taste_floor_group_amendments (venture text not null, group_key text not null,
-      statement text not null, decided_by text not null, decided_at timestamptz not null)`)
+    // The real table (content-engine 20261204090000_floor_group_amendments.sql): its check refuses a row not decided by him.
+    await expect(client.query(`insert into public.taste_floor_group_amendments (venture, group_key, statement, decided_by, decided_at, source) values
+      ('publication', 'synthetic_shape', 'synthetic: not his', 'engine', '2026-11-15T14:00:00Z', 'synthetic')`)).rejects.toThrow()
     try {
-      await client.query(`insert into public.taste_floor_group_amendments values
-        ('publication', 'synthetic_shape', 'synthetic: his first amendment', 'Krish', '2026-11-15T13:30:00Z'),
-        ('publication', 'synthetic_shape', 'synthetic: his latest amendment', 'Krish', '2026-11-15T13:40:00Z'),
-        ('publication', 'synthetic_shape', 'synthetic: not his', 'engine', '2026-11-15T14:00:00Z'),
-        ('heartside', 'synthetic_shape', 'synthetic: another venture', 'Krish', '2026-11-15T15:00:00Z')`)
+      await client.query(`insert into public.taste_floor_group_amendments (venture, group_key, statement, decided_by, decided_at, source) values
+        ('publication', 'synthetic_shape', 'synthetic: his first amendment', 'Krish', '2026-11-15T13:30:00Z', 'synthetic'),
+        ('publication', 'synthetic_shape', 'synthetic: his latest amendment', 'Krish', '2026-11-15T13:40:00Z', 'synthetic'),
+        ('heartside', 'synthetic_shape', 'synthetic: another venture', 'Krish', '2026-11-15T15:00:00Z', 'synthetic')`)
       expect((await groups())[0]).toMatchObject({ standing: 'reworded', statement: 'synthetic: his latest amendment', decided_on: '2026-11-15' })
     } finally {
-      await client.query('drop table public.taste_floor_group_amendments')
+      // An amendment is never deleted row by row (its trigger refuses); the suite clears its own synthetic rows.
+      await client.query('truncate public.taste_floor_group_amendments')
     }
   })
 })

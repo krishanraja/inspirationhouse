@@ -58,7 +58,7 @@ jobs:
           M=.content-engine/supabase/migrations
           # The floor groups migration too: the rejections job reads his decisions on groups of standards (src/rejection/groups.ts).
           # And the teaches columns: the tagger writes the engine's guess of what a card teaches (src/tag/items.ts, tag-v4).
-          files=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql $M/20261122090000_inspiration_teaches_and_card_uses.sql $M/20261124090000_floor_groups.sql $M/20261205090000_inspiration_teaches_thumbnail.sql | paste -sd, -)
+          files=$(ls $M/2026110[4-9]*.sql $M/2026111[0-7]090000_*.sql $M/20261122090000_inspiration_teaches_and_card_uses.sql $M/20261123090000_engine_incidents.sql $M/20261124090000_floor_groups.sql $M/20261204090000_floor_group_amendments.sql $M/20261207090000_defects_leave_taste.sql $M/20261205090000_inspiration_teaches_thumbnail.sql | paste -sd, -)
           test -n "$files"
           echo "TASTE_MIGRATION=$files" >> "$GITHUB_ENV"
       - run: pnpm test

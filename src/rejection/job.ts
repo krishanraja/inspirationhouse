@@ -7,7 +7,7 @@ import { githubApi, type GitHubApi } from '../publish/harness.ts'
 import { judgeRun } from '../runs.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { fileCapture, fileReportDislike, markCollected, reportedDislikes, uncollectedInbox, type InboxRow } from './arrivals.ts'
-import { distilFloor, recountStandards } from './distil.ts'
+import { distilFloor, floorReadCurrent, keepFloorReadCurrent, recountStandards } from './distil.ts'
 import { restoreGroupDecided } from './groups.ts'
 import { fileDrop, readDropZone, type DropFile } from './dropzone.ts'
 import { readDump, type Dump } from './dump.ts'
@@ -15,6 +15,7 @@ import { fileDump, holdQuote, nearOf, type QuoteRow, type RecordRow } from './fi
 import { attachMedia, insertMedia, keepMedia } from './keep.ts'
 import { keepStill } from './media.ts'
 import { proposeFloor, syncFloorDecisions } from './propose.ts'
+import { moveDefects } from './defects.ts'
 import { publishFloor } from './publish.ts'
 import { loadFloor, readFloorRulings, renderFloorReport, type FloorRulings, type RenderInput } from './render.ts'
 import { capturedWords, fileNear, fileQuotes, fileRecords, rejectionTablesExist, type WholeRead } from './store.ts'
@@ -45,6 +46,8 @@ export interface RejectionsDeps {
   /** For tests: where his rulings on the floor's wording come from (content-engine config/floor-rulings.json through the
    *  GitHub API otherwise, src/rejection/render.ts). */
   floorRulings?: () => Promise<FloorRulings>
+  /** For tests that pin what filing alone does: false leaves defects where they were filed. On by default. */
+  moveDefects?: boolean
 }
 
 export interface RejectionsResult {
@@ -283,6 +286,16 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     } else {
       try { counts.rejections_eligible = (await proposeFloor(d.db, d.now, false, d.floorPatternMin)).eligible } catch (err) { problem('propose', err) }
     }
+  }
+
+  // Defects leave taste (Ruling, Krish, 2026-11-23): after the standards are drafted, before the floor is rendered.
+  if (tables && d.moveDefects !== false) {
+    try {
+      const current = write && await floorReadCurrent(d.db)
+      const m = await moveDefects(d.db, write)
+      if (current && m.records_moved) await keepFloorReadCurrent(d.db)
+      for (const [k, v] of Object.entries(m)) counts[`rejections_defects_${k}`] = v
+    } catch (err) { problem('defects', err) }
   }
 
   lap(5)

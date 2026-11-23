@@ -194,7 +194,7 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
   const { records, liked } = await floorRecords(db, venture)
   const result: FloorDistilResult = { records: records.length, groups: 0, drafted: 0, resolved: 0, written: 0, superseded: 0, held: 0, calls: 0, failures: {}, skipped: false, failed: 0, repaired: 0, preview: [], refused: 0 }
   if (!records.length) return result
-  const cursor = contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
+  const cursor = floorCursor(records)
   const [mark] = await db.query<{ cursor: string | null }>(`select cursor from public.taste_watermarks where source = $1`, [WATERMARK])
   // The same standing records, read by the same prompt, give nothing new: the model is not asked again, whether or
   // not he has decided every standard it drafted from them.
@@ -288,11 +288,16 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
   }
   // A candidate this reading no longer drafts is superseded, but only when every group was read: a group whose call
   // failed keeps its candidates until a reading succeeds. One he decided through its group is never superseded: a
-  // reading that does not draft it again says nothing about his decision.
+  // reading that does not draft it again says nothing about his decision. Nor does it say anything about a standard
+  // that moved to the engine, or one citing a record that moved: the reading no longer sees that evidence.
   if (!result.failed && !result.refused) {
     const gone = await db.query<{ id: string }>(
       `update public.taste_floor_standards s set status = 'superseded'
-       where s.venture = $2 and s.status = 'candidate' and not (s.fingerprint = any($1::text[])) and ${groupDecisionSql('s')} is null
+       where s.venture = $2 and s.status = 'candidate' and s.moved_to_engine_at is null
+         and not (s.fingerprint = any($1::text[])) and ${groupDecisionSql('s')} is null
+         and not exists (select 1 from public.taste_rejections r
+                         where r.venture = s.venture and r.moved_to_engine_at is not null
+                           and (r.source || ':' || r.source_ref) = any(s.record_refs))
        returning s.id::text`,
       [drafted.map(s => s.fingerprint), venture],
       { write: true },
@@ -308,6 +313,24 @@ export async function distilFloor(db: Db, llm: Llm, runId: string, write: boolea
     )
   }
   return result
+}
+
+const floorCursor = (records: readonly FloorRecord[]): string =>
+  contentHash({ r: records.map(r => [r.source, r.source_ref, r.quotes.map(q => [q.id, q.attribution])]), p: FLOOR_PROMPT_REV, rules: RULES_REV })
+
+/** Whether the last reading covers the records standing now. */
+export async function floorReadCurrent(db: Db, venture: Venture = FLOOR_VENTURE): Promise<boolean> {
+  const { records } = await floorRecords(db, venture)
+  if (!records.length) return false
+  const [mark] = await db.query<{ cursor: string | null }>(`select cursor from public.taste_watermarks where source = $1`, [WATERMARK])
+  return mark?.cursor === floorCursor(records)
+}
+
+/** Moving a defect out is not new evidence: a reading that was current stays current, so the model is not asked again. */
+export async function keepFloorReadCurrent(db: Db, venture: Venture = FLOOR_VENTURE): Promise<void> {
+  const { records } = await floorRecords(db, venture)
+  if (!records.length) return
+  await db.query(`update public.taste_watermarks set cursor = $2 where source = $1`, [WATERMARK, floorCursor(records)], { write: true })
 }
 
 /**
