@@ -102,7 +102,7 @@ export async function fileRecords(
   if (!opts.write) {
     const [c] = await db.query<{ held: number; restored: number; withdrawn: number }>(
       `select count(*) filter (where ${read})::int as held,
-              count(*) filter (where ${read} and t.withdrawn_at is not null)::int as restored,
+              count(*) filter (where ${read} and t.withdrawn_at is not null and t.moved_to_engine_at is null)::int as restored,
               count(*) filter (where $2::text is not null and t.source = $2 and t.kind = any($4::text[]) and t.withdrawn_at is null and not ${read})::int as withdrawn
        from public.taste_rejections t where t.source = any($3::text[])`,
       [keep, opts.whole?.source ?? null, sources, opts.whole?.kinds ?? []],
@@ -138,7 +138,7 @@ export async function fileRecords(
     { write: true },
   )
   const back = await db.query<{ id: string }>(
-    `update public.taste_rejections t set withdrawn_at = null where t.withdrawn_at is not null and ${read} returning t.id::text`,
+    `update public.taste_rejections t set withdrawn_at = null where t.withdrawn_at is not null and t.moved_to_engine_at is null and ${read} returning t.id::text`,
     [keep],
     { write: true },
   )

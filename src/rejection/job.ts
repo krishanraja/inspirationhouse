@@ -15,6 +15,7 @@ import { fileDump, holdQuote, nearOf, type QuoteRow, type RecordRow } from './fi
 import { attachMedia, insertMedia, keepMedia } from './keep.ts'
 import { keepStill } from './media.ts'
 import { proposeFloor, syncFloorDecisions } from './propose.ts'
+import { moveDefects } from './defects.ts'
 import { publishFloor } from './publish.ts'
 import { loadFloor, readFloorRulings, renderFloorReport, type FloorRulings, type RenderInput } from './render.ts'
 import { capturedWords, fileNear, fileQuotes, fileRecords, rejectionTablesExist, type WholeRead } from './store.ts'
@@ -283,6 +284,14 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
     } else {
       try { counts.rejections_eligible = (await proposeFloor(d.db, d.now, false, d.floorPatternMin)).eligible } catch (err) { problem('propose', err) }
     }
+  }
+
+  // Defects leave taste (Ruling, Krish, 2026-11-23): after the standards are drafted, before the floor is rendered.
+  if (tables) {
+    try {
+      const m = await moveDefects(d.db, write)
+      for (const [k, v] of Object.entries(m)) counts[`rejections_defects_${k}`] = v
+    } catch (err) { problem('defects', err) }
   }
 
   lap(5)

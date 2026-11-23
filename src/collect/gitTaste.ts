@@ -1,6 +1,7 @@
 import type { Config } from '../config.ts'
 import type { Evidence } from '../evidence.ts'
 import { contentHash } from '../hash.ts'
+import { hasDefectWords } from '../rejection/defects.ts'
 import { SOURCE_VENTURE } from '../venture.ts'
 
 // The taste files content-engine keeps in git. They are where Krish's live
@@ -56,6 +57,8 @@ export async function collectGitTaste(fetchJson: FetchJson, now = new Date().toI
   for (const l of list(learnings, 'learnings')) {
     const krish = str(l.krish)
     if (!krish || !str(l.id)) continue
+    // A lesson about a defect belongs to the engine's failure loop, which reads this file itself (Ruling, Krish, 2026-11-23).
+    if (hasDefectWords(str(l.means))) continue
     out.push({
       source: 'learnings_json', sourceRef: String(l.id), occurredAt: isoDate(l.on, now),
       attribution: 'krish_words', polarity: 'dislikes', lane: 'voice', layer: null,

@@ -44,7 +44,7 @@ export const FLOOR_ELIGIBLE_SQL = `
     from public.taste_rejections r
     where r.venture = s.venture and r.withdrawn_at is null and r.kind <> 'liked' and r.rule_kind in ('form', 'workflow')
       and ((r.source || ':' || r.source_ref) = any(s.record_refs) or r.quote_ids && s.quote_ids)) p
-  where s.venture = $1 and s.status = 'candidate' and s.support_n >= 1 and p.productions >= $2
+  where s.venture = $1 and s.status = 'candidate' and s.moved_to_engine_at is null and s.support_n >= 1 and p.productions >= $2
     and not exists (select 1 from public.taste_floor_standards o
                     where o.venture = s.venture and o.fingerprint = s.fingerprint and o.proposal_id is not null)
     -- Nor one he decided through its group (src/rejection/groups.ts): he has answered it once.
