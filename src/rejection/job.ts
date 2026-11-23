@@ -46,6 +46,8 @@ export interface RejectionsDeps {
   /** For tests: where his rulings on the floor's wording come from (content-engine config/floor-rulings.json through the
    *  GitHub API otherwise, src/rejection/render.ts). */
   floorRulings?: () => Promise<FloorRulings>
+  /** For tests that pin what filing alone does: false leaves defects where they were filed. On by default. */
+  moveDefects?: boolean
 }
 
 export interface RejectionsResult {
@@ -287,7 +289,7 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   }
 
   // Defects leave taste (Ruling, Krish, 2026-11-23): after the standards are drafted, before the floor is rendered.
-  if (tables) {
+  if (tables && d.moveDefects !== false) {
     try {
       const m = await moveDefects(d.db, write)
       for (const [k, v] of Object.entries(m)) counts[`rejections_defects_${k}`] = v
