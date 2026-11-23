@@ -22,6 +22,12 @@ describe('what is a defect and what is a preference', () => {
     expect(classOfStandard({ kind: 'form', theme: 'clipart_generic', statement: 'Never use broken-looking clipart' })).toBe('preference')
   })
 
+  it('an edit he calls boring is his taste, even under edit and A/V', () => {
+    expect(classOfStandard({ kind: 'form', theme: 'edit_av', statement: 'Never deliver a visually boring cut; always make it entertaining' })).toBe('preference')
+    expect(classOfStandard({ kind: 'form', theme: 'edit_av', statement: 'Never let picture and voice drift out of sync' })).toBe('defect')
+    expect(classOfRecord(record({ theme: 'edit_av', item: 'synthetic: a boring cut with one bad join' }))).toBe('mixed')
+  })
+
   it('an unsorted record naming a fault is mixed: logged, and kept in taste', () => {
     expect(classOfRecord(record({ theme: 'other', item: null, words: 'synthetic: boring, and the logos overlap' }))).toBe('mixed')
     expect(classOfRecord(record({ theme: 'other', item: null, words: 'synthetic: it feels boring' }))).toBe('preference')

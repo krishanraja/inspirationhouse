@@ -30,6 +30,9 @@ const DEFECT_WORDS = new RegExp([
 /** Themes that are his judgement of how a thing should feel or read: never a defect by their words alone. */
 const PREFERENCE_THEMES = new Set(['voice_tone', 'words_on_screen', 'clipart_generic', 'decorative_motion', 'predictions_framing', 'unclear_copy', 'packaging'])
 
+/** Words of judgement: an edit he calls boring is his taste, even when it is filed under edit and A/V. */
+const JUDGEMENT_WORDS = /\b(?:boring|entertain\w*|engaging|exciting|premium|tacky|classy|feels?)\b/i
+
 export const hasDefectWords = (text: string | null | undefined): boolean => DEFECT_WORDS.test(text ?? '')
 
 export interface ClassableRecord { kind: string; theme: string; rule_kind: string; item: string | null; words: string }
@@ -37,7 +40,8 @@ export interface ClassableRecord { kind: string; theme: string; rule_kind: strin
 /** Where one rejection record belongs. Pure. Something he liked is never a defect. */
 export function classOfRecord(r: ClassableRecord): DefectClass {
   if (r.kind === 'liked') return 'preference'
-  if (r.kind === 'process' || r.rule_kind === 'workflow' || r.theme === 'edit_av') return 'defect'
+  if (r.kind === 'process' || r.rule_kind === 'workflow') return 'defect'
+  if (r.theme === 'edit_av') return JUDGEMENT_WORDS.test(r.item ?? '') ? 'mixed' : 'defect'
   if (PREFERENCE_THEMES.has(r.theme)) return 'preference'
   // An unsorted record is usually several complaints in his words: log the fault and keep the rest as taste.
   if (r.theme === 'other') return hasDefectWords(`${r.item ?? ''} ${r.words}`) ? 'mixed' : 'preference'
@@ -49,6 +53,7 @@ export interface ClassableStandard { kind: string; theme: string; statement: str
 
 /** Where one standard belongs. Pure. */
 export function classOfStandard(s: ClassableStandard): 'defect' | 'preference' {
+  if (JUDGEMENT_WORDS.test(s.statement) && s.theme === 'edit_av') return 'preference'
   if (s.kind === 'workflow' || s.theme === 'process' || s.theme === 'edit_av') return 'defect'
   if (PREFERENCE_THEMES.has(s.theme)) return 'preference'
   return hasDefectWords(s.statement) ? 'defect' : 'preference'
