@@ -1,7 +1,7 @@
 ---
 repo: krishanraja/inspirationhouse
 product: Inspiration House (the taste ledger)
-as_of: 2026-11-18
+as_of: 2026-11-23
 head: 6be5686
 lifecycle: live
 production_url: none
@@ -22,10 +22,11 @@ The taste ledger. It turns what Krish saves and judges into a record of why he l
 
 Krish, and every writer and maker in the fleet: output gets closer to his taste each week only through rules he approved, keyed by venture.
 
-## Where it is right now (as of 2026-11-18)
+## Where it is right now (as of 2026-11-23)
 
 <!-- north-star-state {"week_of":"2026-11-09","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- The Rejections engine can sort defects from preference, copy each defect to content-engine's engine_standards and engine_incidents, and keep them out of taste. It is held on this branch until the migration 20261207090000_defects_leave_taste is applied, because it reads the new tables. (2026-11-23)
 - Every reader that counts or uses taste_evidence as Krish's signal (signals, whys, claims, proposals, repeats, scoreboard) now skips rows marked reference material, through countsAsSignal in src/evidence.ts; it reads the mark through the row's json, so it holds before and after content-engine's migration 20261206090000 lands. withdrawUncollected is unchanged. (2026-11-18)
 - The floor run (taste-rejections) had not reached content-engine since 15 Nov. On 16 Nov it could not read content-engine's floor rulings and so held the floor by design, and on 17 and 18 Nov it was cancelled at its 45-minute limit. The GitHub reader now reads once more without the token when the token is refused (content-engine is public), a held floor logs the HTTP status as a count, each stage logs its seconds, and the limit is 90 minutes. (2026-11-18)
 - A tag answer that cannot be read now says where it broke (field names only, never its words), so the two cards that fail every run name their cause in the run's reason. (2026-11-17)
@@ -52,14 +53,15 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What changed recently
 
+- 2026-11-23 Krish ruled that the taste system holds only preference and inspiration.
 - 2026-11-14 This `NOW.md` written in the steward's schema, folding the ten closeout notes of 29 Oct to 14 Nov; closeout notes fold into it on main from now on.
 - 2026-11-07 A Drive folder Krish named for voices he finds inspiring became a collect source.
 
 ## What is next and what is waiting on Krish
 
-- Next (2026-11-18): Apply content-engine's migration 20261206090000_taste_evidence_reference.sql to Mindmaker OS once its pull request merges, then confirm the 3,682 backfill rows carry reference_at.
+- Next (2026-11-23): Apply the migration, merge this, run taste-rejections as a dry run, then a real run, and merge the floor pull request it opens.
 - Read the next failed `taste_weekly` run's `counts.distil_failures`; if it says `max_tokens`, split that venture's whys into two calls.
 - Read the next `taste_harness` run: `repeat_envelopes_sent` above 0 and no problems (a 404 means `HARNESS_SYNC_TOKEN` cannot dispatch to ai-harness).
 - When a workflow passes `SUPABASE_PROJECT_REF` from a repository variable, drop the default in `src/config.ts` and the test's allowance.
 - Waiting on Krish: a North Star for this repository; `TASTE_REJECTIONS_CLOCK=on` and the first real rejections floor run (fleet decisions, batch 3).
-- North Star check (2026-11-18): holds.
+- North Star check (2026-11-23): holds.
