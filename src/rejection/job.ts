@@ -7,7 +7,7 @@ import { githubApi, type GitHubApi } from '../publish/harness.ts'
 import { judgeRun } from '../runs.ts'
 import { FLOOR_VENTURE, type Venture } from '../venture.ts'
 import { fileCapture, fileReportDislike, markCollected, reportedDislikes, uncollectedInbox, type InboxRow } from './arrivals.ts'
-import { distilFloor, recountStandards } from './distil.ts'
+import { distilFloor, floorReadCurrent, keepFloorReadCurrent, recountStandards } from './distil.ts'
 import { restoreGroupDecided } from './groups.ts'
 import { fileDrop, readDropZone, type DropFile } from './dropzone.ts'
 import { readDump, type Dump } from './dump.ts'
@@ -291,7 +291,9 @@ export async function runRejections(d: RejectionsDeps): Promise<RejectionsResult
   // Defects leave taste (Ruling, Krish, 2026-11-23): after the standards are drafted, before the floor is rendered.
   if (tables && d.moveDefects !== false) {
     try {
+      const current = write && await floorReadCurrent(d.db)
       const m = await moveDefects(d.db, write)
+      if (current && m.records_moved) await keepFloorReadCurrent(d.db)
       for (const [k, v] of Object.entries(m)) counts[`rejections_defects_${k}`] = v
     } catch (err) { problem('defects', err) }
   }

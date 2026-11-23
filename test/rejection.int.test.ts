@@ -884,13 +884,31 @@ runJob('the rejections job, end to end, on a real database', () => {
   // Ruling (Krish, 2026-11-23): the taste system holds only preference and inspiration. Run last: it moves rows the tests
   // above read.
   it('moves a defect out of taste without losing it, keeps it for makers, and a later read never brings it back', async () => {
-    await job(drive(dump()), { llm: null, propose: false })
-    const fp = (await one(`select fingerprint from taste_floor where venture = 'publication' order by fingerprint limit 1`)).fingerprint as string
-    await client.query(`update taste_floor_standards set statement = 'synthetic: never let a title card overlap the caption band.' where fingerprint = $1`, [fp])
+    // A current reading, so a model call after this could only come from the move.
+    await job(drive(dump()), { propose: false })
+    // A defect standard already on a proposal: the move must get past the guard that keeps such a row's words fixed.
+    const fp = md5('synthetic: a defect standard on a proposal')
+    const onProposal = await client.query(
+      `insert into taste_floor_standards (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, status, proposal_id, prompt_rev, venture)
+       select $1, 'synthetic: never let a title card overlap the caption band.', s.how_to_check, s.formats, 'layout', 'graphics', 'form',
+              s.quote_ids, s.status, s.proposal_id, s.prompt_rev, s.venture
+       from taste_floor_standards s join taste_floor f on f.id = s.id
+       where s.venture = 'publication' and s.status = 'proposed' and f.statement = s.statement order by s.fingerprint limit 1`, [fp])
+    expect(onProposal.rowCount).toBe(1)
+    // A preference standard whose evidence is a record that moves: it stays taste, and a later reading must not retire it.
+    const cited = await one(`select source || ':' || source_ref as ref, quote_ids::text[] as quotes from taste_rejections
+      where kind = 'process' and item = $1 and withdrawn_at is null limit 1`, [P.item])
+    const keptFp = md5('synthetic: a preference standard citing a record that moves')
+    await client.query(
+      `insert into taste_floor_standards (fingerprint, statement, how_to_check, formats, theme, layer, kind, quote_ids, record_refs, prompt_rev, venture)
+       values ($1, 'synthetic: keep the pace of the opening lively.', 'synthetic: watch the first ten seconds for pace.', '{short_video}',
+               'voice_tone', 'graphics', 'form', $2::uuid[], $3::text[], 'floor-v1', 'publication')`, [keptFp, cited.quotes, [cited.ref]])
     const makers = (await one(`select count(*)::int as n from production_floor`)).n as number
     const records = (await one(`select count(*)::int as n from taste_rejections`)).n as number
+    let calls = 0
+    const counted: Llm = { ...llm, structured: (async (q: Parameters<Llm['structured']>[0]) => { calls++; return llm.structured(q) }) as Llm['structured'] }
 
-    const r = await job(drive(dump()), { llm: null, propose: false, moveDefects: true })
+    const r = await job(drive(dump()), { llm: counted, propose: false, moveDefects: true })
     expect(r.problems).toEqual([])
     expect(Number(r.counts.rejections_defects_records_moved)).toBeGreaterThanOrEqual(1)
     expect(Number(r.counts.rejections_defects_standards_moved)).toBeGreaterThanOrEqual(1)
@@ -909,9 +927,20 @@ runJob('the rejections job, end to end, on a real database', () => {
     expect(Object.values(floor.records).find(x => x.what === P.item)!.home).toBe('engine')
 
     // The next read of the same folder neither restores it nor files it twice.
-    const again = await job(drive(dump()), { llm: null, propose: false, moveDefects: true })
+    const again = await job(drive(dump()), { llm: counted, propose: false, moveDefects: true })
     expect(again.counts).toMatchObject({ rejections_records_restored: 0, rejections_defects_records_moved: 0, rejections_defects_standards_moved: 0 })
     expect((await one(`select withdrawn_at is not null as out from taste_rejections where id = $1`, [moved.id])).out).toBe(true)
+    // The move is not new evidence, so it never buys a model reading.
+    expect(calls).toBe(0)
+
+    // A reading that does come later leaves both standards where they are.
+    await client.query(`update taste_watermarks set cursor = $1`, [md5('synthetic: a later reading')])
+    const later = await job(drive(dump()), { llm: counted, propose: false, moveDefects: true })
+    expect(later.problems).toEqual([])
+    expect(calls).toBeGreaterThan(0)
+    expect((await one(`select status from taste_floor_standards where fingerprint = $1`, [keptFp])).status).toBe('candidate')
+    expect((await one(`select count(*)::int as n from taste_floor where fingerprint = $1`, [keptFp])).n).toBe(1)
+    expect((await one(`select home from production_floor where fingerprint = $1`, [fp])).home).toBe('engine')
   })
 })
 
@@ -1212,7 +1241,8 @@ run('a standard he decided through its group, on a real database', () => {
         ('heartside', 'synthetic_shape', 'synthetic: another venture', 'Krish', '2026-11-15T15:00:00Z', 'synthetic')`)
       expect((await groups())[0]).toMatchObject({ standing: 'reworded', statement: 'synthetic: his latest amendment', decided_on: '2026-11-15' })
     } finally {
-      await client.query('delete from public.taste_floor_group_amendments')
+      // An amendment is never deleted row by row (its trigger refuses); the suite clears its own synthetic rows.
+      await client.query('truncate public.taste_floor_group_amendments')
     }
   })
 })
