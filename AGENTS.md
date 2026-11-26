@@ -10,7 +10,7 @@ This repository's North Star is [`docs/NORTH_STAR.md`](docs/NORTH_STAR.md). It i
 - Only Krish changes it.
 <!-- north-star:end -->
 
-Read `NOW.md` first (where it is right now), then `README.md`. Before a session that changed the repository ends, write `now-notes/YYYY-MM-DD-<slug>.md` with `Status:`, `Next:` and `North Star check (YYYY-MM-DD): holds.`; it folds into `NOW.md` on main. These rules hold for every change.
+Read `NOW.md` first (where it is right now), then `README.md` (how to post and read), and `docs/HOW_IT_WORKS.md` for the stage you are changing. Before a session that changed the repository ends, write `now-notes/YYYY-MM-DD-<slug>.md` with `Status:`, `Next:` and `North Star check (YYYY-MM-DD): holds.`; it folds into `NOW.md` on main. These rules hold for every change.
 
 1. **Never write to Krish's Drive.** Google scopes stay read-only (`src/config.ts`, checked in `test/hygiene.test.ts`).
 2. **No data in the repository or the logs.** The repository is public. Fixtures are synthetic. Log through `src/log.ts`, which keeps counts and drops text. Readable previews go to `preview/`, which is gitignored.
@@ -22,6 +22,7 @@ Read `NOW.md` first (where it is right now), then `README.md`. Before a session 
 8. **A run that produced nothing from real input is a failure** (`src/runs.ts`). Do not make it pass by catching the error.
 9. **Keep his words whole, and the signal vocabulary fixed.** Never shorten what is stored of his words to fit a field; cut only what is shown (`meta.full_text` keeps the rest). New signal slugs arrive by pull request in `src/signal/vocab.ts`, never from the model at run time.
 10. **Every row's venture comes from `src/venture.ts` or the reporting session's own declaration, never a model's guess.** The ledger is keyed by venture (a `venture_registry` slug; Make Your Mind Up is `publication`, apart from `mindmake`), and a row keeps the venture it was filed under. A report or capture with no venture is held and counted, never filed under a guess. A compiling step (distil, the floor, the harness render, the tagger's profile) reads one venture; a read that decides what to withdraw stays whole across ventures, so one venture's step never withdraws another's rows. A new source, folder or cue source gets its venture in `src/venture.ts` first, and the migration's backfill and that file must agree (`venture_mismatch` is 0).
+11. **Only taste and creative preference enter the ledger; everything else goes to the internal auditor** (Krish, 2026-11-26: "Anything that isn't a matter of taste or creative preference should go to the internal auditor"; Ruling, Krish, 2026-11-23). A defect, a broken run, how a session or pipeline should behave, or a session's own notes is filed to content-engine's `engine_incidents`, which the auditor reads, and never becomes taste evidence. The sort is fixed rules (`src/collect/reportSort.ts` for session reports, `src/rejection/defects.ts` for the floor), never a model; when a report carries both a problem and a judgement it stays taste whole and is filed for the auditor too. A rule change bumps its rev, and the next run re-sorts what was filed before. No auditing code lives here: fleet checks, scorecards and fix queues belong to krishanraja/internal-auditor.
 
 Check before pushing: `pnpm typecheck && pnpm test`, then `pnpm engine daily --dry-run` against live data.
 
