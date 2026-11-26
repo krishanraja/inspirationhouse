@@ -11,7 +11,7 @@ import { collectDrive, sheetEvidence } from './collect/drive.ts'
 import { collectVoiceFolder, VOICE_REF } from './collect/voiceFolder.ts'
 import { collectInstagram } from './collect/instagram.ts'
 import { syncCues } from './collect/feedbackCues.ts'
-import { syncReports } from './collect/sessionReports.ts'
+import { sortFiledReports, syncReports } from './collect/sessionReports.ts'
 import { connectGoogle, googleConfigured, type Google } from './google.ts'
 import { anthropicLlm, staged, type Llm } from './llm.ts'
 import { Meter } from './meter.ts'
@@ -249,7 +249,7 @@ async function cues(ctx: Ctx): Promise<void> {
 
 /**
  * What sessions in other repositories reported through Control Center's report_to_taste_engine tool, filed as his
- * words or as an observation (src/collect/sessionReports.ts). Needs the ledger, and content-engine's taste_reports
+ * words or as an observation, and anything that is not taste left for the internal auditor (src/collect/sessionReports.ts). Needs the ledger, and content-engine's taste_reports
  * migration: until it is applied the stage reads nothing and counts reports_table_missing. A failure is recorded,
  * never thrown.
  */
@@ -265,7 +265,15 @@ async function reports(ctx: Ctx): Promise<void> {
     reports_read: r.read, reports_words: r.words, reports_observations: r.observations, reports_cues: r.cues,
     reports_refused: r.refused, reports_unassigned: r.unassigned, reports_venture_mismatch: r.ventureMismatch,
     reports_evidence_written: r.evidenceWritten, reports_table_missing: r.missing ? 1 : 0,
+    reports_not_taste: r.notTaste, reports_mixed: r.mixed, reports_incidents_filed: r.incidentsFiled,
   }
+  // Reports filed before the sort (or under an older rev) are sorted the same way, so nothing that is not taste stays in
+  // the ledger because it arrived early.
+  const s = await sortFiledReports(ctx.db, { write: !ctx.dry }).catch(err => {
+    ctx.problems.push(`reports sort: ${(err as Error).name}`)
+    return null
+  })
+  if (s) Object.assign(counts, { reports_resorted: s.read, reports_withdrawn_not_taste: s.withdrawn, reports_resort_incidents_filed: s.incidentsFiled })
   Object.assign(ctx.counts, counts)
   // A report held with no venture is never filed under a guess, and never quietly left: the run fails until the session's
   // repository is mapped (taste_venture_repositories) or the report names its venture.
