@@ -26,6 +26,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 <!-- north-star-state {"week_of":"2026-11-23","week_target":null,"current":null,"current_as_of":null,"current_source":null,"urgency":4,"urgency_reason":"no North Star of its own yet; Krish sets one"} --> **North Star number: U4, not measured.** inspirationhouse has no North Star of its own yet (`docs/NORTH_STAR.md`); Krish sets one.
 
+- Only taste enters the ledger. Every report a session sends through `report_to_taste_engine` is sorted by fixed rules (`src/collect/reportSort.ts`): one about how a session, engine or pipeline behaved, or a session's own notes, never becomes taste, and his words go to content-engine's `engine_incidents`, where the internal auditor reads them; one that names a problem and a judgement stays taste and is filed for the auditor too. Reports filed earlier are sorted the same way on the next daily run. A live dry run on 2026-11-26 read 677 reports: 19 leave taste (18 filed earlier), 64 stay as mixed. (2026-11-26)
 - The README says in one page how to post and how to read; `docs/TWO_WAY.md` is the posting contract with examples; the full stage detail is `docs/HOW_IT_WORKS.md`; design records and the old status log are in `docs/history/`. (2026-11-26)
 - Defects leave the Rejections floor: on 2026-11-23 its run moved 109 records to content-engine's `engine_incidents` and logged 14 mixed ones there while keeping them as taste (Ruling, Krish, 2026-11-23: the taste system holds only preference and inspiration).
 - The daily, weekly, harness, cards and rejections jobs run on GitHub Actions, dispatched by Control Center's clock; their own cron schedules stay off while `TASTE_ENABLED` is unset. The last daily run (2026-11-25 05:17 UTC) succeeded.
@@ -33,6 +34,7 @@ Krish, and every writer and maker in the fleet: output gets closer to his taste 
 
 ## What changed recently
 
+- 2026-11-26 Krish asked that the ledger hold only taste and that anything else go to the internal auditor; session reports are now sorted on arrival and the docs were cut to what a reader needs.
 - 2026-11-23 Krish ruled that the taste system holds only preference and inspiration.
 - 2026-11-14 This `NOW.md` written in the steward's schema; closeout notes fold into it on main.
 
